@@ -19,3 +19,45 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  # Runs the database suites of server/db against real PostgreSQL and MariaDB.
+  # The Keycloak suite stays opt-in (npm run test:keycloak): its image is large and slow to start.
+  databases:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: urutau
+          POSTGRES_PASSWORD: urutau-dev
+          POSTGRES_DB: urutau
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U urutau"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_USER: urutau
+          MARIADB_PASSWORD: urutau-dev
+          MARIADB_DATABASE: urutau
+          MARIADB_ROOT_PASSWORD: urutau-root-dev
+        ports:
+          - 53306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run test:db:postgres
+      - run: npm run test:db:mariadb

@@ -62,6 +62,7 @@ function RepositoryBoard({ repo, onOpenSettings, onChangeRepo }: BoardPageProps)
   const closedWindowDays = useClosedWindowDays(key)
   const query = useRepoSnapshot(repo, closedWindowDays)
   const creating = useRef(false)
+  const serverMode = useSession((state) => state.session?.githubAccess.mode === 'server')
   const accessProblem = useSession((state) =>
     state.session?.githubAccess.mode === 'browser' ? state.session.githubAccess.problem : null,
   )
@@ -136,11 +137,15 @@ function RepositoryBoard({ repo, onOpenSettings, onChangeRepo }: BoardPageProps)
   if (query.isError) {
     const error = query.error
     const serverAccess = error instanceof GitHubError && error.kind === 'server-access'
+    // In server mode Settings has no token field, so it is no way out of any of these errors.
     const needsToken =
+      !serverMode &&
       error instanceof GitHubError &&
       (error.needsToken || error.kind === 'rate-limited' || (serverAccess && error.problem !== 'unavailable'))
     const signInAgain =
-      accessProblem === 'signin-expired' || (serverAccess && error.problem === 'signin-expired')
+      accessProblem === 'signin-expired' ||
+      (serverAccess && error.problem === 'signin-expired') ||
+      (serverMode && error instanceof GitHubError && error.kind === 'unauthorized')
     return (
       <div className="board-message">
         {title}

@@ -210,6 +210,19 @@ describe('save queue', () => {
   })
 })
 
+describe('load after a delete', () => {
+  it('clears a deleted notice when the board was recreated', async () => {
+    const stub = await signedIn([stored(1, base)])
+    await useBoards.getState().load(KEY)
+    stub.externalDelete(KEY)
+    await useBoards.getState().reloadIfIdle(KEY)
+    expect(entry().conflict).toMatchObject({ kind: 'deleted' })
+    stub.putBoard('acme/widgets', renamed(base, 'Recreated'))
+    await useBoards.getState().load(KEY)
+    expect(entry()).toMatchObject({ status: 'ready', conflict: null })
+  })
+})
+
 describe('reloadIfIdle', () => {
   it('clears an old deleted notice when the board was recreated', async () => {
     const stub = await signedIn([stored(1, base)])

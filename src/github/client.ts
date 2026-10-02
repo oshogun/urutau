@@ -106,7 +106,7 @@ async function toGitHubError(response: Response, hasToken: boolean, server = fal
 
   if (server) {
     if (status === 424 && body.error === 'github-access') {
-      const problem = body.problem && body.problem in SERVER_MESSAGES ? body.problem : 'unavailable'
+      const problem = body.problem && Object.hasOwn(SERVER_MESSAGES, body.problem) ? body.problem : 'unavailable'
       return new GitHubError(
         'server-access',
         status,
@@ -137,7 +137,7 @@ async function toGitHubError(response: Response, hasToken: boolean, server = fal
       return new GitHubError(
         'rate-limited',
         status,
-        `GitHub's API rate limit was reached.${when} Your GitHub account's rate limit was reached.`,
+        `The rate limit for your GitHub account was reached.${when}`,
         resetAt,
       )
     }

@@ -1,0 +1,25 @@
+# Runs the Urutau image with a SQLite database in a named volume.
+#   docker compose up -d --build
+# Open http://localhost:8787. A DNS name needs PUBLIC_URL (see README.md).
+# Environment variables set in the shell or in a .env file are passed through.
+services:
+  urutau:
+    build: .
+    image: urutau
+    ports:
+      - '127.0.0.1:${URUTAU_HOST_PORT:-8787}:8080'
+    volumes:
+      - urutau-data:/data
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
+      KEYCLOAK_GITHUB_IDP: ${KEYCLOAK_GITHUB_IDP:-}
+      KEYCLOAK_BROKER_API: ${KEYCLOAK_BROKER_API:-v1}
+      KEYCLOAK_ALLOW_HTTP: ${KEYCLOAK_ALLOW_HTTP:-false}
+    restart: unless-stopped
+volumes:
+  urutau-data:

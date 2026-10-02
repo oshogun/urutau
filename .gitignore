@@ -11,6 +11,9 @@ node_modules
 dist
 # default SQLite database of the API server
 /data
+# local environment files (may hold KEYCLOAK_CLIENT_SECRET)
+.env
+.env.*
 dist-ssr
 *.local
 

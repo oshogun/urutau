@@ -14,14 +14,16 @@ run `git` write commands in `/home/guilherme/urutau/urutau`; reading it is
 fine. The clone has no `node_modules` and none of the live checkout's
 untracked files: run `npm ci` in the clone.
 
-## There is no server and no database
+## What runs: a server, a database, GitHub
 
-Urutau is a static single-page app with no backend. All of its state lives in
-the browser's localStorage (`urutau:settings`, `urutau:boards`), and its only
-external service is the GitHub REST API at `api.github.com`, which it reads
-and never writes. Nothing in this repo serves the user's real data. What
-remains to protect is the user's own dev server, if one is running (see
-Ports), and the shared GitHub API budget.
+Urutau is a React app plus a small API server (`server/`, Hono and Kysely). Boards and accounts
+live in a SQL database: SQLite by default (`data/urutau.db`, git-ignored), PostgreSQL or MariaDB
+through `DATABASE_URL`. The browser keeps only the theme, a pasted GitHub token and v1 data it may
+import. Its external service is the GitHub REST API at `api.github.com`, which it reads and never
+writes. Agents never use `data/urutau.db` of the live checkout: run the server on
+`DATABASE_URL=sqlite::memory:`, as the run-urutau driver's server mode does. What remains to protect
+is the user's own dev server and containers, if running (see Ports), and the shared GitHub API
+budget.
 
 ## Use Node 24. The default `node` on this machine is wrong.
 
@@ -41,21 +43,57 @@ default node" is not verification.
 
 ## Ports
 
-- `5173` is `npm run dev`'s port, `4173` is `npm run preview`'s, and `9333`
-  is the run-urutau driver's. These belong to the user's own sessions.
-- Agents working in a run clone use `5174` (dev), `4174` (preview) and `9334`
-  (driver), with `--strictPort` so a taken port fails loudly instead of
-  moving:
+Each is free on this machine when nothing of the user's runs (checked with `lsof -nP -i :<port>
+-sTCP:LISTEN`, no output, on 2026-10-02):
 
-      nohup npm run dev -- --host 127.0.0.1 --port 5174 --strictPort > .claude/scratch/run-urutau/dev.log 2>&1 &
+| Use | User's sessions | Run clones |
+| --- | --- | --- |
+| Vite dev / preview | 5173 / 4173 | 5174 / 4174 |
+| run-urutau driver | 9333 | 9334 |
+| API server (`PORT`) | 8787 | 8788 |
+| PostgreSQL container (`URUTAU_PG_PORT`) | 55432 | 55433 |
+| MariaDB container (`URUTAU_MARIADB_PORT`) | 53306 | 53307 |
+| Keycloak container (`URUTAU_KEYCLOAK_PORT`) | 58080 | 58081 |
+| `compose.yaml` host port (`URUTAU_HOST_PORT`) | 8787 | 8790 |
+
+Concurrent agents in one run need distinct ports; the orchestrator assigns the extras (for
+example 8789, 58082) in the envelope and they are listed in the run's artifacts. Containers bind
+`127.0.0.1` only.
+
+- `npm run dev` starts the API server too, so a run clone sets `PORT=8788` or it binds the user's
+  8787, and `DATABASE_URL=sqlite::memory:` or it creates `data/urutau.db` in the clone. Always
+  pass `--strictPort` so a taken port fails loudly instead of moving:
+
+      mkdir -p .claude/scratch/run-urutau
+      DATABASE_URL=sqlite::memory: PORT=8788 nohup npm run dev -- --host 127.0.0.1 --port 5174 --strictPort > .claude/scratch/run-urutau/dev.log 2>&1 &
       APP_URL=http://127.0.0.1:5174 DRIVER_PORT=9334 nohup node .claude/skills/run-urutau/driver.mjs > .claude/scratch/run-urutau/driver.log 2>&1 &
 
-  The rest of the driver's usage is in `.claude/skills/run-urutau/SKILL.md`;
-  replace its ports with these.
+  The driver's server mode (in-memory database, first-run admin) is in
+  `.claude/skills/run-urutau/SKILL.md`; replace its ports with these.
+- Containers: name the compose project per run, for example
+  `URUTAU_PG_PORT=55433 URUTAU_MARIADB_PORT=53307 docker compose -p urutau-db-clone -f compose.db.yaml up -d --wait`.
 - Stop only what you started, by port:
   `lsof -ti:<port> -sTCP:LISTEN | xargs -r kill`. Sessions for other projects
   on this machine run Chrome, Playwright and dev servers too, so never
   `pkill` by process name.
+
+## Docker images and containers
+
+Images present on this machine (`docker images`, 2026-10-02): `postgres:17-alpine` 424 MB,
+`mariadb:11.4` 464 MB, `quay.io/keycloak/keycloak:26.8.0` 751 MB. `node:24-alpine` is the base of
+the app's `Dockerfile` and is pulled by `docker build`. Do not pull other versions.
+
+- Compose files: `compose.yaml` (the app), `compose.db.yaml` and `compose.keycloak.yaml` (opt-in
+  test containers, data on tmpfs). Commands are in `README.md`.
+- Remove containers after each task: `docker compose -p <project> -f <file> down -v`, and
+  `docker rm -fv` (the image's `/data` is an anonymous volume that `docker rm -f` leaves behind;
+  `docker run --rm` avoids it) / `docker rmi` for what a manual `docker run` or `docker build`
+  made. Then `docker ps -a` shows nothing of yours. Remove only what you created: other agents' containers may
+  be running.
+- `docker build` leaves build cache that `docker rmi` does not remove (about 1 GB after one build
+  here). It is shared, so do not `docker builder prune` while other agents may be building; report
+  `docker system df` instead.
+- Check `df -h /` before pulling or building (the 8 GB rule below applies).
 
 ## The GitHub API budget is shared
 
@@ -137,10 +175,13 @@ npm 11 blocks dependency install scripts by default and prints
 The gate is `npm run lint && npm run typecheck && npm test && npm run build`,
 the same four steps CI runs. Beyond it:
 
-- `npm test` runs Vitest over `src/**/*.test.ts(x)` in jsdom. It is hermetic:
+- `npm test` runs Vitest over `src/**/*.test.ts(x)` in jsdom (and the server tests, below). It is hermetic:
   `fetch` is stubbed per test (no network), and jsdom's in-memory localStorage
   is cleared after each test (`src/test/setup.ts`).
   Vitest 5 hides `console.log` from passing tests; add `--silent=false`.
+- `npm test` also runs the server tests (`server/**/*.test.ts`, node environment, in-memory
+  SQLite). The opt-in database and Keycloak suites need containers and are not part of the gate:
+  `npm run test:db:postgres`, `npm run test:db:mariadb`, `npm run test:keycloak`.
 - UI behaviour is checked with the run-urutau Playwright driver
   (`.claude/skills/run-urutau/SKILL.md`) in fixtures mode, with screenshots
   you then open and look at.

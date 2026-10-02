@@ -4,7 +4,7 @@ import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  // Relative base so the static build works from any sub-path (e.g. GitHub Pages).
+  // Relative asset paths, so the built app works under a PUBLIC_URL path prefix.
   base: './',
   plugins: [react()],
   build: {

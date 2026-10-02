@@ -71,14 +71,14 @@ describe('useRepoSnapshot', () => {
   it('on a 424 reloads the session and falls back to the browser path', async () => {
     const stub = installApiStub({
       githubAccess: { mode: 'server' },
-      github: () => json({ error: 'github-access', message: 'x', problem: 'signin-expired' }, 424),
+      github: () => {
+        stub.setGithubAccess({ mode: 'browser', problem: 'signin-expired' })
+        return json({ error: 'github-access', message: 'x', problem: 'signin-expired' }, 424)
+      },
     })
     await useSession.getState().load()
     vi.mocked(fetch).mockClear()
     const { result } = renderHook(() => useRepoSnapshot(REPO, 0), { wrapper: wrapper() })
-    await waitFor(() => expect(result.current.error).toMatchObject({ kind: 'server-access' }))
-    stub.setGithubAccess({ mode: 'browser', problem: 'signin-expired' })
-    await useSession.getState().refresh()
     await waitFor(() => expect(result.current.data?.repository.fullName).toBe('acme/widgets'))
     expect(useSession.getState().session?.githubAccess).toEqual({ mode: 'browser', problem: 'signin-expired' })
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).startsWith('https://api.github.com/'))).toBe(true)

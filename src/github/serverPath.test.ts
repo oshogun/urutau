@@ -109,6 +109,35 @@ describe('server path', () => {
     expect(error).toMatchObject({ kind: 'server-access', status: 424, message, problem, needsToken: false, retryable })
   })
 
+  it('uses the generic message for a 424 problem that is only an inherited object key', async () => {
+    installApiStub({
+      githubAccess: { mode: 'server' },
+      github: () =>
+        new Response(JSON.stringify({ error: 'github-access', message: 'x', problem: 'toString' }), { status: 424 }),
+    })
+    await useSession.getState().load()
+    const error = await getJson('/repos/acme/widgets', { via: 'server' }).catch((e: unknown) => e)
+    expect(error).toMatchObject({ kind: 'server-access', problem: 'unavailable', message: 'Keycloak could not be reached.' })
+  })
+
+  it('says once that the GitHub account hit its rate limit, with the reset time', async () => {
+    installApiStub({
+      githubAccess: { mode: 'server' },
+      github: () =>
+        new Response(JSON.stringify({ message: 'API rate limit exceeded' }), {
+          status: 403,
+          headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1900000000' },
+        }),
+    })
+    await useSession.getState().load()
+    const error = await getJson('/repos/acme/widgets', { via: 'server' }).catch((e: unknown) => e)
+    const time = new Date(1_900_000_000_000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    expect(error).toMatchObject({
+      kind: 'rate-limited',
+      message: `The rate limit for your GitHub account was reached. It resets at ${time}.`,
+    })
+  })
+
   it('words GitHub 401, 403 and 404 for the account instead of a token', async () => {
     const answers = [
       [401, "GitHub rejected the token Keycloak holds for you. Sign in with Keycloak again."],

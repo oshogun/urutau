@@ -49,7 +49,9 @@ export function SignInPage({ notice }: SignInPageProps) {
         <h1 className="auth__title">{heading}</h1>
         <p className="auth__lead">
           {firstRun
-            ? 'This server has no accounts yet. The account you create here is the administrator and can invite everyone else.'
+            ? keycloak
+              ? 'This server has no accounts yet. The first person to sign in, by either method, becomes the administrator and can invite everyone else.'
+              : 'This server has no accounts yet. The account you create here is the administrator and can invite everyone else.'
             : 'Boards on this server are shared with everyone who has an account.'}
         </p>
       </div>
@@ -128,11 +130,6 @@ export function SignInPage({ notice }: SignInPageProps) {
               : 'Or sign in with the Keycloak account this server is connected to.'}
           </p>
           <KeycloakButton>Sign in with Keycloak</KeycloakButton>
-          {firstRun && (
-            <p className="auth__lead">
-              The first person to sign in, by either method, becomes the administrator.
-            </p>
-          )}
         </div>
       )}
     </div>

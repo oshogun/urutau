@@ -422,7 +422,7 @@ describe('App', () => {
       renderApp('', { session: 'first-run', keycloak: true })
       await screen.findByRole('heading', { name: 'Create the admin account' })
       expect(startLink('Sign in with Keycloak')).toHaveAttribute('href', 'api/auth/keycloak/start')
-      expect(screen.getByText(/first person to sign in, by either method/)).toBeInTheDocument()
+      expect(screen.getByText(/first person to sign in, by either method, becomes the administrator/)).toBeInTheDocument()
     })
 
     it('hides the Keycloak button on the first-run screen when Keycloak is off', async () => {
@@ -486,6 +486,21 @@ describe('App', () => {
         screen.getByText('Sign in with Keycloak again to read issues through your GitHub link.'),
       ).toBeInTheDocument()
       expect(startLink('Sign in with Keycloak again')).toHaveAttribute('href', 'api/auth/keycloak/start')
+    })
+  })
+
+  describe('GitHub errors in server mode', () => {
+    it('offers Keycloak sign-in, not Settings, after a GitHub 401 on the server path', async () => {
+      renderApp('?repo=acme/widgets', {
+        githubAccess: { mode: 'server' },
+        github: () => new Response(JSON.stringify({ message: 'Bad credentials' }), { status: 401 }),
+      })
+      expect(await screen.findByText(/Couldn't load acme\/widgets/)).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Sign in with Keycloak again' })).toHaveAttribute(
+        'href',
+        'api/auth/keycloak/start',
+      )
+      expect(screen.queryByRole('button', { name: 'Open settings' })).not.toBeInTheDocument()
     })
   })
 
