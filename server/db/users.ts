@@ -23,12 +23,12 @@ export async function isFirstRun(db: Kysely<Tables>): Promise<boolean> {
 }
 
 /**
- * Creates an account in one transaction (or inside the one `db` already is). The account that claims the instance
- * (the insert of instance_claim row 1 succeeds) becomes the admin; every later
- * one is a regular user. With `onlyIfFirst`, a call that did not claim the
- * instance creates nothing. A taken username raises a unique violation and the
- * transaction rolls back, claim included; the caller maps it with
- * `isUniqueViolation`.
+ * Creates an account in one transaction (or inside the one `db` already is).
+ * The account that claims the instance (the insert of instance_claim row 1
+ * succeeds) becomes the admin; every later one is a regular user. With
+ * `onlyIfFirst`, a call that did not claim the instance creates nothing. A
+ * taken username raises a unique violation and the transaction rolls back,
+ * claim included; the caller maps it with `isUniqueViolation`.
  */
 export async function createAccount(
   db: Kysely<Tables>,

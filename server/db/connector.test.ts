@@ -1,3 +1,4 @@
+import { writeSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,10 +9,17 @@ import { openDatabase } from './index.ts'
 connectorSuite('sqlite in memory', () => openDatabase('sqlite::memory:'))
 
 // Set by the PostgreSQL and MariaDB test scripts; the same suite then runs against that server.
+// The suite deletes every row of the application tables, so it only runs against a local database.
 const externalUrl = process.env.URUTAU_TEST_DATABASE_URL
 if (externalUrl) {
+  const host = new URL(externalUrl.replace(/^mariadb:/, 'mysql:')).hostname
+  if (host !== '127.0.0.1' && host !== 'localhost') {
+    throw new Error('URUTAU_TEST_DATABASE_URL must point at 127.0.0.1 or localhost')
+  }
   connectorSuite('URUTAU_TEST_DATABASE_URL', () => openDatabase(externalUrl))
 } else {
+  // Written straight to stderr: the default reporter hides console output of passing tests.
+  writeSync(2, '\nPostgreSQL and MariaDB suites skipped: URUTAU_TEST_DATABASE_URL is not set (npm run test:db:postgres, npm run test:db:mariadb)\n')
   describe('external database suite', () => {
     it('is not configured, so only SQLite ran', () => {
       expect(externalUrl).toBeUndefined()

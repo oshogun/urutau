@@ -1,6 +1,9 @@
 import { isBoardConfig } from '../../src/domain/board.ts'
 import { parseRepoInput, repoKey } from '../../src/domain/repoRef.ts'
 import type { BoardConfig } from '../../src/domain/types.ts'
+import { isBoardVersion } from '../db/helpers.ts'
+
+export { isBoardVersion }
 
 /**
  * The lower-case repository key for `owner/name` text in any case, or null

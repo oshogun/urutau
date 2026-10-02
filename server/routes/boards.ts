@@ -8,7 +8,7 @@ import {
   type StoredBoard,
 } from '../../src/domain/api.ts'
 import type { AppContext } from '../app.ts'
-import { asBoardConfig, repoKeyOf } from '../boards/validate.ts'
+import { asBoardConfig, isBoardVersion, repoKeyOf } from '../boards/validate.ts'
 import { createBoard, deleteBoard, getBoard, listBoards, saveBoard } from '../db/boards.ts'
 import { isRecord, readJson } from '../http/body.ts'
 import { HttpError, invalidRequest } from '../http/errors.ts'
@@ -23,7 +23,7 @@ function pathKey(owner: string, name: string): string {
 function parseSave(body: unknown, key: string): SaveBoardRequest {
   if (!isRecord(body)) throw invalidRequest('The request body must be an object.')
   const { baseVersion, fullName, board } = body
-  if (baseVersion !== null && !(Number.isInteger(baseVersion) && (baseVersion as number) >= 1)) {
+  if (baseVersion !== null && !isBoardVersion(baseVersion)) {
     throw invalidRequest('baseVersion must be null or a whole number from 1.')
   }
   if (typeof fullName !== 'string' || repoKeyOf(fullName) !== key) {

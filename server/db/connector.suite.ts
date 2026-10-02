@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fixtureBoard } from './fixtures.ts'
 import { isUniqueViolation, type Database } from './index.ts'
 import { createBoard, deleteBoard, getBoard, listBoards, saveBoard } from './boards.ts'
@@ -26,6 +26,17 @@ async function resetData(database: Database): Promise<void> {
 export function connectorSuite(name: string, open: () => Promise<Database>): void {
   describe(`database connector (${name})`, () => {
     let database: Database
+
+    // Leave a shared server database empty for whoever runs next.
+    afterAll(async () => {
+      const last = await open()
+      try {
+        await last.migrate()
+        await resetData(last)
+      } finally {
+        await last.close()
+      }
+    })
 
     beforeEach(async () => {
       database = await open()
@@ -60,6 +71,13 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         const stored = await getBoard(database.db, 'acme/widgets')
         expect(stored).toMatchObject({ repoKey: 'acme/widgets', fullName: 'Acme/Widgets', version: 1, updatedAt: T0.toISOString(), updatedBy: null })
         expect(stored?.board).toEqual(board)
+      })
+
+      it('raises a foreign-key error, not a duplicate, for an author that does not exist', async () => {
+        await expect(
+          createBoard(database.db, { repoKey: 'acme/widgets', fullName: 'Acme/Widgets', config: fixtureBoard(), userId: 'no-such-user', now: T0 }),
+        ).rejects.toThrow()
+        expect(await getBoard(database.db, 'acme/widgets')).toBeNull()
       })
 
       it('saves with the current version and increments it', async () => {
@@ -99,6 +117,15 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         const results = await Promise.all([attempt('A'), attempt('B')])
         expect(results.filter((r) => r.saved)).toHaveLength(1)
         expect((await getBoard(database.db, 'acme/widgets'))?.version).toBe(2)
+      })
+
+      it('treats a base version beyond the integer column range as stale, not as a database error', async () => {
+        await createBoard(database.db, { repoKey: 'acme/widgets', fullName: 'Acme/Widgets', config: fixtureBoard(), userId: null, now: T0 })
+        for (const baseVersion of [2 ** 31, 2 ** 53 - 1]) {
+          expect(await saveBoard(database.db, { repoKey: 'acme/widgets', baseVersion, fullName: 'Acme/Widgets', config: fixtureBoard('X'), userId: null, now: T0 })).toEqual({ saved: false })
+          expect(await deleteBoard(database.db, 'acme/widgets', baseVersion)).toBe(false)
+        }
+        expect((await getBoard(database.db, 'acme/widgets'))?.version).toBe(1)
       })
 
       it('refuses a save for a board that does not exist', async () => {
@@ -275,6 +302,13 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
     })
 
     describe('identities', () => {
+      it('raises a foreign-key error, not a duplicate, when the user does not exist', async () => {
+        await expect(
+          linkIdentity(database.db, { issuer: 'https://sso.example/realms/u', subject: 'sub-9', userId: 'no-such-user', now: T0 }),
+        ).rejects.toThrow()
+        expect(await findUserByIdentity(database.db, 'https://sso.example/realms/u', 'sub-9')).toBeNull()
+      })
+
       it('links once and finds the account; removing the user removes the link', async () => {
         const user = await seedAdmin()
         const link = { issuer: 'https://sso.example/realms/u', subject: 'sub-1', userId: user.id, now: T0 }

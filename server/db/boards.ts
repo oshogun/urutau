@@ -1,7 +1,7 @@
 import { sql, type Kysely } from 'kysely'
 import type { BoardSummary, StoredBoard } from '../../src/domain/api.ts'
 import type { BoardConfig } from '../../src/domain/types.ts'
-import { insertIgnoringDuplicate, iso } from './helpers.ts'
+import { insertIgnoringDuplicate, isBoardVersion, iso } from './helpers.ts'
 import type { Tables } from './schema.ts'
 
 const LIST_LIMIT = 500
@@ -81,6 +81,7 @@ export async function createBoard(db: Kysely<Tables>, board: NewBoard): Promise<
  * same version cannot both succeed.
  */
 export async function saveBoard(db: Kysely<Tables>, save: BoardSave): Promise<SaveBoardResult> {
+  if (!isBoardVersion(save.baseVersion)) return { saved: false }
   const result = await db
     .updateTable('boards')
     .set({
@@ -98,6 +99,7 @@ export async function saveBoard(db: Kysely<Tables>, save: BoardSave): Promise<Sa
 
 /** Deletes the board only if it is still at `version`; returns whether a row was removed. */
 export async function deleteBoard(db: Kysely<Tables>, repoKey: string, version: number): Promise<boolean> {
+  if (!isBoardVersion(version)) return false
   const result = await db
     .deleteFrom('boards')
     .where('repo_key', '=', repoKey)
