@@ -1,0 +1,31 @@
+@use '@carbon/react/scss/spacing' as *;
+@use '@carbon/react/scss/theme' as *;
+@use '@carbon/react/scss/type';
+
+.connect {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-07;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: $spacing-10 $spacing-05 $spacing-09;
+}
+
+.connect__title {
+  @include type.type-style('heading-05');
+}
+
+.connect__lead {
+  @include type.type-style('body-02');
+
+  margin-top: $spacing-04;
+  color: $text-secondary;
+}
+
+.connect__form.cds--tile {
+  padding: $spacing-07;
+}
+
+.connect__recent .cds--contained-list-item__content {
+  @include type.type-style('body-compact-01');
+}

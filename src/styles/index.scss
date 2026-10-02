@@ -1,0 +1,19 @@
+// Carbon's default font path uses webpack's `~` prefix, which Vite does not
+// understand; point it at the @ibm/plex package so the fonts are bundled.
+@use '@carbon/react' with (
+  $font-path: '@ibm/plex'
+);
+@use '@carbon/react/scss/theme' as *;
+
+// The Carbon theme class (cds--white / cds--g100) lives on <html>; see useCarbonTheme.
+html,
+body {
+  min-height: 100%;
+  background-color: $background;
+  color: $text-primary;
+}
+
+.app-main {
+  // Height of the Carbon UI shell header.
+  padding-top: 3rem;
+}

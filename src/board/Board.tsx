@@ -1,0 +1,197 @@
+import { Launch, Locked, Renew, Settings } from '@carbon/icons-react'
+import { Button, InlineNotification, Link, Modal, Tag } from '@carbon/react'
+import { useCallback, useMemo, useState } from 'react'
+import {
+  deleteBucket,
+  moveBucket,
+  moveIssue,
+  resolveBuckets,
+  saveBucket,
+  type BucketContents,
+} from '../domain/board'
+import { EMPTY_FILTERS, isFiltering, matchesFilters } from '../domain/filters'
+import type { Bucket, RepoSnapshot } from '../domain/types'
+import { useBoardConfig, useBoards } from '../state/boards'
+import { BoardCanvas } from './BoardCanvas'
+import { BoardSettingsModal } from './BoardSettingsModal'
+import { BoardToolbar } from './BoardToolbar'
+import { BucketEditorModal } from './BucketEditorModal'
+import './board.scss'
+
+interface BoardProps {
+  boardKey: string
+  snapshot: RepoSnapshot
+  isFetching: boolean
+  refreshError: Error | null
+  onRefresh: () => void
+}
+
+type Dialog =
+  | { kind: 'edit-bucket'; bucket: Bucket | null }
+  | { kind: 'delete-bucket'; bucket: Bucket }
+  | { kind: 'board-settings' }
+
+export function Board({ boardKey, snapshot, isFetching, refreshError, onRefresh }: BoardProps) {
+  const { repository, issues, labels } = snapshot
+  const [config, updateConfig] = useBoardConfig(boardKey, labels)
+  const resetBoard = useBoards((state) => state.resetBoard)
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [dialog, setDialog] = useState<Dialog | null>(null)
+  const closeDialog = () => setDialog(null)
+
+  const contents = useMemo(() => resolveBuckets(issues, config), [issues, config])
+  const filtering = isFiltering(filters)
+  const visible = useMemo<BucketContents>(() => {
+    if (!filtering) return contents
+    return new Map(
+      [...contents].map(([bucketId, list]) => [
+        bucketId,
+        list.filter((issue) => matchesFilters(issue, filters)),
+      ]),
+    )
+  }, [contents, filters, filtering])
+  const labelsByName = useMemo(() => new Map(labels.map((label) => [label.name, label])), [labels])
+
+  const handleMoveIssue = useCallback(
+    (issueNumber: number, bucketId: string, beforeIssueNumber: number | null) =>
+      updateConfig((current) => moveIssue(current, issues, issueNumber, bucketId, beforeIssueNumber)),
+    [issues, updateConfig],
+  )
+
+  const openCount = issues.filter((issue) => issue.state === 'open').length
+  const closedCount = issues.length - openCount
+  const syncedAt = new Date(snapshot.fetchedAt).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  return (
+    <div className="board">
+      <header className="board-header">
+        <div className="board-header__title">
+          <h1 className="board-header__name">
+            <Link href={repository.url} target="_blank" rel="noreferrer" renderIcon={Launch}>
+              {repository.fullName}
+            </Link>
+            {repository.isPrivate && (
+              <Tag size="sm" type="outline" renderIcon={Locked}>
+                Private
+              </Tag>
+            )}
+          </h1>
+          {repository.description && (
+            <p className="board-header__description">{repository.description}</p>
+          )}
+        </div>
+        <div className="board-header__meta">
+          <span className="board-header__counts">
+            {openCount} open
+            {config.closedWindowDays > 0 &&
+              ` · ${closedCount} closed in the last ${config.closedWindowDays} days`}
+            {' · '}synced {syncedAt}
+          </span>
+          <Button
+            kind="ghost"
+            size="sm"
+            renderIcon={Renew}
+            onClick={onRefresh}
+            disabled={isFetching}
+            className={isFetching ? 'board-header__refresh--busy' : undefined}
+          >
+            {isFetching ? 'Syncing…' : 'Refresh'}
+          </Button>
+          <Button
+            kind="ghost"
+            size="sm"
+            renderIcon={Settings}
+            onClick={() => setDialog({ kind: 'board-settings' })}
+          >
+            Board settings
+          </Button>
+        </div>
+      </header>
+
+      {refreshError && (
+        <InlineNotification
+          className="board__notice"
+          kind="error"
+          lowContrast
+          title="Couldn't refresh."
+          subtitle={`${refreshError.message} Showing the last loaded issues.`}
+        />
+      )}
+      {snapshot.truncated && (
+        <InlineNotification
+          className="board__notice"
+          kind="warning"
+          lowContrast
+          title="Not every issue is shown."
+          subtitle="This repository has more issues than Urutau loads at once (1,000 open and 1,000 recently closed)."
+        />
+      )}
+
+      <BoardToolbar
+        issues={issues}
+        labels={labels}
+        filters={filters}
+        onFiltersChange={setFilters}
+        onAddBucket={() => setDialog({ kind: 'edit-bucket', bucket: null })}
+      />
+
+      <BoardCanvas
+        buckets={config.buckets}
+        visible={visible}
+        contents={contents}
+        labelsByName={labelsByName}
+        isFiltering={filtering}
+        onMoveIssue={handleMoveIssue}
+        onEditBucket={(bucket) => setDialog({ kind: 'edit-bucket', bucket })}
+        onMoveBucket={(bucketId, offset) =>
+          updateConfig((current) => moveBucket(current, bucketId, offset))
+        }
+        onDeleteBucket={(bucket) => setDialog({ kind: 'delete-bucket', bucket })}
+      />
+
+      {dialog?.kind === 'edit-bucket' && (
+        <BucketEditorModal
+          bucket={dialog.bucket}
+          labels={labels}
+          onSave={(bucket) => {
+            updateConfig((current) => saveBucket(current, bucket))
+            closeDialog()
+          }}
+          onClose={closeDialog}
+        />
+      )}
+      {dialog?.kind === 'delete-bucket' && (
+        <Modal
+          open
+          danger
+          size="xs"
+          modalHeading={`Delete “${dialog.bucket.title}”?`}
+          primaryButtonText="Delete bucket"
+          secondaryButtonText="Cancel"
+          onRequestSubmit={() => {
+            updateConfig((current) => deleteBucket(current, dialog.bucket.id))
+            closeDialog()
+          }}
+          onRequestClose={closeDialog}
+        >
+          <p>
+            Its issues go back to automatic placement: a matching label rule, otherwise the first
+            bucket. Nothing changes on GitHub.
+          </p>
+        </Modal>
+      )}
+      {dialog?.kind === 'board-settings' && (
+        <BoardSettingsModal
+          repoName={repository.fullName}
+          config={config}
+          onSave={(next) => updateConfig(() => next)}
+          onReset={() => resetBoard(boardKey)}
+          onClose={closeDialog}
+        />
+      )}
+    </div>
+  )
+}

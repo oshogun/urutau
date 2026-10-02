@@ -1,0 +1,504 @@
+@use '@carbon/react/scss/breakpoint' as *;
+@use '@carbon/react/scss/motion' as *;
+@use '@carbon/react/scss/spacing' as *;
+@use '@carbon/react/scss/theme' as *;
+@use '@carbon/react/scss/type';
+
+$bucket-min-width: 16rem;
+$bucket-max-width: 24rem;
+$page-gutter: $spacing-07;
+
+// ---------------------------------------------------------------------------
+// Page layout: header and toolbar on top, horizontally scrolling buckets below.
+
+.board {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 3rem);
+}
+
+.board-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: $spacing-03 $spacing-07;
+  padding: $spacing-06 $page-gutter $spacing-04;
+}
+
+.board-header__name {
+  @include type.type-style('heading-04');
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-03;
+
+  .cds--link {
+    font: inherit;
+  }
+
+  .cds--tag {
+    margin: 0;
+  }
+}
+
+.board-header__description {
+  @include type.type-style('body-01');
+
+  max-width: 60rem;
+  margin-top: $spacing-02;
+  color: $text-secondary;
+}
+
+.board-header__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-02 $spacing-03;
+}
+
+.board-header__counts {
+  @include type.type-style('label-01');
+
+  margin-right: $spacing-03;
+  color: $text-secondary;
+}
+
+.board-header__refresh--busy svg {
+  animation: board-spin 1s linear infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@keyframes board-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.board__notice.cds--inline-notification {
+  max-width: none;
+  margin: 0 $page-gutter $spacing-03;
+}
+
+.board-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-03;
+  padding: $spacing-03 $page-gutter;
+}
+
+.board-toolbar__search {
+  flex: 1 1 16rem;
+  max-width: 28rem;
+}
+
+.board-toolbar__field {
+  flex: 0 1 12rem;
+  min-width: 10rem;
+}
+
+.board-toolbar__field--labels {
+  flex-basis: 16rem;
+}
+
+// Two classes so this beats Carbon's `.cds--btn { margin: 0 }` regardless of stylesheet order.
+.board-toolbar .board-toolbar__add {
+  margin-left: auto;
+}
+
+.board-canvas {
+  display: flex;
+  flex: 1;
+  align-items: stretch;
+  gap: $spacing-05;
+  min-height: 0;
+  padding: $spacing-04 $page-gutter $spacing-07;
+  overflow: auto hidden;
+}
+
+@include breakpoint-down(md) {
+  .board-header,
+  .board-toolbar,
+  .board-canvas {
+    padding-inline: $spacing-05;
+  }
+
+  .board__notice.cds--inline-notification {
+    margin-inline: $spacing-05;
+  }
+
+  .board-toolbar__search,
+  .board-toolbar__field {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .board-toolbar .board-toolbar__add {
+    margin-left: 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Labels
+
+.label-tag.cds--tag {
+  margin: 0;
+
+  // The exact GitHub color, next to the closest Carbon tag palette.
+  &::before {
+    content: '';
+    flex: none;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin-inline-end: $spacing-02;
+    border-radius: 50%;
+    background-color: var(--label-color, currentcolor);
+    // A ring in the tag's text color keeps very dark or very light labels visible in both themes.
+    box-shadow: 0 0 0 1px color-mix(in srgb, currentcolor 40%, transparent);
+  }
+}
+
+.label-option {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+  width: 100%;
+}
+
+.label-option__dot {
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentcolor 40%, transparent);
+}
+
+.label-option__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.label-option__count {
+  color: $text-secondary;
+}
+
+// ---------------------------------------------------------------------------
+// Buckets
+
+.bucket {
+  display: flex;
+  // Share the width when there is room; scroll horizontally when there isn't.
+  flex: 1 0 $bucket-min-width;
+  flex-direction: column;
+  // An explicit minimum stops long labels from widening their column.
+  min-width: $bucket-min-width;
+  max-width: $bucket-max-width;
+  min-height: 0;
+  border-top: 3px solid $border-subtle;
+  background-color: $layer;
+}
+
+.bucket--over-limit {
+  border-top-color: $support-error;
+}
+
+.bucket__header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+  min-height: 3rem;
+  padding: 0 $spacing-02 0 $spacing-05;
+
+  .cds--tag {
+    margin: 0;
+  }
+
+  .cds--overflow-menu__wrapper {
+    margin-left: auto;
+  }
+}
+
+.bucket__title {
+  @include type.type-style('heading-compact-01');
+
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bucket__rules {
+  @include type.type-style('helper-text-01');
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-02 $spacing-03;
+  padding: 0 $spacing-05 $spacing-03;
+  color: $text-secondary;
+}
+
+.bucket__rule-note {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-02;
+
+  svg {
+    fill: currentcolor;
+  }
+}
+
+.bucket__rule-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-02;
+  list-style: none;
+}
+
+.bucket__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.bucket__cards {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: $spacing-03;
+  min-height: 4rem;
+  padding: $spacing-02 $spacing-03 $spacing-05;
+  overflow-y: auto;
+  list-style: none;
+  transition: background-color $duration-fast-02 motion(standard, productive);
+}
+
+.bucket__cards--over {
+  background-color: $highlight;
+}
+
+.bucket__card {
+  flex: none;
+}
+
+.bucket__card--draggable {
+  cursor: grab;
+}
+
+.bucket__card--placeholder {
+  opacity: 0.4;
+}
+
+.bucket__empty {
+  @include type.type-style('helper-text-01');
+
+  display: grid;
+  min-height: 5rem;
+  border: 1px dashed $border-strong;
+  color: $text-helper;
+  place-items: center;
+}
+
+.bucket__skeleton-card.cds--skeleton__placeholder {
+  width: 100%;
+  height: 6rem;
+}
+
+// ---------------------------------------------------------------------------
+// Issue cards
+
+.issue-card.cds--tile {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+  min-width: 0;
+  min-height: 0;
+  padding: $spacing-03 $spacing-04 $spacing-04;
+  transition: background-color $duration-fast-02 motion(standard, productive);
+
+  &:hover {
+    background-color: $layer-hover;
+  }
+}
+
+.issue-card--overlay.cds--tile {
+  box-shadow: 0 4px 12px rgb(0 0 0 / 30%);
+  cursor: grabbing;
+}
+
+.issue-card__top {
+  display: flex;
+  align-items: center;
+  gap: $spacing-02;
+  min-height: 2rem;
+  margin-right: -$spacing-03;
+
+  .cds--tag {
+    margin: 0;
+  }
+}
+
+.issue-card__handle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-left: -$spacing-02;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: $icon-secondary;
+  cursor: grab;
+
+  svg {
+    fill: currentcolor;
+  }
+
+  &:hover {
+    color: $icon-primary;
+  }
+
+  &:focus-visible {
+    outline: 2px solid $focus;
+    outline-offset: -2px;
+  }
+}
+
+.issue-card__number {
+  @include type.type-style('label-01');
+
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: $text-secondary;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-card__title {
+  @include type.type-style('heading-compact-01');
+
+  color: $text-primary;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+
+  &:hover {
+    color: $link-primary-hover;
+    text-decoration: underline;
+  }
+
+  &:focus-visible {
+    outline: 2px solid $focus;
+    outline-offset: 1px;
+  }
+}
+
+.issue-card--closed .issue-card__title {
+  color: $text-secondary;
+}
+
+.issue-card__labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-02;
+  list-style: none;
+
+  li {
+    max-width: 100%;
+  }
+
+  .cds--tag {
+    max-width: 100%;
+  }
+}
+
+.issue-card__footer {
+  @include type.type-style('label-01');
+
+  display: flex;
+  align-items: center;
+  gap: $spacing-04;
+  color: $text-secondary;
+}
+
+.issue-card__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-02;
+  min-width: 0;
+  white-space: nowrap;
+
+  svg {
+    flex: none;
+    fill: currentcolor;
+  }
+}
+
+.issue-card__assignees {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+
+  img {
+    margin-left: -0.375rem;
+    border: 2px solid $layer;
+    border-radius: 50%;
+    background-color: $layer-accent;
+
+    &:first-child {
+      margin-left: 0;
+    }
+  }
+}
+
+.issue-card__more {
+  margin-left: $spacing-02;
+}
+
+// ---------------------------------------------------------------------------
+// Messages and dialogs
+
+.board-message {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: $spacing-10 $spacing-05;
+
+  .cds--inline-notification {
+    max-width: none;
+  }
+}
+
+.board-message__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-03;
+  margin-top: $spacing-05;
+}
+
+.board-settings__heading {
+  @include type.type-style('heading-compact-01');
+}
+
+.board-settings__text {
+  @include type.type-style('body-compact-01');
+
+  margin-top: $spacing-02;
+  color: $text-secondary;
+}
+
+.board-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-03;
+  margin-top: $spacing-04;
+}
