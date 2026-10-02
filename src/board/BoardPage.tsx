@@ -3,10 +3,12 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { createDefaultBoard } from '../domain/board'
 import { formatRepo, repoKey } from '../domain/repoRef'
 import type { RepoRef } from '../domain/types'
+import { KeycloakButton } from '../components/auth/KeycloakButton'
 import { GitHubError } from '../github/client'
 import { useBoard, useClosedWindowDays } from '../hooks/useBoard'
 import { useBoardEvents } from '../hooks/useBoardEvents'
 import { useRepoSnapshot } from '../hooks/useRepoSnapshot'
+import { useSession } from '../state/session'
 import { readV1Board } from '../state/v1Import'
 import { Board } from './Board'
 import './board.scss'
@@ -60,6 +62,9 @@ function RepositoryBoard({ repo, onOpenSettings, onChangeRepo }: BoardPageProps)
   const closedWindowDays = useClosedWindowDays(key)
   const query = useRepoSnapshot(repo, closedWindowDays)
   const creating = useRef(false)
+  const accessProblem = useSession((state) =>
+    state.session?.githubAccess.mode === 'browser' ? state.session.githubAccess.problem : null,
+  )
   const live = useBoardEvents(repo, entry.status !== 'loading')
 
   const { status, conflict, create } = entry
@@ -130,7 +135,12 @@ function RepositoryBoard({ repo, onOpenSettings, onChangeRepo }: BoardPageProps)
 
   if (query.isError) {
     const error = query.error
-    const needsToken = error instanceof GitHubError && (error.needsToken || error.kind === 'rate-limited')
+    const serverAccess = error instanceof GitHubError && error.kind === 'server-access'
+    const needsToken =
+      error instanceof GitHubError &&
+      (error.needsToken || error.kind === 'rate-limited' || (serverAccess && error.problem !== 'unavailable'))
+    const signInAgain =
+      accessProblem === 'signin-expired' || (serverAccess && error.problem === 'signin-expired')
     return (
       <div className="board-message">
         {title}
@@ -144,6 +154,7 @@ function RepositoryBoard({ repo, onOpenSettings, onChangeRepo }: BoardPageProps)
           <Button kind="primary" onClick={() => void query.refetch()}>
             Try again
           </Button>
+          {signInAgain && <KeycloakButton kind="secondary">Sign in with Keycloak again</KeycloakButton>}
           {needsToken && (
             <Button kind="secondary" onClick={onOpenSettings}>
               Open settings

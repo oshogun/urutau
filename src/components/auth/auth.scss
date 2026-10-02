@@ -108,3 +108,17 @@
 .user-menu__options .cds--overflow-menu-options__btn {
   max-width: none;
 }
+
+.auth__alternative {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-04;
+  align-items: flex-start;
+}
+
+.github-access-notice {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-04;
+  align-items: flex-start;
+}

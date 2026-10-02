@@ -105,6 +105,31 @@ describe('useBoardEvents', () => {
     expect(stub.requests('PUT')).toHaveLength(0)
   })
 
+  it('ignores board-deleted while a save is in flight', async () => {
+    await mount()
+    const gate = stub.hold('PUT boards/acme/widgets')
+    useBoards.getState().update(KEY, 'acme/widgets', () => renamed('Mine'))
+    await tick()
+    expect(useBoards.getState().entries[KEY].saving).toBe(true)
+    stub.externalDelete(KEY)
+    await tick()
+    expect(useBoards.getState().entries[KEY]).toMatchObject({ status: 'ready', conflict: null })
+    expect(useBoards.getState().entries[KEY].board?.buckets[0].title).toBe('Mine')
+    gate.release()
+  })
+
+  it('ignores board-deleted while an unsaved edit is pending', async () => {
+    await mount()
+    stub.failNext('PUT boards/acme/widgets', { status: 500, error: 'server-error', message: 'Boom.' })
+    useBoards.getState().update(KEY, 'acme/widgets', () => renamed('Mine'))
+    await tick()
+    expect(useBoards.getState().entries[KEY]).toMatchObject({ dirty: true, saving: false })
+    stub.externalDelete(KEY)
+    await tick()
+    expect(useBoards.getState().entries[KEY]).toMatchObject({ status: 'ready', conflict: null, dirty: true })
+    expect(useBoards.getState().entries[KEY].board?.buckets[0].title).toBe('Mine')
+  })
+
   it('closes the stream on unmount', async () => {
     const { unmount } = await mount()
     expect(stub.openStreams()).toBe(1)

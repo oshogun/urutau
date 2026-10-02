@@ -47,6 +47,12 @@ export interface ApiStubOptions {
   /** Accounts that can sign in, besides the signed-in user. Default password for "ada" is "correct horse". */
   accounts?: { username: string; password: string; isAdmin?: boolean }[]
   signOutRedirectTo?: string | null
+  /**
+   * Answers GET api/github/<path>?<query> while the session's githubAccess mode is 'server'
+   * (path without the `api/github/` prefix). Without it, or for an unknown path, the stub
+   * answers 404 github-path-not-allowed. In browser mode the stub answers 403 forbidden.
+   */
+  github?: (request: { path: string; query: string; headers: Record<string, string> }) => Response | undefined
 }
 
 export interface ApiCall {
@@ -87,6 +93,8 @@ export interface ApiStub {
   hold(matcher: CallMatcher): { release(): void }
   users: UserSummary[]
   invites: { summary: InviteSummary; token: string }[]
+  /** Changes the GitHub access of the signed-in session, as the server would report it from now on. */
+  setGithubAccess(access: GitHubAccess): void
   /** The signed-in session, or null. */
   readonly session: Session | null
   /** Number of EventSource instances currently open. */
@@ -345,6 +353,14 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     // Everything else needs a session.
     if (!current) return error(401, 'signed-out', 'Sign in to continue.')
 
+    if (head === 'github' && method === 'GET') {
+      if (current.githubAccess.mode !== 'server') {
+        return error(403, 'forbidden', 'GitHub reads go through the browser for this session.')
+      }
+      const answer = options.github?.({ path: tail, query: url.search.replace(/^\?/, ''), headers: call.headers })
+      return answer ?? error(404, 'github-path-not-allowed', 'That GitHub path is not allowed.')
+    }
+
     if (head === 'boards') {
       if (method === 'GET' && tail === '') {
         const list = [...boards.values()]
@@ -537,6 +553,9 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
       return accounts.map((a) => a.user)
     },
     invites,
+    setGithubAccess(access) {
+      if (current) current = { ...current, githubAccess: access }
+    },
     get session() {
       return current
     },

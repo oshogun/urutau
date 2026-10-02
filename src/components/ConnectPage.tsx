@@ -17,6 +17,7 @@ import { V1ImportPrompt } from '../board/V1ImportPrompt'
 import { SNAPSHOT_QUERY_ROOT } from '../hooks/useRepoSnapshot'
 import { useSession } from '../state/session'
 import { useSettings } from '../state/settings'
+import { GitHubAccessNotice } from './auth/GitHubAccessNotice'
 import './app.scss'
 
 interface ConnectPageProps {
@@ -75,14 +76,17 @@ export function ConnectPage({ onOpen }: ConnectPageProps) {
               spellCheck={false}
             />
             {browserToken ? (
-              <PasswordInput
-                id="connect-token"
-                labelText="Personal access token (optional)"
-                helperText="Needed for private repositories and to raise GitHub's rate limit. A fine-grained token with read-only Issues access is enough. It is stored only in this browser and sent only to GitHub."
-                value={tokenInput}
-                onChange={(event) => setTokenInput(event.target.value)}
-                autoComplete="off"
-              />
+              <>
+                <GitHubAccessNotice />
+                <PasswordInput
+                  id="connect-token"
+                  labelText="Personal access token (optional)"
+                  helperText="Needed for private repositories and to raise GitHub's rate limit. A fine-grained token with read-only Issues access is enough. It is stored only in this browser and sent only to GitHub."
+                  value={tokenInput}
+                  onChange={(event) => setTokenInput(event.target.value)}
+                  autoComplete="off"
+                />
+              </>
             ) : (
               <p className="connect__note">GitHub is read through your Keycloak link.</p>
             )}

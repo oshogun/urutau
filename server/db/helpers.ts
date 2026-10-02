@@ -7,7 +7,7 @@ export function iso(date: Date): string {
   return date.toISOString()
 }
 
-/** The largest value of an INTEGER column on every backend (PostgreSQL's is the smallest). */
+/** The largest value of an INTEGER column on every backend: PostgreSQL and MariaDB store 32-bit integers (SQLite stores 64-bit). */
 const MAX_INTEGER = 2 ** 31 - 1
 
 /**

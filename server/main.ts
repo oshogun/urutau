@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server'
 import { createApp, purgeExpired, serverSecrets } from './app.ts'
 import { loadConfig } from './config.ts'
 import { createEventHub } from './events/publisher.ts'
+import { GrantStore } from './oidc/grants.ts'
 import { openDatabase } from './db/index.ts'
 import { acceptedHostnames, startupWarning } from './http/hostGuard.ts'
 import { createLogger } from './log.ts'
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
   await database.migrate()
 
   const hub = createEventHub()
+  const grants = new GrantStore()
   const app = createApp({
     config,
     database,
@@ -32,12 +34,13 @@ async function main(): Promise<void> {
     now: () => new Date(),
     fetch: globalThis.fetch,
     eventHub: hub,
+    grants,
   })
   registerStatic(app, defaultDistDir())
 
   const purge = async () => {
     try {
-      await purgeExpired(database, new Date())
+      await purgeExpired(database, new Date(), grants)
     } catch (error) {
       log.warn('purging expired rows failed', { name: error instanceof Error ? error.name : 'Error' })
     }

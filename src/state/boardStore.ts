@@ -160,7 +160,13 @@ export const useBoards = create<BoardsState>()((set, get) => {
         const entry = get().entries[key]
         if (entry?.saving || entry?.dirty) return
         if (stored) {
-          patch(key, { status: 'ready', stored, board: stored.board, loadError: null })
+          patch(key, {
+            status: 'ready',
+            stored,
+            board: stored.board,
+            loadError: null,
+            conflict: entry?.conflict?.kind === 'deleted' ? null : (entry?.conflict ?? null),
+          })
         } else {
           patch(key, { status: 'missing', stored: null, board: null, loadError: null })
         }
@@ -206,7 +212,12 @@ export const useBoards = create<BoardsState>()((set, get) => {
         if (!entry || entry.saving || entry.dirty) return null
         if (stored) {
           if (stored.version === entry.stored?.version) return null
-          patch(key, { status: 'ready', stored, board: stored.board })
+          patch(key, {
+            status: 'ready',
+            stored,
+            board: stored.board,
+            conflict: entry.conflict?.kind === 'deleted' ? null : entry.conflict,
+          })
           return stored
         }
         if (entry.stored) adopt(key, null, { kind: 'deleted', by: null })

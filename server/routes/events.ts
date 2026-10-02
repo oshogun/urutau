@@ -56,7 +56,7 @@ export function eventsRoutes(ctx: AppContext) {
             setTimeout(resolve, ctx.hub.pingMs).unref()
           })
           if (closed || stream.aborted) break
-          // A session that was signed out or whose user was removed ends its stream at the next heartbeat.
+          // Sign-out and user removal end the stream at once (closeSession); this catches a session that expired or was deleted another way.
           if (!(await getSession(db, idHash, ctx.now()))) break
           await stream.write(': ping\n\n')
         }

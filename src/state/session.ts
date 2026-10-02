@@ -22,6 +22,11 @@ export interface SessionState {
   signIn(username: string, password: string): Promise<void>
   createAdmin(username: string, password: string): Promise<void>
   acceptInvite(token: string, username: string, password: string): Promise<void>
+  /**
+   * Re-reads GET /api/session. When it is still the same user, only `session` is replaced (its
+   * githubAccess may have changed) and nothing else resets; any other outcome is a session change.
+   */
+  refresh(): Promise<void>
   /** POST sign-out; follows redirectTo for Keycloak sessions. */
   signOut(): Promise<void>
   /** Called when any /api answer carries code 'signed-out'. Does nothing when already signed out. */
@@ -90,6 +95,24 @@ export const useSession = create<SessionState>()((set, get) => {
         apply({ status: 'signed-in', session: response.session, firstRun: false, config, loadError })
       } else {
         apply({ status: 'signed-out', session: null, firstRun: response.firstRun, config, loadError })
+      }
+    },
+
+    async refresh() {
+      let response: SessionResponse
+      try {
+        response = await apiRequest<SessionResponse>('session')
+      } catch {
+        return
+      }
+      const previous = get().session
+      if (response.signedIn && previous?.user.id === response.session.user.id) {
+        setCsrfToken(response.session.csrfToken)
+        set({ session: response.session })
+      } else if (response.signedIn) {
+        signedIn(response.session)
+      } else {
+        apply({ status: 'signed-out', session: null, firstRun: response.firstRun, loadError: null })
       }
     },
 

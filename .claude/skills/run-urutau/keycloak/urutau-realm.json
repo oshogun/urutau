@@ -1,0 +1,79 @@
+{
+  "realm": "urutau",
+  "displayName": "Urutau (test only)",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "clients": [
+    {
+      "clientId": "urutau",
+      "name": "Urutau",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "urutau-dev-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://127.0.0.1:8787/api/auth/keycloak/callback",
+        "http://127.0.0.1:8788/api/auth/keycloak/callback",
+        "http://127.0.0.1:5173/api/auth/keycloak/callback",
+        "http://127.0.0.1:5174/api/auth/keycloak/callback"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://127.0.0.1:8787/*##http://127.0.0.1:8788/*##http://127.0.0.1:5173/*##http://127.0.0.1:5174/*"
+      }
+    }
+  ],
+  "identityProviders": [
+    {
+      "alias": "github",
+      "displayName": "GitHub (stand-in realm)",
+      "providerId": "oidc",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": true,
+      "addReadTokenRoleOnCreate": true,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "authorizationUrl": "http://127.0.0.1:${URUTAU_KEYCLOAK_PORT:58080}/realms/fakegithub/protocol/openid-connect/auth",
+        "tokenUrl": "http://127.0.0.1:${URUTAU_KEYCLOAK_PORT:58080}/realms/fakegithub/protocol/openid-connect/token",
+        "userInfoUrl": "http://127.0.0.1:${URUTAU_KEYCLOAK_PORT:58080}/realms/fakegithub/protocol/openid-connect/userinfo",
+        "jwksUrl": "http://127.0.0.1:${URUTAU_KEYCLOAK_PORT:58080}/realms/fakegithub/protocol/openid-connect/certs",
+        "issuer": "http://127.0.0.1:${URUTAU_KEYCLOAK_PORT:58080}/realms/fakegithub",
+        "validateSignature": "true",
+        "useJwksUrl": "true",
+        "clientId": "keycloak-broker",
+        "clientSecret": "fakegithub-broker-dev-secret",
+        "clientAuthMethod": "client_secret_post",
+        "defaultScope": "openid profile email",
+        "syncMode": "IMPORT"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "localonly",
+      "enabled": true,
+      "email": "localonly@example.test",
+      "emailVerified": true,
+      "firstName": "Local",
+      "lastName": "Only",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "localonly-dev-password",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

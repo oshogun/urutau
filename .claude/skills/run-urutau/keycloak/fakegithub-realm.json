@@ -1,0 +1,31 @@
+{
+  "realm": "fakegithub",
+  "displayName": "Stand-in for GitHub (test only)",
+  "enabled": true,
+  "sslRequired": "none",
+  "clients": [
+    {
+      "clientId": "keycloak-broker",
+      "name": "Keycloak urutau realm, brokering this realm",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "fakegithub-broker-dev-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://127.0.0.1:${URUTAU_KEYCLOAK_PORT:58080}/realms/urutau/broker/github/endpoint"]
+    }
+  ],
+  "users": [
+    {
+      "username": "octocat",
+      "enabled": true,
+      "email": "octocat@example.test",
+      "emailVerified": true,
+      "firstName": "Octo",
+      "lastName": "Cat",
+      "credentials": [{ "type": "password", "value": "octocat-dev-password", "temporary": false }]
+    }
+  ]
+}

@@ -1,12 +1,13 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
-import type { AuthMethod, Session } from '../../src/domain/api.ts'
+import type { AuthMethod, GitHubAccess, Session } from '../../src/domain/api.ts'
 import type { AppContext } from '../app.ts'
 import { createSession, deleteSession, getSession, touchSession } from '../db/sessions.ts'
 import { getUserById, type UserRow } from '../db/users.ts'
 import { HttpError } from '../http/errors.ts'
 import { isPublicRoute } from '../http/publicRoutes.ts'
 import type { AppEnv } from '../http/types.ts'
+import type { Grant } from '../oidc/grants.ts'
 import { randomToken, sha256Hex } from './tokens.ts'
 
 export const SESSION_COOKIE = 'urutau_session'
@@ -27,8 +28,23 @@ export function clearSessionCookie(ctx: AppContext, c: Context): void {
   deleteCookie(c, SESSION_COOKIE, { path: '/', secure: ctx.config.secureCookies })
 }
 
+/**
+ * How the browser should read GitHub. A Keycloak user whose broker answered (or
+ * has not been asked yet) goes through the server; one whose grant is gone or
+ * whose broker refused falls back to the browser with the reason. Local users,
+ * and Keycloak users when no GitHub identity provider is configured, read
+ * GitHub from the browser with nothing to report.
+ */
+export function githubAccessFor(ctx: AppContext, authMethod: AuthMethod, sessionIdHash: string): GitHubAccess {
+  if (authMethod !== 'keycloak' || !ctx.keycloak?.brokersGitHub) return { mode: 'browser', problem: null }
+  const grant = ctx.grants.get(sessionIdHash)
+  if (!grant) return { mode: 'browser', problem: 'signin-expired' }
+  if (grant.broker === 'not-linked' || grant.broker === 'refused') return { mode: 'browser', problem: grant.broker }
+  return { mode: 'server' }
+}
+
 /** The response body for a signed-in session. */
-export function toSession(user: UserRow, authMethod: AuthMethod, csrfToken: string): Session {
+export function toSession(user: UserRow, authMethod: AuthMethod, csrfToken: string, githubAccess: GitHubAccess): Session {
   return {
     user: {
       id: user.id,
@@ -38,18 +54,39 @@ export function toSession(user: UserRow, authMethod: AuthMethod, csrfToken: stri
       authMethod,
     },
     csrfToken,
-    githubAccess: { mode: 'browser', problem: null },
+    githubAccess,
   }
 }
 
 /**
  * Starts a session for the user and sets its cookie. A session cookie the
  * request already carried is deleted first, so signing in never leaves the
- * previous session usable.
+ * previous session usable. A Keycloak sign-in passes its grant, kept in memory
+ * under the new session.
  */
-export async function startSession(ctx: AppContext, c: Context, user: UserRow, authMethod: AuthMethod): Promise<Session> {
+export async function startSession(
+  ctx: AppContext,
+  c: Context,
+  user: UserRow,
+  authMethod: AuthMethod,
+  grant?: Grant,
+): Promise<Session> {
+  return (await startSessionWithId(ctx, c, user, authMethod, grant)).session
+}
+
+/** Like `startSession`, and also returns the hash of the new session id, the key of its Keycloak grant. */
+export async function startSessionWithId(
+  ctx: AppContext,
+  c: Context,
+  user: UserRow,
+  authMethod: AuthMethod,
+  grant?: Grant,
+): Promise<{ session: Session; idHash: string }> {
   const previous = getCookie(c, SESSION_COOKIE)
-  if (previous) await deleteSession(ctx.database.db, sha256Hex(previous))
+  if (previous) {
+    await deleteSession(ctx.database.db, sha256Hex(previous))
+    ctx.grants.delete(sha256Hex(previous))
+  }
   const id = randomToken()
   const csrfToken = randomToken()
   const now = ctx.now()
@@ -61,8 +98,10 @@ export async function startSession(ctx: AppContext, c: Context, user: UserRow, a
     now,
     expiresAt: new Date(now.getTime() + LIFETIME_MS),
   })
+  if (grant) ctx.grants.set(sha256Hex(id), grant, now.getTime())
   writeCookie(ctx, c, id)
-  return toSession(user, authMethod, csrfToken)
+  const idHash = sha256Hex(id)
+  return { session: toSession(user, authMethod, csrfToken, githubAccessFor(ctx, authMethod, idHash)), idHash }
 }
 
 /**
@@ -87,6 +126,7 @@ export function loadSession(ctx: AppContext): MiddlewareHandler<AppEnv> {
           writeCookie(ctx, c, id)
         }
       } else {
+        ctx.grants.delete(idHash)
         clearSessionCookie(ctx, c)
       }
     }

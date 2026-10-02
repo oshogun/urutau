@@ -4,7 +4,7 @@ import { sql } from 'kysely'
 import type { AppConfigResponse, CredentialsRequest, SessionResponse, SignOutResponse } from '../../src/domain/api.ts'
 import type { AppContext } from '../app.ts'
 import { hashPassword, validatePassword, validateUsername, verifyPassword } from '../auth/password.ts'
-import { clearSessionCookie, SESSION_COOKIE, startSession, toSession } from '../auth/sessions.ts'
+import { clearSessionCookie, githubAccessFor, SESSION_COOKIE, startSession, toSession } from '../auth/sessions.ts'
 import { sha256Hex } from '../auth/tokens.ts'
 import { deleteSession } from '../db/sessions.ts'
 import { createAccount, getUserByUsername, isFirstRun } from '../db/users.ts'
@@ -49,15 +49,22 @@ export function authRoutes(ctx: AppContext) {
 
   routes.get('/config', async (c) => {
     const row = await ctx.database.db.selectFrom('meta').select('value').where('key', '=', 'instance_id').executeTakeFirst()
-    // Keycloak sign-in has no routes yet, so the client is told it is off.
-    const body: AppConfigResponse = { keycloak: { enabled: false }, instanceId: row?.value ?? '' }
+    const body: AppConfigResponse = { keycloak: { enabled: ctx.config.keycloak !== null }, instanceId: row?.value ?? '' }
     return c.json(body)
   })
 
   routes.get('/session', async (c) => {
     const auth = c.get('auth')
     const body: SessionResponse = auth
-      ? { signedIn: true, session: toSession(auth.user, auth.session.auth_method, auth.session.csrf_token) }
+      ? {
+          signedIn: true,
+          session: toSession(
+            auth.user,
+            auth.session.auth_method,
+            auth.session.csrf_token,
+            githubAccessFor(ctx, auth.session.auth_method, auth.session.id_hash),
+          ),
+        }
       : { signedIn: false, firstRun: await isFirstRun(ctx.database.db) }
     return c.json(body)
   })
@@ -97,13 +104,18 @@ export function authRoutes(ctx: AppContext) {
 
   routes.post('/auth/sign-out', async (c) => {
     const id = getCookie(c, SESSION_COOKIE)
+    let redirectTo: string | null = null
     if (id) {
       const idHash = sha256Hex(id)
+      const auth = c.get('auth')
+      // The id token is needed for the Keycloak end-session URL, so read it before the grant is dropped.
+      const idToken = ctx.grants.get(idHash)?.idToken ?? null
       await deleteSession(ctx.database.db, idHash)
       ctx.hub.closeSession(idHash)
       clearSessionCookie(ctx, c)
+      if (auth?.session.auth_method === 'keycloak' && ctx.keycloak) redirectTo = await ctx.keycloak.endSessionUrl(idToken)
     }
-    const body: SignOutResponse = { redirectTo: null }
+    const body: SignOutResponse = { redirectTo }
     return c.json(body)
   })
 

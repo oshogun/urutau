@@ -1,0 +1,34 @@
+# Opt-in Keycloak for the OIDC tests and manual checks; not part of the gate.
+#   docker compose -f compose.keycloak.yaml up -d --wait
+#   npm run test:keycloak
+#   docker compose -f compose.keycloak.yaml down -v
+# Run clones set URUTAU_KEYCLOAK_PORT=58081 and add `-p urutau-keycloak-clone`.
+# The port is the same inside and outside the container, so the URLs Keycloak
+# builds for itself (the realm files use ${URUTAU_KEYCLOAK_PORT}) and the ones
+# the browser opens are identical. Dev-only credentials: every secret and
+# password here and in the realm files is a documented test value.
+name: urutau-keycloak
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.0
+    command: start-dev --http-port=${URUTAU_KEYCLOAK_PORT:-58080} --import-realm
+    environment:
+      URUTAU_KEYCLOAK_PORT: ${URUTAU_KEYCLOAK_PORT:-58080}
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin-dev-password
+    ports:
+      - "127.0.0.1:${URUTAU_KEYCLOAK_PORT:-58080}:${URUTAU_KEYCLOAK_PORT:-58080}"
+    volumes:
+      - ./.claude/skills/run-urutau/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      # The image has no curl: open a TCP connection from bash and read the status line.
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/${URUTAU_KEYCLOAK_PORT:-58080} &&
+          printf 'GET /realms/urutau/.well-known/openid-configuration HTTP/1.0\r\n\r\n' >&3 &&
+          head -n1 <&3 | grep -q ' 200 '
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s

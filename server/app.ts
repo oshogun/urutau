@@ -12,11 +12,15 @@ import { hostGuard } from './http/hostGuard.ts'
 import { requestLog, securityHeaders } from './http/middleware.ts'
 import type { AppEnv } from './http/types.ts'
 import { urlSecrets, type Logger } from './log.ts'
-import { createEventHub, type EventHub } from './events/publisher.ts'
+import { createEventHub, normalizeClientId, type EventHub } from './events/publisher.ts'
+import { GrantStore } from './oidc/grants.ts'
+import { createKeycloak, type Keycloak } from './oidc/keycloak.ts'
 import { authRoutes } from './routes/auth.ts'
 import { boardsRoutes } from './routes/boards.ts'
 import { eventsRoutes } from './routes/events.ts'
+import { githubRoutes } from './routes/github.ts'
 import { invitesRoutes } from './routes/invites.ts'
+import { oidcRoutes } from './routes/oidc.ts'
 import { usersRoutes } from './routes/users.ts'
 
 export interface BoardEventPublisher {
@@ -35,25 +39,39 @@ export interface AppDeps {
   boardEvents?: BoardEventPublisher
   /** The open event streams; created by `createApp` when not given. */
   eventHub?: EventHub
+  /** The Keycloak grants; created by `createApp` when not given, and passed by tests that inspect or drop them. */
+  grants?: GrantStore
 }
 
 /** What every route factory receives: the dependencies plus per-process state. */
-export interface AppContext extends Omit<AppDeps, 'boardEvents' | 'eventHub'> {
+export interface AppContext extends Omit<AppDeps, 'boardEvents' | 'eventHub' | 'grants'> {
   limits: RateLimiter
   hub: EventHub
   /** Publishes to the event streams and to `AppDeps.boardEvents`. */
   boardEvents: BoardEventPublisher
+  /** Keycloak tokens of the signed-in sessions, in memory only. */
+  grants: GrantStore
+  /** The Keycloak client; null when Keycloak is not configured. */
+  keycloak: Keycloak | null
 }
 
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const hub = deps.eventHub ?? createEventHub()
   const boardEvents: BoardEventPublisher = {
     publish(event) {
-      hub.publish(event)
-      deps.boardEvents?.publish(event)
+      // The client id comes from a request header and goes to every subscriber, so only a short plain id passes.
+      const clean = { ...event, data: { ...event.data, clientId: normalizeClientId(event.data.clientId) } } as typeof event
+      hub.publish(clean)
+      deps.boardEvents?.publish(clean)
     },
   }
-  const ctx: AppContext = { ...deps, limits: new RateLimiter(deps.now), hub, boardEvents }
+  const grants = deps.grants ?? new GrantStore()
+  hub.onSessionEnd((sessionIdHash) => grants.delete(sessionIdHash))
+  const keycloak =
+    deps.config.keycloak !== null && deps.config.publicUrl !== null
+      ? createKeycloak({ config: deps.config.keycloak, publicUrl: deps.config.publicUrl, fetch: deps.fetch, now: deps.now, log: deps.log, grants })
+      : null
+  const ctx: AppContext = { ...deps, limits: new RateLimiter(deps.now), hub, boardEvents, grants, keycloak }
   const app = new Hono<AppEnv>()
 
   app.use('*', securityHeaders())
@@ -69,8 +87,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.route('/api', invitesRoutes(ctx))
   app.route('/api', boardsRoutes(ctx))
   app.route('/api', eventsRoutes(ctx))
-  // Registration point for the Keycloak sign-in routes (public per the route list in http/publicRoutes.ts).
-  // Registration point for the GitHub proxy.
+  app.route('/api', oidcRoutes(ctx))
+  app.route('/api', githubRoutes(ctx))
 
   app.notFound((c) => {
     if (c.req.path.startsWith('/api/') || c.req.path === '/api') {
@@ -97,9 +115,20 @@ export function serverSecrets(config: Config): string[] {
 
 const INVITE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
-/** Deletes expired sessions and invites that expired more than 30 days ago. */
-export async function purgeExpired(database: Database, now: Date): Promise<{ sessions: number; invites: number }> {
+/**
+ * Deletes expired sessions and invites that expired more than 30 days ago.
+ * Given the grant store, it also drops the Keycloak grant of every session it deleted.
+ */
+export async function purgeExpired(
+  database: Database,
+  now: Date,
+  grants?: GrantStore,
+): Promise<{ sessions: number; invites: number }> {
+  const expired = grants
+    ? await database.db.selectFrom('sessions').select('id_hash').where('expires_at', '<=', now.toISOString()).execute()
+    : []
   const sessions = await deleteExpiredSessions(database.db, now)
+  for (const { id_hash: idHash } of expired) grants?.delete(idHash)
   const result = await database.db
     .deleteFrom('invites')
     .where('expires_at', '<', new Date(now.getTime() - INVITE_RETENTION_MS).toISOString())

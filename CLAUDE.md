@@ -1,9 +1,13 @@
 # urutau
 
-A kanban board for GitHub issues: a client-only single-page app in `src/`
-(React 19, TypeScript, Vite, IBM Carbon) with no backend. It reads a
-repository's issues and labels from the GitHub REST API and keeps buckets and
-card positions in the browser's localStorage. `README.md` is the user-facing
+A kanban board for GitHub issues, for a team: a single-page app in `src/`
+(React 19, TypeScript, Vite, IBM Carbon) and a Node server in `server/` (Hono,
+Kysely) that stores accounts and boards in a database (SQLite by default,
+PostgreSQL or MariaDB optionally) and serves the built app. Users sign in with
+a local account or through Keycloak; every signed-in user shares every board,
+and changes reach open boards live over Server-Sent Events. Issues and labels
+are read from the GitHub REST API, by the browser or, for Keycloak users whose
+realm brokers GitHub, by the server. `README.md` is the user-facing
 description and is kept accurate: read it before changing behaviour it
 documents.
 
@@ -79,11 +83,12 @@ Some kinds of work have their own skill. Load it instead of improvising:
    frozen, verbatim. Run id is `YYYY-MM-DD-short-slug`.
 2. **Plan**: delegate to `planner`; store `plan.json`.
 3. **Design**: delegate to `designer` when the run introduces a contract: a
-   change to a persisted store (`urutau:settings`, `urutau:boards`) or the board
-   export format, a new GitHub API call or any write to GitHub, or a shared type
-   in `src/domain/types.ts`. Freeze it before any code is written. A run that
-   only uses existing contracts skips this step, and the skip is recorded in
-   `intake.md`.
+   change to a persisted store (`urutau:settings`, `urutau:boards`), the
+   database schema, the `/api` contract (`src/domain/api.ts`) or the board
+   export format, a new GitHub API call or any write to GitHub, a change to
+   sign-in or sessions, or a shared type in `src/domain/types.ts`. Freeze it
+   before any code is written. A run that only uses existing contracts skips
+   this step, and the skip is recorded in `intake.md`.
 4. **Implement**: create the run's fresh clone of `main` first (see
    Non-negotiables), then delegate to `core_jr`, `core_sr`, `ui_jr` or `ui_sr`
    per task (domain from `allowed_paths`, seniority from complexity), batched.
@@ -139,14 +144,27 @@ narrow the contract further.
   (labels, issue state, comments) unless the run's frozen decisions include
   it. Such a write goes through Design first, and stays off until the user
   turns it on.
-- **The user's GitHub token goes only to `api.github.com`.** It never appears
-  in a board export, a log line, a URL, a fixture or a run artifact, and agents
-  never put their own `gh` credentials into the app or its driver.
-- **Persisted browser state is a contract.** Users' browsers already hold
-  version-1 data in `urutau:settings` and `urutau:boards`, and exported board
-  files in the wild. A change to any of these shapes bumps the zustand `persist`
-  version with a `migrate` that keeps existing boards loading, and is designed
-  before it is built.
+- **GitHub tokens go only to `api.github.com`.** There are two:
+  - the personal access token a user pastes in Settings stays in that browser
+    and is sent only from the browser to `api.github.com`, never to urutau's
+    own server;
+  - a Keycloak user's GitHub token is fetched by the server from Keycloak's
+    broker endpoint, held in memory, and sent only from the server to
+    `api.github.com`. It never reaches the browser or the database.
+
+  Neither ever appears in a board export, a log line, a URL, a fixture or a run
+  artifact, and agents never put their own `gh` credentials into the app or its
+  driver.
+- **Persisted state is a contract.**
+  - The database: a schema change is a new numbered migration in
+    `server/db/migrations/` that keeps existing rows, runs on SQLite,
+    PostgreSQL and MariaDB, and passes the connector suite on all three.
+  - The browser: `urutau:settings` is at version 2; a change to its shape bumps
+    the zustand `persist` version with a `migrate`. Version-1 `urutau:boards`
+    data is read only, to offer its import, and is never changed or deleted.
+  - Exported board files in the wild (`BoardConfig` version 1) keep importing.
+
+  Each of these is designed before it is built.
 - **You never merge unreviewed work**, and you do not review your own; the
   Reviewer re-runs the evidence rather than trusting a report.
 - **Escalate rather than guess** on: ambiguous requirements, destructive
@@ -192,13 +210,22 @@ commonest ones in a diff.
 The gate is `npm run lint && npm run typecheck && npm test && npm run build`,
 the same four steps CI (`.github/workflows/ci.yml`) runs, under Node 24.
 
-- `npm test` (Vitest, jsdom) covers the pure logic in `src/domain/` (placement,
-  ordering, filters, label colours, repository parsing), the GitHub client in
-  `src/github/` (pagination, error mapping, mapping to domain types) and an
-  App-level test of the main flows. It is hermetic: `fetch` is stubbed, there is
-  no network.
-- UI behaviour is checked in a real browser with the `/run-urutau` driver, in
-  fixtures mode, with screenshots that are opened and looked at.
+- `npm test` (Vitest) has two projects. `client` (jsdom) covers the pure
+  logic in `src/domain/`, the GitHub client in `src/github/`, the stores and
+  hooks, and App-level tests of the main flows against an in-memory fake of
+  `/api` (`src/test/apiStub.ts`). `server` (node) covers the database layer on
+  in-memory SQLite, auth, the routes, live updates and the GitHub proxy. It is
+  hermetic: `fetch` is stubbed, there is no network and no Docker.
+- Opt-in suites need Docker: `npm run test:db:postgres` and
+  `npm run test:db:mariadb` run the connector suite against `compose.db.yaml`;
+  `npm run test:keycloak` runs the Keycloak sign-in and broker tests against
+  `compose.keycloak.yaml`. Use the run-clone ports from
+  `.claude/ENVIRONMENT.md` and remove the containers afterwards.
+- UI behaviour is checked in a real browser with the `/run-urutau` driver in
+  server mode: a real API on in-memory SQLite, and the browser's GitHub
+  requests answered from fixtures. The driver does not answer GitHub requests
+  the server makes for Keycloak users; those are covered by the server tests
+  with a stubbed `fetch`. Screenshots are opened and looked at.
 - Live GitHub behaviour uses the driver's live mode after checking the API
   budget (`.claude/ENVIRONMENT.md` § The GitHub API budget is shared).
 

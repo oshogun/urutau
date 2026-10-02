@@ -2,6 +2,7 @@ import { Button, Form, InlineNotification, PasswordInput, Stack, TextInput, Tile
 import { useRef, useState, type FormEvent } from 'react'
 import { ApiError } from '../../api/client'
 import { useSession } from '../../state/session'
+import { KeycloakButton } from './KeycloakButton'
 import './auth.scss'
 
 interface SignInPageProps {
@@ -13,6 +14,7 @@ interface SignInPageProps {
 export function SignInPage({ notice }: SignInPageProps) {
   const firstRun = useSession((state) => state.firstRun)
   const loadError = useSession((state) => state.loadError)
+  const keycloak = useSession((state) => state.config?.keycloak.enabled ?? false)
   const signIn = useSession((state) => state.signIn)
   const createAdmin = useSession((state) => state.createAdmin)
 
@@ -117,6 +119,22 @@ export function SignInPage({ notice }: SignInPageProps) {
           </Form>
         </Layer>
       </Tile>
+
+      {keycloak && (
+        <div className="auth__alternative">
+          <p className="auth__lead">
+            {firstRun
+              ? 'Or use the Keycloak account this server is connected to.'
+              : 'Or sign in with the Keycloak account this server is connected to.'}
+          </p>
+          <KeycloakButton>Sign in with Keycloak</KeycloakButton>
+          {firstRun && (
+            <p className="auth__lead">
+              The first person to sign in, by either method, becomes the administrator.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

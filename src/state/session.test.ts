@@ -91,4 +91,26 @@ describe('session store', () => {
     expect(useSession.getState().status).toBe('signed-out')
     expect(useSession.getState().loadError).toMatch(/could not reach/i)
   })
+
+  it('refresh replaces the session without a session change when it is the same user', async () => {
+    const stub = installApiStub()
+    await useSession.getState().load()
+    const listener = vi.fn()
+    const off = onSessionChange(listener)
+    stub.setGithubAccess({ mode: 'browser', problem: 'signin-expired' })
+    await useSession.getState().refresh()
+    expect(useSession.getState().session?.githubAccess).toEqual({ mode: 'browser', problem: 'signin-expired' })
+    expect(listener).not.toHaveBeenCalled()
+    off()
+  })
+
+  it('refresh signs out when the session is gone', async () => {
+    const stub = installApiStub()
+    await useSession.getState().load()
+    await useSession.getState().signOut()
+    stub.failNext('GET session', { status: 200, body: { signedIn: false, firstRun: false } })
+    useSession.setState({ status: 'signed-in' })
+    await useSession.getState().refresh()
+    expect(useSession.getState().status).toBe('signed-out')
+  })
 })

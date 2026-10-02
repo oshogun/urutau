@@ -32,7 +32,7 @@ describe('first run', () => {
   })
 
   test('stores a bcrypt hash, never the password', async () => {
-    h = await createTestApp()
+    h = await createTestApp({ passwordCost: 12 })
     await firstRun()
     const row = await h.database.db.selectFrom('users').selectAll().executeTakeFirstOrThrow()
     expect(row.password_hash).toMatch(/^\$2[aby]\$12\$/)

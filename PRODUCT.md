@@ -12,9 +12,9 @@ Small software teams that work on one GitHub repository together and plan its
 issues on a kanban board. They expect to share one board: the same buckets,
 label rules and card positions for everyone on the team.
 
-Today a board lives in one browser and is shared by exporting and importing a
-JSON file. A board the whole team shares directly is a confirmed need that is
-not met yet.
+A team runs one urutau server. Everyone signs in to it and sees the same
+boards, and a teammate's change appears on an open board within a second or
+two. Boards can still be exported and imported as JSON files.
 
 ## Product Purpose
 
@@ -39,9 +39,13 @@ updates the issue's labels or its open/closed state on GitHub.
 - Data comes from the GitHub REST API: issues (pull requests excluded), labels,
   assignees and milestones.
 - Public repositories work without a token, within GitHub's anonymous limit of
-  60 API requests an hour. Private repositories and heavier use need the
-  user's own personal access token, kept in their browser and sent only to
-  GitHub.
+  60 API requests an hour. Private repositories and heavier use need a GitHub
+  token: either the user's own personal access token, kept in their browser
+  and sent only to GitHub, or, for teams that sign in through Keycloak with
+  GitHub as a brokered identity provider, the token Keycloak stores, which
+  urutau's server uses to read from GitHub on the user's behalf.
+- The server is self-hosted by the team. It stores accounts and boards in
+  SQLite by default, or in PostgreSQL or MariaDB.
 - A board has buckets (by default Backlog, To do, In progress, In review and
   Done), work-in-progress limits, label rules that route issues into buckets, a
   bucket that collects closed issues, and filters by text, label, assignee and
@@ -49,17 +53,20 @@ updates the issue's labels or its open/closed state on GitHub.
 
 ## Capabilities and Constraints
 
-- Today: read-only access to GitHub; board state stored per browser and shared
-  through JSON export and import; cards move by mouse, touch or keyboard; light
-  and dark themes; UI copy in English only.
-- A static single-page app today (React, TypeScript, Vite). A backend is not
-  ruled out; a board shared by a team may need one.
+- Today: read-only access to GitHub; boards stored on the team's server and
+  shared by every signed-in user, with live updates and a refusal (and notice)
+  when two people save the same board at once; local accounts, where the first
+  account is the admin and invites the others by link, and Keycloak sign-in;
+  JSON export and import; cards move by mouse, touch or keyboard; light and
+  dark themes; UI copy in English only.
+- A single-page app (React, TypeScript, Vite) served by a Node server, which
+  needs a host that runs Node 24 or the container image; a static host alone
+  is no longer enough.
 - Terms: a **bucket** is a kanban column; a **label rule** routes open issues
   with a given label into a bucket; a **board** is the buckets, rules and card
   positions for one repository.
+- Settled: a team shares boards through a self-hosted backend (2026-10-02).
 - Open decisions:
-  - How a team shares one board: a backend, a file in the repository, or
-    GitHub's own Projects as storage.
   - The exact two-way sync behaviour: which buckets map to which labels or
     states, and what happens when GitHub changed in the meantime.
 
@@ -68,7 +75,9 @@ updates the issue's labels or its open/closed state on GitHub.
 - Name: Urutau.
 - Visual language: the IBM Carbon design system, binding since the original
   brief.
-- Free and open source under GPL-3.0, with no accounts and no tracking.
+- Free and open source under GPL-3.0, with no tracking. Accounts exist only on
+  the team's own server (local, or through the team's Keycloak), never with a
+  third party.
 - UI copy in English and Portuguese.
 
 ## Evidence on Hand
@@ -84,8 +93,8 @@ or published screenshots yet; future work must not invent any.
 3. Built for a team: anything that works only in one person's browser is a
    stopgap.
 4. Accessible and bilingual by default.
-5. Free and private: no accounts, no tracking, and the user's token goes only
-   to GitHub.
+5. Free and private: self-hosted accounts only, no tracking, and GitHub tokens
+   go only to GitHub.
 
 ## Accessibility & Inclusion
 

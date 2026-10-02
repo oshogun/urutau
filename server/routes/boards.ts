@@ -24,7 +24,7 @@ function parseSave(body: unknown, key: string): SaveBoardRequest {
   if (!isRecord(body)) throw invalidRequest('The request body must be an object.')
   const { baseVersion, fullName, board } = body
   if (baseVersion !== null && !isBoardVersion(baseVersion)) {
-    throw invalidRequest('baseVersion must be null or a whole number from 1.')
+    throw invalidRequest('baseVersion must be null or a whole number from 1 to 2147483646.')
   }
   if (typeof fullName !== 'string' || repoKeyOf(fullName) !== key) {
     throw invalidRequest('fullName must be the repository in the path, in any letter case.')

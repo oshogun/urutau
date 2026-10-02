@@ -29,6 +29,17 @@ function save(baseVersion: number | null, title = 'To do', fullName = 'acme/widg
 }
 
 describe('saving a board', () => {
+  test('a client id outside 1 to 64 letters, digits, dashes and underscores is dropped from the events', async () => {
+    await setUp()
+    const ids = ['a'.repeat(64), 'a'.repeat(65), 'tab 1', 'tab<1>', '', 'tab\u00e9']
+    let version: number | null = null
+    for (const id of ids) {
+      const saved = await h.put(PATH, save(version), { 'X-Urutau-Client': id })
+      version = ((await saved.json()) as { version: number }).version
+    }
+    expect(h.events.map((event) => event.data.clientId)).toEqual(['a'.repeat(64), null, null, null, null, null])
+  })
+
   test('creates at version 1, then each save with the current version returns the next one', async () => {
     await setUp()
     const created = await h.put(PATH, save(null), { 'X-Urutau-Client': 'tab-1' })
@@ -355,7 +366,7 @@ describe('live updates', () => {
     await vi.waitFor(() => expect(hub.size()).toBe(0))
   })
 
-  test('the heartbeat is sent, and a signed-out session\'s stream ends at the next one', async () => {
+  test('the heartbeat is sent, and signing out ends the session\'s stream at once', async () => {
     const { app, hub } = await setUpStreaming(30)
     const stream = await open(app, h)
     await stream.waitFor(': ping')

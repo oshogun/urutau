@@ -1,8 +1,10 @@
 import type { Hono } from 'hono'
 import { CSRF_HEADER, type BoardDeletedEvent, type BoardUpdatedEvent } from '../../src/domain/api.ts'
+import { setPasswordCost } from '../auth/password.ts'
 import { createApp, type AppDeps, type BoardEventPublisher } from '../app.ts'
 import { loadConfig, type Config } from '../config.ts'
 import { createEventHub, type EventHub } from '../events/publisher.ts'
+import { GrantStore } from '../oidc/grants.ts'
 import { openDatabase, type Database } from '../db/index.ts'
 import { createLogger } from '../log.ts'
 import type { AppEnv } from '../http/types.ts'
@@ -14,7 +16,11 @@ export interface TestOverrides {
   /** Start time of the fixed clock. */
   start?: Date
   fetch?: typeof fetch
+  /** bcrypt cost for this app's password hashes; low by default so tests stay fast under CPU contention. */
+  passwordCost?: number
 }
+
+export const TEST_PASSWORD_COST = 4
 
 /** One browser: its own cookies and the CSRF token of its current session. */
 export interface TestClient {
@@ -39,6 +45,8 @@ export interface TestApp extends TestClient {
   events: PublishedEvent[]
   /** The open event streams. */
   hub: EventHub
+  /** The Keycloak grants held in memory. */
+  grants: GrantStore
   clock: { now: Date; advance(ms: number): void }
   /** Another browser with its own cookie jar. */
   newClient(): TestClient
@@ -58,6 +66,7 @@ function readCookies(jar: Map<string, string>, response: Response): void {
 }
 
 export async function createTestApp(overrides: TestOverrides = {}): Promise<TestApp> {
+  setPasswordCost(overrides.passwordCost ?? TEST_PASSWORD_COST)
   const database = await openDatabase('sqlite::memory:')
   await database.migrate()
   const config: Config = { ...loadConfig({}), databaseUrl: 'sqlite::memory:', ...overrides.config }
@@ -71,6 +80,7 @@ export async function createTestApp(overrides: TestOverrides = {}): Promise<Test
   const events: PublishedEvent[] = []
   const boardEvents: BoardEventPublisher = { publish: (event) => void events.push(event) }
   const hub = createEventHub()
+  const grants = new GrantStore()
   const deps: AppDeps = {
     config,
     database,
@@ -83,6 +93,7 @@ export async function createTestApp(overrides: TestOverrides = {}): Promise<Test
       }),
     boardEvents,
     eventHub: hub,
+    grants,
   }
   const app = createApp(deps)
 
@@ -140,6 +151,7 @@ export async function createTestApp(overrides: TestOverrides = {}): Promise<Test
     logs,
     events,
     hub,
+    grants,
     clock,
     newClient,
     close: () => database.close(),

@@ -1,5 +1,12 @@
 import type { BoardDeletedEvent, BoardUpdatedEvent } from '../../src/domain/api.ts'
 
+const CLIENT_ID = /^[A-Za-z0-9_-]{1,64}$/
+
+/** The tab id a client sent in X-Urutau-Client when it is up to 64 letters, digits, dashes and underscores; null otherwise. */
+export function normalizeClientId(value: string | null | undefined): string | null {
+  return typeof value === 'string' && CLIENT_ID.test(value) ? value : null
+}
+
 export type BoardEvent = { type: 'board-updated'; data: BoardUpdatedEvent } | { type: 'board-deleted'; data: BoardDeletedEvent }
 
 /** One open event stream. `send` must not throw for a closed stream; `close` ends it. */
@@ -9,14 +16,16 @@ export interface Subscriber {
 }
 
 export interface EventHub {
-  /** Seconds between heartbeats on an open stream; settable so tests do not wait 25 s. */
+  /** Milliseconds between heartbeats on an open stream; settable so tests do not wait 25 s. */
   pingMs: number
   /** Sends the event to every stream open on its repository. Synchronous; call it after the write committed. */
   publish(event: BoardEvent): void
   /** Registers a stream for a repository, tagged with the session that opened it. Returns the function that removes it. */
   subscribe(repoKey: string, sessionIdHash: string, subscriber: Subscriber): () => void
-  /** Ends every stream the session opened (sign-out, user removal). */
+  /** Ends every stream the session opened (sign-out, user removal) and tells the `onSessionEnd` listeners. */
   closeSession(sessionIdHash: string): void
+  /** Registers a function called with the id hash of every session passed to `closeSession`. */
+  onSessionEnd(listener: (sessionIdHash: string) => void): void
   /** Ends every stream (shutdown). */
   closeAll(): void
   /** Open streams, for tests. */
@@ -31,6 +40,7 @@ interface Entry {
 /** In-memory fan-out for one server process: streams are grouped by repository key. */
 export function createEventHub(options: { pingMs?: number } = {}): EventHub {
   const byRepo = new Map<string, Set<Entry>>()
+  const sessionEndListeners: Array<(sessionIdHash: string) => void> = []
 
   function remove(repoKey: string, entry: Entry): void {
     const entries = byRepo.get(repoKey)
@@ -71,7 +81,11 @@ export function createEventHub(options: { pingMs?: number } = {}): EventHub {
       byRepo.set(repoKey, entries)
       return () => remove(repoKey, entry)
     },
-    closeSession: (sessionIdHash) => closeWhere((entry) => entry.sessionIdHash === sessionIdHash),
+    closeSession(sessionIdHash) {
+      for (const listener of sessionEndListeners) listener(sessionIdHash)
+      closeWhere((entry) => entry.sessionIdHash === sessionIdHash)
+    },
+    onSessionEnd: (listener) => void sessionEndListeners.push(listener),
     closeAll: () => closeWhere(() => true),
     size: () => [...byRepo.values()].reduce((total, entries) => total + entries.size, 0),
   }

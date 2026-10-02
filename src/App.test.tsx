@@ -137,7 +137,10 @@ describe('App', () => {
     expect(stub.board('acme/widgets')?.version).toBe(1)
   })
 
-  it('moves an issue with the card menu and saves it with the stored version', async () => {
+  // This is the first test to open a card menu, so Carbon's menu and floating-position code is
+  // loaded and compiled here: about 1 s alone, 1.8 s with three test runs in parallel and over 5 s
+  // with a dozen. The default 5 s limit then fails a test that has nothing wrong with it.
+  it('moves an issue with the card menu and saves it with the stored version', { timeout: 15_000 }, async () => {
     const user = userEvent.setup()
     renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 3)] })
     await screen.findByText('Crash on save')
@@ -397,6 +400,92 @@ describe('App', () => {
       await useSession.getState().markSignedOut()
 
       expect(await screen.findByText('Your session ended; your last change was not saved.')).toBeInTheDocument()
+    })
+  })
+
+  describe('Keycloak', () => {
+    const startLink = (name: string) => screen.queryByRole('link', { name })
+
+    it('hides the Keycloak button when the server has Keycloak off', async () => {
+      renderApp('', { session: 'signed-out', keycloak: false })
+      await screen.findByRole('heading', { name: 'Sign in to Urutau' })
+      expect(startLink('Sign in with Keycloak')).not.toBeInTheDocument()
+    })
+
+    it('offers Sign in with Keycloak when the server has it on', async () => {
+      renderApp('', { session: 'signed-out', keycloak: true })
+      await screen.findByRole('heading', { name: 'Sign in to Urutau' })
+      expect(startLink('Sign in with Keycloak')).toHaveAttribute('href', 'api/auth/keycloak/start')
+    })
+
+    it('offers Sign in with Keycloak on the first-run screen only when Keycloak is on', async () => {
+      renderApp('', { session: 'first-run', keycloak: true })
+      await screen.findByRole('heading', { name: 'Create the admin account' })
+      expect(startLink('Sign in with Keycloak')).toHaveAttribute('href', 'api/auth/keycloak/start')
+      expect(screen.getByText(/first person to sign in, by either method/)).toBeInTheDocument()
+    })
+
+    it('hides the Keycloak button on the first-run screen when Keycloak is off', async () => {
+      renderApp('', { session: 'first-run', keycloak: false })
+      await screen.findByRole('heading', { name: 'Create the admin account' })
+      expect(startLink('Sign in with Keycloak')).not.toBeInTheDocument()
+      expect(screen.queryByText(/first person to sign in/)).not.toBeInTheDocument()
+    })
+
+    it.each([
+      ['keycloak-unavailable', 'Keycloak could not be reached. Try again in a moment.'],
+      ['keycloak-expired', 'The Keycloak sign-in took too long. Start it again.'],
+      ['keycloak-denied', 'Keycloak did not let you in.'],
+      ['keycloak-failed', 'The Keycloak sign-in failed. Start it again.'],
+      ['something-else', 'Signing in failed. Try again.'],
+    ])('explains ?signin-error=%s', async (code, message) => {
+      renderApp(`?signin-error=${code}`, { session: 'signed-out', keycloak: true })
+      expect(await screen.findByText(message)).toBeInTheDocument()
+      expect(window.location.search).toBe('')
+    })
+
+    it('hides the token field in server mode and explains why', async () => {
+      const user = userEvent.setup()
+      renderApp('', { githubAccess: { mode: 'server' } })
+      expect(await screen.findByText('GitHub is read through your Keycloak link.')).toBeInTheDocument()
+      expect(screen.queryByLabelText(/Personal access token/)).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Settings' }))
+      expect(await screen.findAllByText('GitHub is read through your Keycloak link.')).toHaveLength(2)
+      expect(screen.queryByLabelText('GitHub personal access token')).not.toBeInTheDocument()
+    })
+
+    it('shows the token field to a Keycloak user without a GitHub link', async () => {
+      const user = userEvent.setup()
+      renderApp('', { githubAccess: { mode: 'browser', problem: 'not-linked' } })
+      expect(await screen.findByLabelText(/Personal access token/)).toBeInTheDocument()
+      expect(screen.getByText('Your Keycloak account has no linked GitHub account.')).toBeInTheDocument()
+      expect(startLink('Sign in with Keycloak again')).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Settings' }))
+      expect(await screen.findByLabelText('GitHub personal access token')).toBeInTheDocument()
+    })
+
+    it('offers to sign in again when the Keycloak link expired', async () => {
+      renderApp('', { githubAccess: { mode: 'browser', problem: 'signin-expired' } })
+      await screen.findByLabelText(/Personal access token/)
+      expect(startLink('Sign in with Keycloak again')).toHaveAttribute('href', 'api/auth/keycloak/start')
+    })
+
+    it('shows the problem and a sign-in-again action when the board cannot be read', async () => {
+      renderApp('?repo=acme/widgets', {
+        githubAccess: { mode: 'server' },
+        github: () =>
+          new Response(JSON.stringify({ error: 'github-access', message: 'x', problem: 'signin-expired' }), {
+            status: 424,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      })
+      expect(await screen.findByText(/Couldn't load acme\/widgets/)).toBeInTheDocument()
+      expect(
+        screen.getByText('Sign in with Keycloak again to read issues through your GitHub link.'),
+      ).toBeInTheDocument()
+      expect(startLink('Sign in with Keycloak again')).toHaveAttribute('href', 'api/auth/keycloak/start')
     })
   })
 
