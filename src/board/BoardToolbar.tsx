@@ -1,8 +1,15 @@
 import { Add, FilterRemove } from '@carbon/icons-react'
-import { Button, Dropdown, FilterableMultiSelect, Search } from '@carbon/react'
+import { Button, Dropdown, FilterableMultiSelect, Search, Tag } from '@carbon/react'
 import { useMemo } from 'react'
 import { NONE, countLabels, isFiltering, type BoardFilters } from '../domain/filters'
 import type { Issue, Label } from '../domain/types'
+import type { BoardConnection } from '../hooks/useBoardEvents'
+
+const CONNECTION_TAG = {
+  live: { type: 'green', text: 'Live' },
+  reconnecting: { type: 'gray', text: 'Reconnecting' },
+  offline: { type: 'red', text: 'Offline' },
+} as const
 
 interface Option {
   value: string | null
@@ -19,6 +26,7 @@ interface BoardToolbarProps {
   filters: BoardFilters
   onFiltersChange: (filters: BoardFilters) => void
   onAddBucket: () => void
+  connection: BoardConnection
 }
 
 export function BoardToolbar({
@@ -27,6 +35,7 @@ export function BoardToolbar({
   filters,
   onFiltersChange,
   onAddBucket,
+  connection,
 }: BoardToolbarProps) {
   const labelOptions = useMemo<LabelOption[]>(() => {
     const counts = countLabels(issues)
@@ -133,6 +142,11 @@ export function BoardToolbar({
           Clear filters
         </Button>
       )}
+      <span role="status" className="board-toolbar__connection">
+        <Tag size="md" type={CONNECTION_TAG[connection].type}>
+          {CONNECTION_TAG[connection].text}
+        </Tag>
+      </span>
       <Button className="board-toolbar__add" size="md" renderIcon={Add} onClick={onAddBucket}>
         Add bucket
       </Button>

@@ -12,8 +12,10 @@ import { hostGuard } from './http/hostGuard.ts'
 import { requestLog, securityHeaders } from './http/middleware.ts'
 import type { AppEnv } from './http/types.ts'
 import { urlSecrets, type Logger } from './log.ts'
+import { createEventHub, type EventHub } from './events/publisher.ts'
 import { authRoutes } from './routes/auth.ts'
 import { boardsRoutes } from './routes/boards.ts'
+import { eventsRoutes } from './routes/events.ts'
 import { invitesRoutes } from './routes/invites.ts'
 import { usersRoutes } from './routes/users.ts'
 
@@ -29,17 +31,29 @@ export interface AppDeps {
   now: () => Date
   /** Injected so tests stub Keycloak and GitHub; production passes globalThis.fetch. */
   fetch: typeof fetch
-  /** Receives one event per successful board write; a no-op until live updates are wired. */
-  boardEvents: BoardEventPublisher
+  /** An extra receiver of every board event, besides the event streams; tests use it to record them. */
+  boardEvents?: BoardEventPublisher
+  /** The open event streams; created by `createApp` when not given. */
+  eventHub?: EventHub
 }
 
 /** What every route factory receives: the dependencies plus per-process state. */
-export interface AppContext extends AppDeps {
+export interface AppContext extends Omit<AppDeps, 'boardEvents' | 'eventHub'> {
   limits: RateLimiter
+  hub: EventHub
+  /** Publishes to the event streams and to `AppDeps.boardEvents`. */
+  boardEvents: BoardEventPublisher
 }
 
 export function createApp(deps: AppDeps): Hono<AppEnv> {
-  const ctx: AppContext = { ...deps, limits: new RateLimiter(deps.now) }
+  const hub = deps.eventHub ?? createEventHub()
+  const boardEvents: BoardEventPublisher = {
+    publish(event) {
+      hub.publish(event)
+      deps.boardEvents?.publish(event)
+    },
+  }
+  const ctx: AppContext = { ...deps, limits: new RateLimiter(deps.now), hub, boardEvents }
   const app = new Hono<AppEnv>()
 
   app.use('*', securityHeaders())
@@ -54,8 +68,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.route('/api', usersRoutes(ctx))
   app.route('/api', invitesRoutes(ctx))
   app.route('/api', boardsRoutes(ctx))
+  app.route('/api', eventsRoutes(ctx))
   // Registration point for the Keycloak sign-in routes (public per the route list in http/publicRoutes.ts).
-  // Registration point for the GitHub proxy and the board event stream.
+  // Registration point for the GitHub proxy.
 
   app.notFound((c) => {
     if (c.req.path.startsWith('/api/') || c.req.path === '/api') {

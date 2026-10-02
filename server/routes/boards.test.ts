@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { BoardListResponse, ImportBoardsResponse, StaleBoardResponse, StoredBoard } from '../../src/domain/api.ts'
+import { sha256Hex } from '../auth/tokens.ts'
 import { fixtureBoard } from '../db/fixtures.ts'
 import { createTestApp, type TestApp, type TestClient } from '../testing/harness.ts'
 
@@ -223,5 +224,194 @@ describe('importing version-1 boards', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toMatchObject({ imported: ['acme/big'] })
     expect((await h.post(IMPORT, { boards: { 'acme/huge': fixtureBoard('x'.repeat(5 * 1024 * 1024)) } })).status).toBe(413)
+  })
+})
+
+describe('live updates', () => {
+  type Stream = { text: () => string; waitFor: (needle: string) => Promise<void>; cancel: () => Promise<void>; response: Response }
+
+  async function open(app: TestApp['app'], client: TestClient, repo = 'acme/widgets'): Promise<Stream> {
+    const response = await app.request(`/api/events?repo=${repo}`, { headers: { cookie: cookieOf(client) } })
+    let text = ''
+    const reader = response.body?.getReader()
+    const decoder = new TextDecoder()
+    let pump: Promise<void> | null = null
+    const waiters: Array<() => void> = []
+    if (reader) {
+      pump = (async () => {
+        for (;;) {
+          const { value, done } = await reader.read().catch(() => ({ value: undefined, done: true }))
+          if (done) break
+          text += decoder.decode(value, { stream: true })
+          for (const waiter of waiters.splice(0)) waiter()
+        }
+      })()
+    }
+    return {
+      response,
+      text: () => text,
+      async waitFor(needle) {
+        const deadline = Date.now() + 1000
+        while (!text.includes(needle)) {
+          if (Date.now() > deadline) throw new Error(`timed out waiting for ${needle}; got ${JSON.stringify(text)}`)
+          await new Promise<void>((resolve) => {
+            waiters.push(resolve)
+            setTimeout(resolve, 20)
+          })
+        }
+      },
+      async cancel() {
+        await reader?.cancel().catch(() => {})
+        await pump
+      },
+    }
+  }
+
+  function cookieOf(client: TestClient): string {
+    return [...client.cookies].map(([name, value]) => `${name}=${value}`).join('; ')
+  }
+
+  async function via(app: TestApp['app'], client: TestClient, method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {
+    return app.request(path, {
+      method,
+      headers: { cookie: cookieOf(client), 'X-Urutau-CSRF': client.csrfToken ?? '1', 'content-type': 'application/json', ...headers },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  }
+
+  async function setUpStreaming(pingMs = 25_000) {
+    await setUp()
+    h.hub.pingMs = pingMs
+    const other = await secondSession()
+    return { hub: h.hub, app: h.app, other }
+  }
+
+  test('a subscriber gets hello, then the event with repo key, version and client id, within a second of another session\'s save', async () => {
+    const { app, other } = await setUpStreaming()
+    await via(app, h, 'PUT', PATH, save(null))
+    const stream = await open(app, h)
+    expect(stream.response.status).toBe(200)
+    expect(stream.response.headers.get('content-type')).toContain('text/event-stream')
+    expect(stream.response.headers.get('cache-control')).toBe('no-cache, no-transform')
+    expect(stream.response.headers.get('x-accel-buffering')).toBe('no')
+    await stream.waitFor('event: hello')
+    expect(stream.text()).toMatch(/^retry: 5000\n\nevent: hello\ndata: \{"repoKey":"acme\/widgets","version":1\}/)
+
+    const started = Date.now()
+    expect((await via(app, other, 'PUT', PATH, save(1, 'Doing'), { 'X-Urutau-Client': 'tab-7' })).status).toBe(200)
+    await stream.waitFor('event: board-updated')
+    expect(Date.now() - started).toBeLessThan(1000)
+    expect(stream.text()).toContain('"repoKey":"acme/widgets","version":2')
+    expect(stream.text()).toContain('"clientId":"tab-7"')
+    expect(stream.text()).not.toContain('Doing')
+    expect(stream.text()).not.toContain('id:')
+    await stream.cancel()
+  })
+
+  test('hello carries a null version when the board does not exist; delete and import events arrive', async () => {
+    const { app } = await setUpStreaming()
+    const stream = await open(app, h)
+    await stream.waitFor('event: hello')
+    expect(stream.text()).toContain('"version":null')
+    await via(app, h, 'POST', '/api/boards/import', { boards: { 'acme/widgets': fixtureBoard() } })
+    await stream.waitFor('event: board-updated')
+    await via(app, h, 'DELETE', `${PATH}?version=1`, undefined, { 'X-Urutau-Client': 'tab-2' })
+    await stream.waitFor('event: board-deleted')
+    expect(stream.text()).toContain('"clientId":"tab-2"')
+    await stream.cancel()
+  })
+
+  test('a 409 save, and a save to another repository, publish nothing to the stream', async () => {
+    const { app, other } = await setUpStreaming()
+    await via(app, h, 'PUT', PATH, save(null))
+    const stream = await open(app, h)
+    await stream.waitFor('event: hello')
+    expect((await via(app, other, 'PUT', PATH, save(7))).status).toBe(409)
+    await via(app, other, 'PUT', '/api/boards/acme/gadgets', save(null, 'To do', 'acme/gadgets'))
+    // A save that does publish, as a marker that earlier events would have arrived by now.
+    await via(app, other, 'PUT', PATH, save(1, 'Marker'))
+    await stream.waitFor('"version":2')
+    expect(stream.text().match(/event: board-updated/g)).toHaveLength(1)
+    await stream.cancel()
+  })
+
+  test('the stream needs a session and a repository key', async () => {
+    const { app } = await setUpStreaming()
+    expect((await app.request('/api/events?repo=acme/widgets')).status).toBe(401)
+    expect((await via(app, h, 'GET', '/api/events')).status).toBe(400)
+    expect((await via(app, h, 'GET', '/api/events?repo=not-a-repo')).status).toBe(400)
+  })
+
+  test('a closed connection is removed from the publisher', async () => {
+    const { app, hub } = await setUpStreaming()
+    const a = await open(app, h)
+    const b = await open(app, h, 'acme/gadgets')
+    await a.waitFor('event: hello')
+    await b.waitFor('event: hello')
+    expect(hub.size()).toBe(2)
+    await a.cancel()
+    await vi.waitFor(() => expect(hub.size()).toBe(1))
+    await b.cancel()
+    await vi.waitFor(() => expect(hub.size()).toBe(0))
+  })
+
+  test('the heartbeat is sent, and a signed-out session\'s stream ends at the next one', async () => {
+    const { app, hub } = await setUpStreaming(30)
+    const stream = await open(app, h)
+    await stream.waitFor(': ping')
+    expect((await h.post('/api/auth/sign-out')).status).toBe(200)
+    await vi.waitFor(() => expect(hub.size()).toBe(0))
+    await stream.cancel()
+  })
+
+  test('closeSession on the hub ends a session\'s stream', async () => {
+    const { app, hub } = await setUpStreaming()
+    const stream = await open(app, h)
+    await stream.waitFor('event: hello')
+    hub.closeSession(sha256Hex(h.cookies.get('urutau_session')!))
+    await vi.waitFor(() => expect(hub.size()).toBe(0))
+    await stream.cancel()
+  })
+
+  test('sign-out ends that session\'s stream at once, leaving the same user\'s other session open', async () => {
+    const { app, hub, other } = await setUpStreaming()
+    const mine = await open(app, h)
+    const theirs = await open(app, other)
+    await mine.waitFor('event: hello')
+    await theirs.waitFor('event: hello')
+    expect(hub.size()).toBe(2)
+    expect((await h.post('/api/auth/sign-out')).status).toBe(200)
+    await vi.waitFor(() => expect(hub.size()).toBe(1), { timeout: 500 })
+    await mine.cancel()
+    await theirs.cancel()
+  })
+
+  test('removing a user ends their streams at once and leaves another user\'s stream open', async () => {
+    const { app, hub } = await setUpStreaming()
+    const invite = (await (await h.post('/api/invites', {})).json()) as { token: string }
+    const maria = h.newClient()
+    const accepted = await maria.post('/api/invites/accept', { token: invite.token, username: 'maria', password: 'maria password' })
+    const mariaId = ((await accepted.json()) as { user: { id: string } }).user.id
+    const adminStream = await open(app, h)
+    const mariaStream = await open(app, maria)
+    await adminStream.waitFor('event: hello')
+    await mariaStream.waitFor('event: hello')
+    expect(hub.size()).toBe(2)
+
+    expect((await h.delete(`/api/users/${mariaId}`)).status).toBe(204)
+    await vi.waitFor(() => expect(hub.size()).toBe(1), { timeout: 500 })
+    await mariaStream.cancel()
+    await h.put(PATH, save(null))
+    await adminStream.waitFor('event: board-updated')
+    await adminStream.cancel()
+  })
+
+  test('a session deleted without closeSession (for example expired) ends its stream at the next heartbeat', async () => {
+    const { app, hub } = await setUpStreaming(30)
+    const stream = await open(app, h)
+    await stream.waitFor('event: hello')
+    await h.database.db.deleteFrom('sessions').execute()
+    await vi.waitFor(() => expect(hub.size()).toBe(0), { timeout: 500 })
+    await stream.cancel()
   })
 })

@@ -504,3 +504,19 @@ $page-gutter: $spacing-07;
   gap: $spacing-03;
   margin-top: $spacing-04;
 }
+
+.board-toolbar__connection {
+  display: inline-flex;
+  margin-inline-start: auto;
+}
+
+.board-toolbar .board-toolbar__connection + .board-toolbar__add {
+  margin-inline-start: 0;
+}
+
+.board-toast.cds--toast-notification {
+  position: fixed;
+  right: $spacing-05;
+  bottom: $spacing-05;
+  z-index: 9000;
+}

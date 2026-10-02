@@ -161,7 +161,8 @@ describe('App', () => {
     await screen.findByText('Crash on save')
 
     const theirs: BoardConfig = { ...stubBoard('acme/widgets', 1).board, placements: { 1: 'in-review' } }
-    stub.externalSave('acme/widgets', theirs, { id: 'user-grace', username: 'grace' })
+    // Stored without an event, so this tab does not know yet and its save is refused.
+    stub.putBoard('acme/widgets', theirs, { id: 'user-grace', username: 'grace' })
 
     await user.click(screen.getByRole('button', { name: 'Actions for issue #1' }))
     await user.click(await screen.findByText('Move to To do'))
@@ -189,14 +190,34 @@ describe('App', () => {
     expect(screen.queryByText('Database down.')).not.toBeInTheDocument()
   })
 
+  it('moves a card and shows a toast when a teammate changes the board', async () => {
+    renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+    await screen.findByText('Crash on save')
+    expect(await screen.findByText('Live')).toBeInTheDocument()
+    expect(within(bucket('Backlog')).getByText('Crash on save')).toBeInTheDocument()
+
+    const theirs: BoardConfig = { ...stubBoard('acme/widgets', 1).board, placements: { 1: 'in-review' } }
+    stub.externalSave('acme/widgets', theirs, { id: 'user-grace', username: 'grace' })
+
+    expect(await screen.findByText('Board updated by grace')).toBeInTheDocument()
+    await waitFor(() => expect(within(bucket('In review')).getByText('Crash on save')).toBeInTheDocument())
+  })
+
+  it('shows Offline when the stream ends with an HTTP error', async () => {
+    renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+    await screen.findByText('Live')
+
+    stub.failStreams('closed')
+
+    expect(await screen.findByText('Offline')).toBeInTheDocument()
+  })
+
   it('lets the user start a new board after a teammate deleted it', async () => {
     const user = userEvent.setup()
     renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
     await screen.findByText('Crash on save')
 
     stub.externalDelete('acme/widgets')
-    await user.click(screen.getByRole('button', { name: 'Actions for issue #1' }))
-    await user.click(await screen.findByText('Move to To do'))
 
     expect(await screen.findByText('Someone else deleted this board.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Start a new board' }))

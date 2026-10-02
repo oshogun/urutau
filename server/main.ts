@@ -2,6 +2,7 @@ import type { Server } from 'node:http'
 import { serve } from '@hono/node-server'
 import { createApp, purgeExpired, serverSecrets } from './app.ts'
 import { loadConfig } from './config.ts'
+import { createEventHub } from './events/publisher.ts'
 import { openDatabase } from './db/index.ts'
 import { acceptedHostnames, startupWarning } from './http/hostGuard.ts'
 import { createLogger } from './log.ts'
@@ -23,13 +24,14 @@ async function main(): Promise<void> {
   const database = await openDatabase(config.databaseUrl)
   await database.migrate()
 
+  const hub = createEventHub()
   const app = createApp({
     config,
     database,
     log,
     now: () => new Date(),
     fetch: globalThis.fetch,
-    boardEvents: { publish: () => {} },
+    eventHub: hub,
   })
   registerStatic(app, defaultDistDir())
 
@@ -56,6 +58,7 @@ async function main(): Promise<void> {
     if (stopping) return
     stopping = true
     clearInterval(timer)
+    hub.closeAll()
     const force = setTimeout(() => server.closeAllConnections(), SHUTDOWN_WAIT_MS)
     server.close(() => {
       clearTimeout(force)

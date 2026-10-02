@@ -91,6 +91,8 @@ export interface ApiStub {
   readonly session: Session | null
   /** Number of EventSource instances currently open. */
   openStreams(): number
+  /** Fails every open stream: 'reconnect' (the browser retries) or 'closed' (HTTP error, source ended). */
+  failStreams(mode: 'reconnect' | 'closed'): void
   restore(): void
 }
 
@@ -120,6 +122,7 @@ class FakeEventSource {
   readonly repoKey: string
   readyState = 0
   onerror: ((event: Event) => void) | null = null
+  onopen: ((event: Event) => void) | null = null
   private listeners = new Map<string, Set<(event: MessageEvent) => void>>()
 
   private onOpen: (source: FakeEventSource) => void
@@ -133,6 +136,7 @@ class FakeEventSource {
       if (this.readyState === 2) return
       this.readyState = 1
       this.onOpen(this)
+      this.onopen?.(new Event('open'))
     })
   }
 
@@ -154,6 +158,27 @@ class FakeEventSource {
   close() {
     this.readyState = 2
     FakeEventSource.instances.delete(this)
+  }
+
+  /**
+   * A network error. 'reconnect' mimics the browser retrying by itself (readyState CONNECTING,
+   * then open with a new hello); 'closed' mimics an HTTP error that ends the source for good.
+   */
+  fail(mode: 'reconnect' | 'closed') {
+    if (mode === 'closed') {
+      this.readyState = 2
+      FakeEventSource.instances.delete(this)
+      this.onerror?.(new Event('error'))
+      return
+    }
+    this.readyState = 0
+    this.onerror?.(new Event('error'))
+    queueMicrotask(() => {
+      if (this.readyState !== 0) return
+      this.readyState = 1
+      this.onOpen(this)
+      this.onopen?.(new Event('open'))
+    })
   }
 }
 
@@ -516,6 +541,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
       return current
     },
     openStreams: () => FakeEventSource.instances.size,
+    failStreams: (mode) => [...FakeEventSource.instances].forEach((source) => source.fail(mode)),
     restore() {
       FakeEventSource.instances.clear()
       vi.stubGlobal('fetch', inner)

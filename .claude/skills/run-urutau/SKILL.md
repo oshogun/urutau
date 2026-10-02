@@ -36,6 +36,9 @@ npm 11 prints `install-scripts` warnings for the IBM Plex telemetry postinstall 
 
 ## Run (agent path)
 
+This starts `npm run dev`, which also starts the API server on `PORT` (default 8787, the user's).
+In a run clone use § Server mode below (it sets `PORT=8788`) instead of these commands.
+
 ```bash
 source ~/.nvm/nvm.sh && nvm use >/dev/null
 mkdir -p .claude/scratch/run-urutau .claude/scratch/tmp && export TMPDIR="$PWD/.claude/scratch/tmp"
@@ -78,8 +81,10 @@ Read. Browser state (localStorage) persists between requests until the driver st
 | `goto(path)` | open a path of the app, e.g. `goto('/')` for the start page |
 | `createAdmin(username, password, page?)` | server mode, empty database: fill the first-run form, wait until the app leaves it |
 | `signIn(username, password, page?)` | server mode: fill the sign-in form; throws with the form's error text if it stays |
-| `newUserContext()` | a second isolated browser context with GitHub fixtures; returns `{ context, page }`, pass `page` to `signIn` |
-| `resetStorage()` | clear saved boards, token, theme and recents, then reload |
+| `newUserContext()` | a second isolated browser context with GitHub fixtures; returns `{ context, page, pageErrors }`, pass `page` to `signIn`. Its console and page errors appear in `logs` as `[user2 ...]` |
+| `inviteUser(username, password)` | the admin creates an invite, a new context opens it and creates the second account; returns `newUserContext()`'s value, signed in |
+| `liveMove(issue, bucketTitle, other, { limitMs = 2000 })` | main page drags the card; returns `{ elapsedMs }` until `other.page` shows it in that bucket without reload; throws over the limit or on a page error in `other` |
+| `resetStorage()` | clear the main page's localStorage (theme, v1 data), then reload; boards live on the server, so it neither deletes them nor signs out |
 | `page`, `context`, `browser` | raw Playwright objects; `mode` and `appUrl` describe the setup |
 
 The following role-based selectors are verified:
@@ -165,6 +170,21 @@ EOS
 user: `const u = await newUserContext(); await signIn('admin', '…', u.page)`, then drive
 `u.page` with Playwright. A wrong password makes `signIn` throw. Stop by port, adding 8788:
 `for port in 9334 5174 8788; do lsof -ti:$port -sTCP:LISTEN | xargs -r kill; done`.
+Live updates between two accounts (the second joins through an invite):
+
+```bash
+curl -s http://127.0.0.1:9334 --data-binary @- <<'EOS'
+await goto('/')
+await createAdmin('admin', 'correct horse battery')
+const u = await inviteUser('second', 'another long password')
+await openBoard('acme/widgets')
+await u.page.goto(`${appUrl}/?repo=acme/widgets`)
+await u.page.locator('.board-header__name').waitFor()
+const { elapsedMs } = await liveMove(14, 'To do', u)
+return { elapsedMs, a: await shot('live-admin'), b: await u.page.screenshot({ path: `${process.env.SCREENSHOT_DIR ?? '.claude/skills/run-urutau/shots'}/live-second.png` }).then(() => 'saved') }
+EOS
+```
+
 Do not write real passwords, session cookies or invite tokens into scripts or screenshot names.
 
 ## Direct invocation (domain logic)

@@ -81,6 +81,30 @@ function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+async function openUserContext(startPath) {
+  const extra = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    colorScheme: process.env.COLOR_SCHEME === 'dark' ? 'dark' : 'light',
+  })
+  if (MODE === 'fixtures') await routeGitHubFixtures(extra)
+  const extraPage = await extra.newPage()
+  const pageErrors = []
+  extraPage.on('console', (message) => {
+    if (message.type() === 'error' || message.type() === 'warning') {
+      logs.push(`[user2 console.${message.type()}] ${message.text()}`)
+    }
+  })
+  extraPage.on('pageerror', (error) => {
+    pageErrors.push(error.message)
+    logs.push(`[user2 pageerror] ${error.message}`)
+  })
+  extraPage.on('requestfailed', (request) =>
+    logs.push(`[user2 requestfailed] ${request.method()} ${request.url()} ${request.failure()?.errorText ?? ''}`),
+  )
+  await extraPage.goto(`${APP_URL}${startPath}`)
+  return { context: extra, page: extraPage, pageErrors }
+}
+
 async function submitAuthForm(target, username, password, buttonName) {
   if (target.url() === 'about:blank') await target.goto(`${APP_URL}/`)
   const usernameField = target.getByLabel('Username', { exact: true })
@@ -141,8 +165,9 @@ const helpers = {
    * Drags an issue card into a bucket (near the top of it) with real mouse
    * events. dnd-kit only starts after 6px of movement and tracks the pointer
    * across several moves, so the drag is sent in `steps` small moves.
+   * `onDropped` is called right after the mouse is released.
    */
-  async drag(issueNumber, bucketTitle, { steps = 20 } = {}) {
+  async drag(issueNumber, bucketTitle, { steps = 20, onDropped } = {}) {
     // Buckets scroll on their own; a card further down has a bounding box
     // outside the viewport, and pressing there grabs nothing.
     await cardFor(issueNumber).scrollIntoViewIfNeeded()
@@ -163,6 +188,7 @@ const helpers = {
     }
     await page.waitForTimeout(150)
     await page.mouse.up()
+    onDropped?.()
     await page.waitForTimeout(300)
     return helpers.buckets()
   },
@@ -201,21 +227,75 @@ const helpers = {
   /**
    * A second, isolated browser context (own cookies and localStorage) for
    * two-user scenarios. GitHub fixtures are routed in it too. Returns
-   * `{ context, page }`; pass `page` as the last argument of signIn(). It is
-   * closed when the driver stops.
+   * `{ context, page, pageErrors }`; pass `page` as the last argument of
+   * signIn(). Its console errors, page errors and failed requests go into the
+   * running request's `logs` with a `[user2]` prefix, and page errors are also
+   * collected in `pageErrors`. It is closed when the driver stops.
    */
-  async newUserContext() {
-    const extra = await browser.newContext({
-      viewport: { width: 1440, height: 900 },
-      colorScheme: process.env.COLOR_SCHEME === 'dark' ? 'dark' : 'light',
-    })
-    if (MODE === 'fixtures') await routeGitHubFixtures(extra)
-    const extraPage = await extra.newPage()
-    await extraPage.goto(`${APP_URL}/`)
-    return { context: extra, page: extraPage }
+  async newUserContext(startPath = '/') {
+    return openUserContext(startPath)
   },
 
-  /** Forgets saved boards, token, theme and recent repositories, then reloads. */
+  /**
+   * Creates a second account through an invite, the way a real user joins:
+   * the signed-in admin (main page) creates an invite over the API, and a new
+   * context opens its link and fills the account form. Returns the same value
+   * as newUserContext(), signed in as the new user. The invite token is used
+   * in this function only and is never returned or logged.
+   */
+  async inviteUser(username, password) {
+    const token = await page.evaluate(async () => {
+      const session = await (await fetch('/api/session')).json()
+      const response = await fetch('/api/invites', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'X-Urutau-CSRF': session.session.csrfToken },
+        body: '{}',
+      })
+      if (!response.ok) throw new Error(`Creating the invite failed with HTTP ${response.status}`)
+      return (await response.json()).token
+    })
+    const user = await openUserContext(`/#invite=${encodeURIComponent(token)}`)
+    await submitAuthForm(user.page, username, password, 'Create account')
+    return user
+  },
+
+  /**
+   * Live-update scenario. `other` is a page from inviteUser()/newUserContext(),
+   * signed in and showing the same repository as the main page (`openBoard`
+   * both). The main page drags `issueNumber` to `bucketTitle`; the time from
+   * the mouse release until the card appears in that bucket in `other`, with no
+   * reload, is returned in `elapsedMs`. Throws if it takes over `limitMs` or if
+   * `other` logged a page error.
+   */
+  async liveMove(issueNumber, bucketTitle, other, { limitMs = 2000 } = {}) {
+    let watcher
+    await helpers.drag(issueNumber, bucketTitle, {
+      onDropped: () => {
+        const started = Date.now()
+        watcher = other.page
+          .waitForFunction(
+            ([issue, title]) => {
+              for (const section of document.querySelectorAll('.board:not(.board--loading) .bucket')) {
+                if (section.querySelector('.bucket__title')?.textContent !== title) continue
+                return [...section.querySelectorAll('.issue-card__number')].some((el) =>
+                  new RegExp(`^#${issue}\\b`).test(el.textContent ?? ''),
+                )
+              }
+              return false
+            },
+            [issueNumber, bucketTitle],
+            { timeout: limitMs + 3000, polling: 'raf' },
+          )
+          .then(() => Date.now() - started)
+      },
+    })
+    const elapsedMs = await watcher
+    if (other.pageErrors.length > 0) throw new Error(`Second context page errors: ${other.pageErrors.join(' | ')}`)
+    if (elapsedMs > limitMs) throw new Error(`Live update took ${elapsedMs} ms, limit ${limitMs} ms`)
+    return { elapsedMs }
+  },
+
+  /** Clears the main page's localStorage (theme and any v1 data) and reloads. Boards live on the server, so this does not delete them or sign out. */
   async resetStorage() {
     await page.evaluate(() => localStorage.clear())
     await page.reload()

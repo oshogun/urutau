@@ -1,6 +1,15 @@
 import { Launch, Locked, Renew, Settings } from '@carbon/icons-react'
-import { ActionableNotification, Button, InlineNotification, Link, Modal, Tag } from '@carbon/react'
+import {
+  ActionableNotification,
+  Button,
+  InlineNotification,
+  Link,
+  Modal,
+  Tag,
+  ToastNotification,
+} from '@carbon/react'
 import { useCallback, useMemo, useState } from 'react'
+import type { BoardEvents } from '../hooks/useBoardEvents'
 import {
   createDefaultBoard,
   deleteBucket,
@@ -29,6 +38,7 @@ interface BoardProps {
   /** Set when saving failed and the edit is still only on screen. */
   saveError: string | null
   onRetrySave: () => void
+  live: BoardEvents
   isFetching: boolean
   refreshError: Error | null
   onRefresh: () => void
@@ -47,6 +57,7 @@ export function Board({
   onDismissConflict,
   saveError,
   onRetrySave,
+  live,
   isFetching,
   refreshError,
   onRefresh,
@@ -55,6 +66,13 @@ export function Board({
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const closeDialog = () => setDialog(null)
+  // Show the toast for each new remote change; adjusted while rendering rather than in an effect.
+  const [shownChange, setShownChange] = useState(live.lastRemoteChange)
+  const [toastOpen, setToastOpen] = useState(false)
+  if (live.lastRemoteChange !== shownChange) {
+    setShownChange(live.lastRemoteChange)
+    setToastOpen(live.lastRemoteChange !== null)
+  }
 
   const contents = useMemo(() => resolveBuckets(issues, config), [issues, config])
   const filtering = isFiltering(filters)
@@ -179,6 +197,7 @@ export function Board({
         filters={filters}
         onFiltersChange={setFilters}
         onAddBucket={() => setDialog({ kind: 'edit-bucket', bucket: null })}
+        connection={live.connection}
       />
 
       <BoardCanvas
@@ -195,6 +214,20 @@ export function Board({
         onDeleteBucket={(bucket) => setDialog({ kind: 'delete-bucket', bucket })}
       />
 
+      {toastOpen && live.lastRemoteChange && (
+        <ToastNotification
+          className="board-toast"
+          kind="info"
+          lowContrast
+          role="status"
+          title={`Board updated by ${live.lastRemoteChange.by ?? 'a teammate'}`}
+          timeout={4000}
+          onClose={() => {
+            setToastOpen(false)
+            return false
+          }}
+        />
+      )}
       {dialog?.kind === 'edit-bucket' && (
         <BucketEditorModal
           bucket={dialog.bucket}

@@ -37,7 +37,10 @@ export interface BoardsState {
   update(repoKey: string, fullName: string, recipe: (current: BoardConfig) => BoardConfig): void
   retrySave(repoKey: string): void
   /** Called by the live-updates hook for a newer version from another tab. */
-  reloadIfIdle(repoKey: string): Promise<void>
+  /** Resolves to the newer stored board it adopted, or null when it changed nothing. */
+  reloadIfIdle(repoKey: string): Promise<StoredBoard | null>
+  /** A teammate deleted the board: status 'missing' and a 'deleted' notice. Nothing while an edit is pending. */
+  applyRemoteDelete(repoKey: string): void
   dismissConflict(repoKey: string): void
 }
 
@@ -195,21 +198,28 @@ export const useBoards = create<BoardsState>()((set, get) => {
     async reloadIfIdle(key) {
       const startedIn = epoch
       const before = get().entries[key]
-      if (!before || before.saving || before.dirty) return
+      if (!before || before.saving || before.dirty) return null
       try {
         const stored = await fetchStored(key)
-        if (epoch !== startedIn) return
+        if (epoch !== startedIn) return null
         const entry = get().entries[key]
-        if (!entry || entry.saving || entry.dirty) return
+        if (!entry || entry.saving || entry.dirty) return null
         if (stored) {
-          if (stored.version === entry.stored?.version) return
+          if (stored.version === entry.stored?.version) return null
           patch(key, { status: 'ready', stored, board: stored.board })
-        } else if (entry.stored) {
-          adopt(key, null, { kind: 'deleted', by: null })
+          return stored
         }
+        if (entry.stored) adopt(key, null, { kind: 'deleted', by: null })
       } catch {
         // The next event or the next open of the board loads it again.
       }
+      return null
+    },
+
+    applyRemoteDelete(key) {
+      const entry = get().entries[key]
+      if (!entry?.stored || entry.saving || entry.dirty) return
+      adopt(key, null, { kind: 'deleted', by: null })
     },
 
     dismissConflict(key) {

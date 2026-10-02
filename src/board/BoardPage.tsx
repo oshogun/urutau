@@ -5,6 +5,7 @@ import { formatRepo, repoKey } from '../domain/repoRef'
 import type { RepoRef } from '../domain/types'
 import { GitHubError } from '../github/client'
 import { useBoard, useClosedWindowDays } from '../hooks/useBoard'
+import { useBoardEvents } from '../hooks/useBoardEvents'
 import { useRepoSnapshot } from '../hooks/useRepoSnapshot'
 import { readV1Board } from '../state/v1Import'
 import { Board } from './Board'
@@ -59,6 +60,7 @@ function RepositoryBoard({ repo, onOpenSettings, onChangeRepo }: BoardPageProps)
   const closedWindowDays = useClosedWindowDays(key)
   const query = useRepoSnapshot(repo, closedWindowDays)
   const creating = useRef(false)
+  const live = useBoardEvents(repo, entry.status !== 'loading')
 
   const { status, conflict, create } = entry
   const snapshot = query.data
@@ -87,6 +89,7 @@ function RepositoryBoard({ repo, onOpenSettings, onChangeRepo }: BoardPageProps)
           onDismissConflict={entry.dismissConflict}
           saveError={entry.saveError}
           onRetrySave={entry.retrySave}
+          live={live}
           isFetching={query.isFetching}
           refreshError={query.isError ? query.error : null}
           onRefresh={() => void query.refetch()}

@@ -98,7 +98,9 @@ export function authRoutes(ctx: AppContext) {
   routes.post('/auth/sign-out', async (c) => {
     const id = getCookie(c, SESSION_COOKIE)
     if (id) {
-      await deleteSession(ctx.database.db, sha256Hex(id))
+      const idHash = sha256Hex(id)
+      await deleteSession(ctx.database.db, idHash)
+      ctx.hub.closeSession(idHash)
       clearSessionCookie(ctx, c)
     }
     const body: SignOutResponse = { redirectTo: null }

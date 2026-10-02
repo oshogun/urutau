@@ -2,6 +2,7 @@ import type { Hono } from 'hono'
 import { CSRF_HEADER, type BoardDeletedEvent, type BoardUpdatedEvent } from '../../src/domain/api.ts'
 import { createApp, type AppDeps, type BoardEventPublisher } from '../app.ts'
 import { loadConfig, type Config } from '../config.ts'
+import { createEventHub, type EventHub } from '../events/publisher.ts'
 import { openDatabase, type Database } from '../db/index.ts'
 import { createLogger } from '../log.ts'
 import type { AppEnv } from '../http/types.ts'
@@ -36,6 +37,8 @@ export interface TestApp extends TestClient {
   /** Every log line written so far. */
   logs: string[]
   events: PublishedEvent[]
+  /** The open event streams. */
+  hub: EventHub
   clock: { now: Date; advance(ms: number): void }
   /** Another browser with its own cookie jar. */
   newClient(): TestClient
@@ -67,6 +70,7 @@ export async function createTestApp(overrides: TestOverrides = {}): Promise<Test
   const logs: string[] = []
   const events: PublishedEvent[] = []
   const boardEvents: BoardEventPublisher = { publish: (event) => void events.push(event) }
+  const hub = createEventHub()
   const deps: AppDeps = {
     config,
     database,
@@ -78,6 +82,7 @@ export async function createTestApp(overrides: TestOverrides = {}): Promise<Test
         throw new Error('unexpected fetch in a test')
       }),
     boardEvents,
+    eventHub: hub,
   }
   const app = createApp(deps)
 
@@ -134,6 +139,7 @@ export async function createTestApp(overrides: TestOverrides = {}): Promise<Test
     database,
     logs,
     events,
+    hub,
     clock,
     newClient,
     close: () => database.close(),

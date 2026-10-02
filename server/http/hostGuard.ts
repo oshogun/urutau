@@ -58,7 +58,9 @@ export function hostGuard(ctx: AppContext): MiddlewareHandler<AppEnv> {
     const urlHost = hostnameOf(new URL(c.req.url).host)
     if (allowed(urlHost) && (header === undefined || allowed(hostnameOf(header)))) return next()
 
-    const seen = (header ?? new URL(c.req.url).host).slice(0, MAX_LOGGED_HOST)
+    // Report the authority that failed: the request target's when that is the refused one, else the Host header's.
+    const urlAuthority = new URL(c.req.url).host
+    const seen = (allowed(urlHost) ? (header ?? urlAuthority) : urlAuthority).slice(0, MAX_LOGGED_HOST)
     const name = hostnameOf(seen) ?? seen
     if (!reported.has(name) && reported.size < MAX_REMEMBERED) {
       reported.add(name)

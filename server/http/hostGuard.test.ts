@@ -71,7 +71,9 @@ describe('with PUBLIC_URL, ALLOWED_HOSTS and TRUST_PROXY', () => {
   test('the host of the request URL is checked too, not only the Host header', async () => {
     await configured()
     expect((await h.app.request('http://localhost/api/session', { headers: { host: 'evil.example' } })).status).toBe(403)
-    expect((await h.app.request('http://evil.example/api/session', { headers: { host: 'localhost' } })).status).toBe(403)
+    expect((await h.app.request('http://rebind.example:8789/api/session', { headers: { host: 'localhost:8789' } })).status).toBe(403)
+    const warnings = h.logs.map((line) => JSON.parse(line) as { level: string; host?: string }).filter((line) => line.level === 'warn')
+    expect(warnings.map((line) => line.host)).toEqual(['evil.example', 'rebind.example:8789'])
     expect(acceptedHostnames(h.deps.config)).toEqual(['urutau.example.com', 'urutau'])
   })
 })
