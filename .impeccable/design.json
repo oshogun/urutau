@@ -1,0 +1,629 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-02T17:09:59.547841+00:00",
+  "title": "Design System: Urutau",
+  "extensions": {
+    "colorMeta": {
+      "interactive-blue": {
+        "role": "primary",
+        "displayName": "Interactive Blue",
+        "canonical": "#0f62fe",
+        "tonalRamp": [
+          "#001141",
+          "#001d6c",
+          "#0043ce",
+          "#0f62fe",
+          "#4589ff",
+          "#78a9ff",
+          "#d0e2ff",
+          "#edf5ff"
+        ]
+      },
+      "interactive-blue-hover": {
+        "role": "primary",
+        "displayName": "Interactive Blue Hover",
+        "canonical": "#0050e6",
+        "tonalRamp": [
+          "#001141",
+          "#001d6c",
+          "#0043ce",
+          "#0f62fe",
+          "#4589ff",
+          "#78a9ff",
+          "#d0e2ff",
+          "#edf5ff"
+        ]
+      },
+      "interactive-blue-dark": {
+        "role": "primary",
+        "displayName": "Interactive Blue (dark)",
+        "canonical": "#4589ff",
+        "tonalRamp": [
+          "#001141",
+          "#001d6c",
+          "#0043ce",
+          "#0f62fe",
+          "#4589ff",
+          "#78a9ff",
+          "#d0e2ff",
+          "#edf5ff"
+        ]
+      },
+      "link-blue-dark": {
+        "role": "primary",
+        "displayName": "Link Blue (dark)",
+        "canonical": "#78a9ff",
+        "tonalRamp": [
+          "#001141",
+          "#001d6c",
+          "#0043ce",
+          "#0f62fe",
+          "#4589ff",
+          "#78a9ff",
+          "#d0e2ff",
+          "#edf5ff"
+        ]
+      },
+      "text-on-color": {
+        "role": "neutral",
+        "displayName": "Text On Color",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Canvas",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "canvas-dark": {
+        "role": "neutral",
+        "displayName": "Canvas (dark)",
+        "canonical": "#161616",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "bucket-surface": {
+        "role": "neutral",
+        "displayName": "Bucket Surface",
+        "canonical": "#f4f4f4",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "bucket-surface-dark": {
+        "role": "neutral",
+        "displayName": "Bucket Surface (dark)",
+        "canonical": "#262626",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "card-surface": {
+        "role": "neutral",
+        "displayName": "Card Surface",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "card-surface-dark": {
+        "role": "neutral",
+        "displayName": "Card Surface (dark)",
+        "canonical": "#393939",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "card-hover": {
+        "role": "neutral",
+        "displayName": "Card Hover",
+        "canonical": "#e8e8e8",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "card-hover-dark": {
+        "role": "neutral",
+        "displayName": "Card Hover (dark)",
+        "canonical": "#474747",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "header-surface": {
+        "role": "neutral",
+        "displayName": "Header Surface",
+        "canonical": "#161616",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "Text Primary",
+        "canonical": "#161616",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "text-primary-dark": {
+        "role": "neutral",
+        "displayName": "Text Primary (dark)",
+        "canonical": "#f4f4f4",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Text Secondary",
+        "canonical": "#525252",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "text-secondary-dark": {
+        "role": "neutral",
+        "displayName": "Text Secondary (dark)",
+        "canonical": "#c6c6c6",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "text-helper": {
+        "role": "neutral",
+        "displayName": "Text Helper",
+        "canonical": "#6f6f6f",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "text-helper-dark": {
+        "role": "neutral",
+        "displayName": "Text Helper (dark)",
+        "canonical": "#a8a8a8",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "border-subtle": {
+        "role": "neutral",
+        "displayName": "Border Subtle",
+        "canonical": "#e0e0e0",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "border-subtle-dark": {
+        "role": "neutral",
+        "displayName": "Border Subtle (dark)",
+        "canonical": "#393939",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Border Strong",
+        "canonical": "#8d8d8d",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "border-strong-dark": {
+        "role": "neutral",
+        "displayName": "Border Strong (dark)",
+        "canonical": "#6f6f6f",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "focus-dark": {
+        "role": "neutral",
+        "displayName": "Focus (dark)",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#161616",
+          "#262626",
+          "#393939",
+          "#525252",
+          "#6f6f6f",
+          "#8d8d8d",
+          "#c6c6c6",
+          "#f4f4f4"
+        ]
+      },
+      "drop-highlight": {
+        "role": "primary",
+        "displayName": "Drop Highlight",
+        "canonical": "#d0e2ff",
+        "tonalRamp": [
+          "#001141",
+          "#001d6c",
+          "#0043ce",
+          "#0f62fe",
+          "#4589ff",
+          "#78a9ff",
+          "#d0e2ff",
+          "#edf5ff"
+        ]
+      },
+      "drop-highlight-dark": {
+        "role": "primary",
+        "displayName": "Drop Highlight (dark)",
+        "canonical": "#001d6c",
+        "tonalRamp": [
+          "#001141",
+          "#001d6c",
+          "#0043ce",
+          "#0f62fe",
+          "#4589ff",
+          "#78a9ff",
+          "#d0e2ff",
+          "#edf5ff"
+        ]
+      },
+      "over-limit-red": {
+        "role": "secondary",
+        "displayName": "Over Limit Red",
+        "canonical": "#da1e28",
+        "tonalRamp": [
+          "#2d0709",
+          "#520408",
+          "#750e13",
+          "#a2191f",
+          "#da1e28",
+          "#fa4d56",
+          "#ffb3b8",
+          "#fff1f1"
+        ]
+      },
+      "over-limit-red-dark": {
+        "role": "secondary",
+        "displayName": "Over Limit Red (dark)",
+        "canonical": "#fa4d56",
+        "tonalRamp": [
+          "#2d0709",
+          "#520408",
+          "#750e13",
+          "#a2191f",
+          "#da1e28",
+          "#fa4d56",
+          "#ffb3b8",
+          "#fff1f1"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The start page heading."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The repository name above the board."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Bucket titles and issue card titles."
+      },
+      "body-large": {
+        "displayName": "Body Large",
+        "purpose": "The start page's lead paragraph."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "The repository description and dialog text."
+      },
+      "body-compact": {
+        "displayName": "Body Compact",
+        "purpose": "Buttons and fields."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Card meta, counts, helper text, the bucket rules row, and tags."
+      }
+    },
+    "shadows": [
+      {
+        "name": "menu-float",
+        "value": "0 2px 6px 0 rgba(0, 0, 0, 0.3)",
+        "purpose": "Carbon's own shadow on overflow menus and list boxes."
+      },
+      {
+        "name": "drag-float",
+        "value": "0 4px 12px rgba(0, 0, 0, 0.3)",
+        "purpose": "The copy of a card that follows the pointer while it is dragged."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-productive-standard",
+        "value": "cubic-bezier(0.2, 0, 0.38, 0.9)",
+        "purpose": "Carbon's productive standard easing; card hover and drop-target background changes."
+      },
+      {
+        "name": "duration-fast-02",
+        "value": "110ms",
+        "purpose": "Background transitions on cards and on the bucket a card is dragged over."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "md",
+        "value": "672px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action of a view: \"Open board\", \"Add bucket\", a dialog confirm.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">Add bucket <svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" width=\"16\" height=\"16\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M17 15 17 8 15 8 15 15 8 15 8 17 15 17 15 24 17 24 17 17 24 17 24 15z\"/></svg></button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: space-between; gap: 2rem; min-height: 40px; padding: 0 15px; border: 0; border-radius: 0; background: var(--cds-button-primary, #0f62fe); color: var(--cds-text-on-color, #ffffff); font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 0.875rem; line-height: 1.28572; letter-spacing: 0.16px; cursor: pointer; transition: background-color 70ms cubic-bezier(0, 0, 0.38, 0.9); } .ds-btn-primary:hover { background: var(--cds-button-primary-hover, #0050e6); } .ds-btn-primary:focus-visible { outline: 2px solid var(--cds-focus, #0f62fe); outline-offset: -2px; box-shadow: inset 0 0 0 3px var(--cds-focus-inset, #ffffff); } .ds-btn-primary:active { background: var(--cds-button-primary-active, #002d9c); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Toolbar actions such as Refresh, Board settings and Clear filters (small, 32px).",
+      "html": "<button class=\"ds-btn-ghost\" type=\"button\">Refresh <svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" width=\"16\" height=\"16\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M12,10H6.78A11,11,0,0,1,27,16h2A13,13,0,0,0,6,7.68V4H4v8h8Z\"/><path d=\"M20,22h5.22A11,11,0,0,1,5,16H3a13,13,0,0,0,23,8.32V28h2V20H20Z\"/></svg></button>",
+      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; gap: 0.5rem; min-height: 32px; padding: 0 15px; border: 0; border-radius: 0; background: transparent; color: var(--cds-link-primary, #0f62fe); font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 0.875rem; line-height: 1.28572; letter-spacing: 0.16px; cursor: pointer; } .ds-btn-ghost:hover { background: var(--cds-background-hover, rgba(141, 141, 141, 0.12)); color: var(--cds-link-primary-hover, #0043ce); } .ds-btn-ghost:focus-visible { outline: 2px solid var(--cds-focus, #0f62fe); outline-offset: -2px; }"
+    },
+    {
+      "name": "Label Tag",
+      "kind": "chip",
+      "refersTo": "tag-label",
+      "description": "A GitHub label: the nearest Carbon tag palette, plus a dot in the label's exact color.",
+      "html": "<span class=\"ds-tag-label\" style=\"--label-color: #7057ff\">good first issue</span>",
+      "css": ".ds-tag-label { display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: 16px; background: var(--cds-tag-background-purple, #e8daff); color: var(--cds-tag-color-purple, #6929c4); font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 0.75rem; line-height: 1.33333; letter-spacing: 0.32px; white-space: nowrap; } .ds-tag-label::before { content: ''; width: 0.5rem; height: 0.5rem; margin-inline-end: 0.25rem; border-radius: 50%; background: var(--label-color, currentcolor); box-shadow: 0 0 0 1px color-mix(in srgb, currentcolor 40%, transparent); }"
+    },
+    {
+      "name": "Count Tag",
+      "kind": "chip",
+      "refersTo": "tag-label",
+      "description": "A bucket's issue count; with a work-in-progress limit it shows open/limit and turns red when over.",
+      "html": "<span class=\"ds-tag-count\">3</span> <span class=\"ds-tag-count ds-tag-count--over\">5/4</span>",
+      "css": ".ds-tag-count { display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: 16px; background: var(--cds-tag-background-cool-gray, #dde1e6); color: var(--cds-tag-color-cool-gray, #121619); font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 0.75rem; line-height: 1.33333; letter-spacing: 0.32px; } .ds-tag-count--over { background: var(--cds-tag-background-red, #ffd7d9); color: var(--cds-tag-color-red, #a2191f); }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Carbon text input: 40px, square, a strong underline, the field color of the layer it sits on.",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field__label\">GitHub repository</span><input class=\"ds-field__input\" placeholder=\"owner/name or https://github.com/owner/name\"></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'IBM Plex Sans', system-ui, sans-serif; } .ds-field__label { font-size: 0.75rem; line-height: 1.33333; letter-spacing: 0.32px; color: var(--cds-text-secondary, #525252); } .ds-field__input { height: 40px; padding: 0 16px; border: 0; border-bottom: 1px solid var(--cds-border-strong, #8d8d8d); border-radius: 0; background: var(--cds-field, #f4f4f4); color: var(--cds-text-primary, #161616); font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 0.875rem; line-height: 1.28572; letter-spacing: 0.16px; } .ds-field__input::placeholder { color: var(--cds-text-placeholder, rgba(22, 22, 22, 0.4)); } .ds-field__input:focus { outline: 2px solid var(--cds-focus, #0f62fe); outline-offset: -2px; }"
+    },
+    {
+      "name": "Issue Card",
+      "kind": "card",
+      "refersTo": "issue-card",
+      "description": "Signature component: one GitHub issue. Drag handle, number and age, menu, title link, label tags, footer. Hover changes the background; the decided lift shadow is not implemented yet.",
+      "html": "<article class=\"ds-issue-card\"><div class=\"ds-issue-card__top\"><button class=\"ds-issue-card__handle\" type=\"button\" aria-label=\"Move issue #12\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" width=\"16\" height=\"16\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M10 6H14V10H10z\"/><path d=\"M18 6H22V10H18z\"/><path d=\"M10 14H14V18H10z\"/><path d=\"M18 14H22V18H18z\"/><path d=\"M10 22H14V26H10z\"/><path d=\"M18 22H22V26H18z\"/></svg></button><span class=\"ds-issue-card__meta\">#12 · opened 12 days ago</span><button class=\"ds-issue-card__menu\" type=\"button\" aria-label=\"Actions for issue #12\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" width=\"16\" height=\"16\" fill=\"currentColor\" aria-hidden=\"true\"><circle cx=\"16\" cy=\"8\" r=\"2\"/><circle cx=\"16\" cy=\"16\" r=\"2\"/><circle cx=\"16\" cy=\"24\" r=\"2\"/></svg></button></div><a class=\"ds-issue-card__title\" href=\"#\">Add keyboard shortcuts for common actions</a><div class=\"ds-issue-card__labels\"><span class=\"ds-tag-label\" style=\"--label-color: #a2eeef\">enhancement</span></div><div class=\"ds-issue-card__footer\"><span class=\"ds-issue-card__count\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" width=\"16\" height=\"16\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M17.74,30,16,29l4-7h6a2,2,0,0,0,2-2V8a2,2,0,0,0-2-2H6A2,2,0,0,0,4,8V20a2,2,0,0,0,2,2h9v2H6a4,4,0,0,1-4-4V8A4,4,0,0,1,6,4H26a4,4,0,0,1,4,4V20a4,4,0,0,1-4,4H21.16Z\"/><path d=\"M8 10H24V12H8z\"/><path d=\"M8 16H18V18H8z\"/></svg> 3</span><span class=\"ds-issue-card__avatar\" aria-label=\"octocat\">O</span></div></article>",
+      "css": ".ds-issue-card { display: flex; flex-direction: column; gap: 0.5rem; width: 15rem; padding: 8px 12px 12px; border-radius: 0; background: var(--cds-layer-02, #ffffff); color: var(--cds-text-primary, #161616); font-family: 'IBM Plex Sans', system-ui, sans-serif; cursor: grab; transition: background-color 110ms cubic-bezier(0.2, 0, 0.38, 0.9); } .ds-issue-card:hover { background: var(--cds-layer-hover-02, #e8e8e8); } .ds-issue-card__top { display: flex; align-items: center; gap: 0.25rem; min-height: 2rem; } .ds-issue-card__handle, .ds-issue-card__menu { display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; padding: 0; border: 0; background: none; color: var(--cds-icon-secondary, #525252); cursor: grab; } .ds-issue-card__menu { margin-left: auto; width: 2rem; height: 2rem; cursor: pointer; } .ds-issue-card__handle:focus-visible, .ds-issue-card__menu:focus-visible, .ds-issue-card__title:focus-visible { outline: 2px solid var(--cds-focus, #0f62fe); outline-offset: -2px; } .ds-issue-card__meta { font-size: 0.75rem; line-height: 1.33333; letter-spacing: 0.32px; color: var(--cds-text-secondary, #525252); } .ds-issue-card__title { font-size: 0.875rem; font-weight: 600; line-height: 1.28572; letter-spacing: 0.16px; color: var(--cds-text-primary, #161616); text-decoration: none; } .ds-issue-card__title:hover { color: var(--cds-link-primary-hover, #0043ce); text-decoration: underline; } .ds-issue-card__labels { display: flex; flex-wrap: wrap; gap: 0.25rem; } .ds-tag-label { display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: 16px; background: var(--cds-tag-background-teal, #9ef0f0); color: var(--cds-tag-color-teal, #004144); font-size: 0.75rem; line-height: 1.33333; letter-spacing: 0.32px; } .ds-tag-label::before { content: ''; width: 0.5rem; height: 0.5rem; margin-inline-end: 0.25rem; border-radius: 50%; background: var(--label-color, currentcolor); box-shadow: 0 0 0 1px color-mix(in srgb, currentcolor 40%, transparent); } .ds-issue-card__footer { display: flex; align-items: center; gap: 0.75rem; font-size: 0.75rem; line-height: 1.33333; letter-spacing: 0.32px; color: var(--cds-text-secondary, #525252); } .ds-issue-card__count { display: inline-flex; align-items: center; gap: 0.25rem; } .ds-issue-card__avatar { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-left: auto; border-radius: 50%; border: 2px solid var(--cds-layer-02, #ffffff); background: #8a3ffc; color: #ffffff; font-size: 0.625rem; }"
+    },
+    {
+      "name": "Bucket Header",
+      "kind": "custom",
+      "refersTo": "bucket",
+      "description": "Signature component: a bucket's top: 3px border (red when over its limit), title, count tag, options menu, and the label rules row.",
+      "html": "<section class=\"ds-bucket\"><header class=\"ds-bucket__header\"><h2 class=\"ds-bucket__title\">In progress</h2><span class=\"ds-tag-count\">2</span><button class=\"ds-bucket__menu\" type=\"button\" aria-label=\"Options for In progress\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" width=\"16\" height=\"16\" fill=\"currentColor\" aria-hidden=\"true\"><circle cx=\"16\" cy=\"8\" r=\"2\"/><circle cx=\"16\" cy=\"16\" r=\"2\"/><circle cx=\"16\" cy=\"24\" r=\"2\"/></svg></button></header><div class=\"ds-bucket__rules\"><span class=\"ds-tag-label\" style=\"--label-color: #0e8a16\">status: in progress</span></div></section>",
+      "css": ".ds-bucket { width: 16rem; border-top: 3px solid var(--cds-border-subtle, #e0e0e0); background: var(--cds-layer-01, #f4f4f4); font-family: 'IBM Plex Sans', system-ui, sans-serif; } .ds-bucket__header { display: flex; align-items: center; gap: 0.5rem; min-height: 3rem; padding: 0 0.25rem 0 1rem; } .ds-bucket__title { margin: 0; font-size: 0.875rem; font-weight: 600; line-height: 1.28572; letter-spacing: 0.16px; color: var(--cds-text-primary, #161616); } .ds-tag-count { display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: 16px; background: var(--cds-tag-background-cool-gray, #dde1e6); color: var(--cds-tag-color-cool-gray, #121619); font-size: 0.75rem; line-height: 1.33333; letter-spacing: 0.32px; } .ds-bucket__menu { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; margin-left: auto; padding: 0; border: 0; background: none; color: var(--cds-icon-primary, #161616); cursor: pointer; } .ds-bucket__menu:hover { background: var(--cds-layer-hover-01, #e8e8e8); } .ds-bucket__menu:focus-visible { outline: 2px solid var(--cds-focus, #0f62fe); outline-offset: -2px; } .ds-bucket__rules { display: flex; flex-wrap: wrap; gap: 0.25rem; padding: 0 1rem 0.5rem; } .ds-tag-label { display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: 16px; background: var(--cds-tag-background-green, #a7f0ba); color: var(--cds-tag-color-green, #0e6027); font-size: 0.75rem; line-height: 1.33333; letter-spacing: 0.32px; } .ds-tag-label::before { content: ''; width: 0.5rem; height: 0.5rem; margin-inline-end: 0.25rem; border-radius: 50%; background: var(--label-color, currentcolor); box-shadow: 0 0 0 1px color-mix(in srgb, currentcolor 40%, transparent); }"
+    },
+    {
+      "name": "Header",
+      "kind": "nav",
+      "refersTo": "header",
+      "description": "Carbon's UI shell header, always Gray 100: the product name and icon buttons for the theme toggle and settings.",
+      "html": "<header class=\"ds-header\"><a class=\"ds-header__name\" href=\"#\">Urutau</a><div class=\"ds-header__actions\"><button class=\"ds-header__action\" type=\"button\" aria-label=\"Switch to dark theme\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" width=\"20\" height=\"20\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M13.5025,5.4136A15.0755,15.0755,0,0,0,25.096,23.6082a11.1134,11.1134,0,0,1-7.9749,3.3893c-.1385,0-.2782.0051-.4178,0A11.0944,11.0944,0,0,1,13.5025,5.4136M14.98,3a1.0024,1.0024,0,0,0-.1746.0156A13.0959,13.0959,0,0,0,16.63,28.9973c.1641.006.3282,0,.4909,0a13.0724,13.0724,0,0,0,10.702-5.5556,1.0094,1.0094,0,0,0-.7833-1.5644A13.08,13.08,0,0,1,15.8892,4.38,1.0149,1.0149,0,0,0,14.98,3Z\"/></svg></button><button class=\"ds-header__action\" type=\"button\" aria-label=\"Settings\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" width=\"20\" height=\"20\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M27,16.76c0-.25,0-.5,0-.76s0-.51,0-.77l1.92-1.68A2,2,0,0,0,29.3,11L26.94,7a2,2,0,0,0-1.73-1,2,2,0,0,0-.64.1l-2.43.82a11.35,11.35,0,0,0-1.31-.75l-.51-2.52a2,2,0,0,0-2-1.61H13.64a2,2,0,0,0-2,1.61l-.51,2.52a11.48,11.48,0,0,0-1.32.75L7.43,6.06A2,2,0,0,0,6.79,6,2,2,0,0,0,5.06,7L2.7,11a2,2,0,0,0,.41,2.51L5,15.24c0,.25,0,.5,0,.76s0,.51,0,.77L3.11,18.45A2,2,0,0,0,2.7,21L5.06,25a2,2,0,0,0,1.73,1,2,2,0,0,0,.64-.1l2.43-.82a11.35,11.35,0,0,0,1.31.75l.51,2.52a2,2,0,0,0,2,1.61h4.72a2,2,0,0,0,2-1.61l.51-2.52a11.48,11.48,0,0,0,1.32-.75l2.42.82a2,2,0,0,0,.64.1,2,2,0,0,0,1.73-1L29.3,21a2,2,0,0,0-.41-2.51ZM25.21,24l-3.43-1.16a8.86,8.86,0,0,1-2.71,1.57L18.36,28H13.64l-.71-3.55a9.36,9.36,0,0,1-2.7-1.57L6.79,24,4.43,20l2.72-2.4a8.9,8.9,0,0,1,0-3.13L4.43,12,6.79,8l3.43,1.16a8.86,8.86,0,0,1,2.71-1.57L13.64,4h4.72l.71,3.55a9.36,9.36,0,0,1,2.7,1.57L25.21,8,27.57,12l-2.72,2.4a8.9,8.9,0,0,1,0,3.13L27.57,20Z\"/><path d=\"M16,22a6,6,0,1,1,6-6A5.94,5.94,0,0,1,16,22Zm0-10a3.91,3.91,0,0,0-4,4,3.91,3.91,0,0,0,4,4,3.91,3.91,0,0,0,4-4A3.91,3.91,0,0,0,16,12Z\"/></svg></button></div></header>",
+      "css": ".ds-header { display: flex; align-items: center; height: 48px; border-bottom: 1px solid #393939; background: #161616; font-family: 'IBM Plex Sans', system-ui, sans-serif; } .ds-header__name { display: flex; align-items: center; height: 100%; padding: 0 2rem 0 1rem; color: #f4f4f4; font-size: 0.875rem; font-weight: 600; line-height: 1.28572; letter-spacing: 0.16px; text-decoration: none; } .ds-header__name:focus-visible { outline: 2px solid #ffffff; outline-offset: -2px; } .ds-header__actions { display: flex; margin-left: auto; } .ds-header__action { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border: 0; background: none; color: #c6c6c6; cursor: pointer; } .ds-header__action:hover { background: #333333; color: #f4f4f4; } .ds-header__action:focus-visible { outline: 2px solid #ffffff; outline-offset: -2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Night Watch",
+    "overview": "The urutau (the common potoo) is a night bird that sits still on a branch and watches. The interface does the same: it stays quiet and still, is as comfortable in the dark theme as in the light one, and spends attention only on what changed or needs action. Calm and utilitarian, it is IBM Carbon used the way Carbon ships it: the White and Gray 100 themes, IBM Plex Sans, square corners, tonal layers.\n\nColor belongs to the work, not to the interface. A card's GitHub labels, its closed or not-planned state, and a bucket that is over its work-in-progress limit are the only colored things on the board; everything around them stays in Carbon's grays, with one blue for what can be acted on. Components are Carbon's, out of the box. The one project-specific behavior is depth: an issue card lifts when it is hovered or focused, so the thing you can pick up stands out from the flat board around it.",
+    "keyCharacteristics": [
+      "Carbon White (light) and Gray 100 (dark), switched on `<html>`; the header is always Gray 100.",
+      "Neutral interface; color comes from labels and statuses.",
+      "Flat tonal layers: canvas, then bucket, then card.",
+      "Cards lift on hover and focus; menus and the dragged card float.",
+      "Square corners everywhere except tags, which are pills.",
+      "IBM Plex Sans on Carbon's productive type scale; working text is 12–14px."
+    ],
+    "rules": [
+      {
+        "name": "The Data Owns Color Rule",
+        "body": "Color on the board comes from the work: label tags, the Closed and Not planned tags, and Over-Limit Red. Surfaces, borders and text stay in Carbon's grays. Never add a decorative hue.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Blue Rule",
+        "body": "Interactive Blue marks what can be acted on (buttons, links, focus, selection) and nothing else.",
+        "section": "colors"
+      },
+      {
+        "name": "The Theme Token Rule",
+        "body": "Component styles use Carbon theme tokens (`$layer`, `$text-secondary`, `var(--cds-…)`), never hex values, so the White and Gray 100 themes both stay correct. The only literal colors are GitHub's label colors, which come from the data.",
+        "section": "colors"
+      },
+      {
+        "name": "The Carbon Scale Rule",
+        "body": "Text sizes come from Carbon's type styles (`@include type.type-style(...)`), never ad-hoc font sizes.",
+        "section": "typography"
+      },
+      {
+        "name": "The Semibold Titles Rule",
+        "body": "Weight 600 marks bucket and card titles only. Headings stay regular, and numbers are never bold.",
+        "section": "typography"
+      },
+      {
+        "name": "The Lift Means Grabbable Rule",
+        "body": "Only things that can be picked up, or that float above the board, cast a shadow: hovered or focused cards, the dragged card, and menus. Buckets, the header and the toolbar stay flat.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** build with `@carbon/react` components and Carbon tokens, as they ship.",
+      "**Do** check every change in both the White and Gray 100 themes.",
+      "**Do** let labels and statuses carry the color (The Data Owns Color Rule).",
+      "**Do** keep text contrast at WCAG 2.1 AA; Carbon's text and layer tokens meet it in both themes.",
+      "**Do** give every action a keyboard path; moving a card has a drag handle and a \"Move to\" menu.",
+      "**Do** leave room in layouts for Portuguese copy, which runs longer than English."
+    ],
+    "donts": [
+      "**Don't** hard-code colors, font sizes or spacing in component styles; GitHub label colors are the only literal colors.",
+      "**Don't** round corners on anything but tags.",
+      "**Don't** put shadows on static surfaces (buckets, the header, the toolbar).",
+      "**Don't** add a second accent color or decorative gradients.",
+      "**Don't** restyle Carbon components beyond layout."
+    ]
+  }
+}

@@ -1,0 +1,205 @@
+# urutau
+
+A kanban board for GitHub issues: a client-only single-page app in `src/`
+(React 19, TypeScript, Vite, IBM Carbon) with no backend. It reads a
+repository's issues and labels from the GitHub REST API and keeps buckets and
+card positions in the browser's localStorage. `README.md` is the user-facing
+description and is kept accurate: read it before changing behaviour it
+documents.
+
+## You are the Orchestrator
+
+This project runs the agentic workflow in **[.claude/agents.md](.claude/agents.md)**.
+Read it; it is your routing policy. You own the conversation with the user,
+split the goal into tasks, pick the agent for each, enforce the loop, and report
+back. The sub-agents in `.claude/agents/` (`planner`, `designer`, `core_jr`,
+`core_sr`, `ui_jr`, `ui_sr`, `devops`, `reviewer`) never talk to the user: they
+return the response envelope to you, and you validate, merge, and decide the
+next step. The `impeccable-*` agents belong to the `/impeccable` skill, which
+spawns them itself.
+
+Standing environment facts every agent needs (Node 24 via nvm, ports, the
+shared GitHub API budget, the disk and scratch rules) are in
+**[.claude/ENVIRONMENT.md](.claude/ENVIRONMENT.md)**. Read it before running
+anything.
+
+### When the workflow applies
+
+Three tiers, per `.claude/agents.md` § Cost discipline rule 6:
+
+- **Answer directly**: a question, an investigation, a one-line fix, a doc typo.
+  No run id, no artifacts, no sub-agent.
+- **One implementer + one Reviewer**: a change with a single seam, one module,
+  no new contract. `intake.md` is the only artifact.
+- **The full loop**: feature work. Several files, a contract change, or
+  something the user will see.
+
+Spinning up a Planner for a two-line change is the failure mode to avoid. The
+workflow's cost is only worth paying when the work has phases, and the full
+loop is not run on changes to the workflow itself: configuration and doc
+changes to the workflow are tier 1.
+
+Some kinds of work have their own skill. Load it instead of improvising:
+
+- **Running, screenshotting or driving the app** ("start urutau", "screenshot
+  the board", "check this in a browser"): use
+  **[`/run-urutau`](.claude/skills/run-urutau/SKILL.md)**. Its Playwright
+  driver answers GitHub API calls from fixtures by default, so it costs no API
+  budget.
+- **Design work on the UI** (critique, audit, polish, layout, typography,
+  colour, copy, empty and error states, onboarding, any visual or UX change):
+  use **[`/impeccable`](.claude/skills/impeccable/SKILL.md)**. Its project
+  context is [`PRODUCT.md`](PRODUCT.md) (users, positioning, commitments) and
+  [`DESIGN.md`](DESIGN.md) with its sidecar `.impeccable/design.json` (the
+  Carbon-based design system) at the repo root; refresh them with
+  `/impeccable init` and `/impeccable document` when they drift. Its hook runs
+  a design detector after edits to UI files and reports findings. The UI is
+  built on IBM Carbon (`@carbon/react`); design work stays inside Carbon's
+  components and tokens.
+- **GitHub issues** ("/issue 3", "look at issue #7", an issue URL): use
+  **[`/issue`](.claude/skills/issue/SKILL.md)**. It is tier 1. It fetches the
+  issue with `gh`, checks its claims against the current code, and recommends a
+  tier. It stops there and waits for the user to say go before any intake.
+- **CI work (`.github/workflows/**`)**: `devops` owns it, so it routes through
+  the normal tiers. Load **[`/update-ci`](.claude/skills/update-ci/SKILL.md)**
+  anyway before touching a workflow file; it picks the tier for the specific
+  change and gives the local verification recipe, so a broken workflow gets
+  caught before it reaches GitHub Actions.
+- **Retrospectives on the workflow itself** ("analyze the last session", "find
+  the inefficiencies", "improve how you work"): use
+  **[`/workflow-retro`](.claude/skills/workflow-retro/SKILL.md)**. It is tier 1
+  (no run, no sub-agents). It measures cost from notifications, reviews and git
+  rather than memory, and puts each fix in the file of the agent that makes the
+  decision.
+
+### The loop
+
+1. **Intake**: restate the goal and success criteria, and write
+   `.claude/runs/<run-id>/intake.md`. Quote the decisions the user has already
+   frozen, verbatim. Run id is `YYYY-MM-DD-short-slug`.
+2. **Plan**: delegate to `planner`; store `plan.json`.
+3. **Design**: delegate to `designer` when the run introduces a contract: a
+   change to a persisted store (`urutau:settings`, `urutau:boards`) or the board
+   export format, a new GitHub API call or any write to GitHub, or a shared type
+   in `src/domain/types.ts`. Freeze it before any code is written. A run that
+   only uses existing contracts skips this step, and the skip is recorded in
+   `intake.md`.
+4. **Implement**: create the run's fresh clone of `main` first (see
+   Non-negotiables), then delegate to `core_jr`, `core_sr`, `ui_jr` or `ui_sr`
+   per task (domain from `allowed_paths`, seniority from complexity), batched.
+   Consecutive tasks on the same owner, the same implementer role and
+   dependency chain go to one implementer agent; two tasks touching the same
+   file are one implementer agent, always. A core task and a UI task never
+   share one. Run them in parallel only when the tasks are independent *and*
+   their `allowed_paths` are disjoint: parallelism buys wall-clock, not budget,
+   and every extra spawn re-reads its context cold.
+5. **Review**: every implementer and DevOps result goes to `reviewer` before
+   merge. `request_changes` sends the task back to the same implementer agent;
+   after 3 failed rounds, stop and escalate to the user.
+6. **Ship**: `devops` once the run's tasks are approved, if the run touches
+   build, CI, packaging or deploy. Otherwise skip it and say so.
+7. **Report**: outcome, residual risks, follow-ups.
+
+### Delegating
+
+Every hand-off is self-contained: the sub-agent starts cold and knows only what
+you put in the envelope. Pass the run id, the goal, the clone path, the
+constraints, and `allowed_paths`.
+
+**Paste, do not cite.** The task record and its acceptance criteria go into the
+envelope verbatim: you already have them, and a sub-agent told to look them up
+opens the whole `plan.json` to find one task. Name design context as the exact
+slice command, `.claude/tools/ctx.sh design <run-id> 4 6.2`, never `design.md`.
+Never say "as discussed".
+
+Match the agent to the task's **domain and risk**, per the rule in
+`.claude/agents.md`. Implementation is always `sonnet` (Planner, the Core and UI
+implementers, DevOps) regardless of task complexity; seniority picks the
+implementer's judgement level, not its model. Designer and Reviewer default to
+`opus`. Override with the Agent tool's `model` parameter: `sonnet` to downgrade
+Designer or Reviewer for a run too small to justify opus; `haiku` to downgrade a
+Jr implementer for a narrow, fully specified mechanical edit. Implementer tasks
+never escalate to opus: a hard implementation task means the Designer should
+narrow the contract further.
+
+### Non-negotiables
+
+- **All implementation happens in a fresh clone of `main` under
+  `.claude/run-clones/<run-id>/` — never in the live checkout.** Commands in
+  `.claude/agents.md` § Rules. Run artifacts under `.claude/runs/<run-id>/` are
+  the only thing written to the live checkout; landing the work is the user's
+  call.
+- **Never use `/tmp` or the harness session scratchpad, and budget disk.**
+  Scratch lives in `.claude/scratch/<run-id>/`, one install per run (the run
+  clone), `df -h /` checked before any clone or install, everything cleaned up
+  per task. Rules in `.claude/ENVIRONMENT.md` § Scratch space; repeat them in
+  every envelope.
+- **Urutau only reads from GitHub today.** Opt-in two-way sync is the
+  confirmed direction (`PRODUCT.md`), but no code path writes to a repository
+  (labels, issue state, comments) unless the run's frozen decisions include
+  it. Such a write goes through Design first, and stays off until the user
+  turns it on.
+- **The user's GitHub token goes only to `api.github.com`.** It never appears
+  in a board export, a log line, a URL, a fixture or a run artifact, and agents
+  never put their own `gh` credentials into the app or its driver.
+- **Persisted browser state is a contract.** Users' browsers already hold
+  version-1 data in `urutau:settings` and `urutau:boards`, and exported board
+  files in the wild. A change to any of these shapes bumps the zustand `persist`
+  version with a `migrate` that keeps existing boards loading, and is designed
+  before it is built.
+- **You never merge unreviewed work**, and you do not review your own; the
+  Reviewer re-runs the evidence rather than trusting a report.
+- **Escalate rather than guess** on: ambiguous requirements, destructive
+  operations, credentials, any write to GitHub, or 3 failed review rounds.
+- **Commits are yours alone.** Sub-agents do not commit, push, or switch
+  branches.
+
+### Run artifacts
+
+Everything durable goes under `.claude/runs/<run-id>/`; layout and conventions
+are in [.claude/runs/README.md](.claude/runs/README.md). Run directories are
+gitignored; only that README is tracked.
+
+Read them with [.claude/tools/ctx.sh](.claude/tools/ctx.sh), not `cat`:
+`ctx.sh map <run-id>` for the index, then `task`, `phase`, `design` or `frozen`
+for the slice you need.
+
+## Writing comments and docs
+
+Code comments, `README.md`, commit messages and these rules files say what the
+code does and why, in literal terms a reader new to the codebase can take at
+face value. A metaphor is not an explanation; write the thing it stands for:
+
+- "load-bearing" → what breaks if it changes ("the build fails without it",
+  "the only thing that enforces the allow-list");
+- "belt-and-suspenders" → "a second check", plus what it catches that the
+  first one misses;
+- "tripwire" → the check;
+- "choke point" → the one module every writer goes through;
+- a "dance" → the sequence;
+- a "spine" → the list;
+- data that is "honest" → what actually happened.
+
+Established technical terms (golden file, focus trap, shell `trap`, escape
+hatch) are fine, and so are Carbon's component names: a "skeleton" here is the
+loading placeholder that `SkeletonText` and `SkeletonPlaceholder` draw. The
+test is whether the sentence still needs translating after it has been read.
+The wording grep in the implementers' self-audit and Reviewer check 9 catch the
+commonest ones in a diff.
+
+## Verification
+
+The gate is `npm run lint && npm run typecheck && npm test && npm run build`,
+the same four steps CI (`.github/workflows/ci.yml`) runs, under Node 24.
+
+- `npm test` (Vitest, jsdom) covers the pure logic in `src/domain/` (placement,
+  ordering, filters, label colours, repository parsing), the GitHub client in
+  `src/github/` (pagination, error mapping, mapping to domain types) and an
+  App-level test of the main flows. It is hermetic: `fetch` is stubbed, there is
+  no network.
+- UI behaviour is checked in a real browser with the `/run-urutau` driver, in
+  fixtures mode, with screenshots that are opened and looked at.
+- Live GitHub behaviour uses the driver's live mode after checking the API
+  budget (`.claude/ENVIRONMENT.md` § The GitHub API budget is shared).
+
+Every claim in a report names the command that produced it.

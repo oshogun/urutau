@@ -86,6 +86,10 @@ through rules 3 and 4.
 
 CI (`.github/workflows/ci.yml`) runs lint, type-check, tests and build on every push and pull request.
 
+For headless, scripted checks (screenshots, drag and drop, fake GitHub data instead of the real
+API) there is a Playwright harness. It is mostly used by AI coding agents; see
+[.claude/skills/run-urutau/SKILL.md](.claude/skills/run-urutau/SKILL.md).
+
 The build is static and uses relative asset paths, so `dist/` can be served from any host or
 sub-path (GitHub Pages, S3, nginx, …).
 
@@ -125,6 +129,7 @@ the UI only uses those types. Adding another provider (GitLab, Gitea, …) means
 - Two-way sync: apply a bucket's label (or close/reopen the issue) on GitHub when a card moves.
 - Shared boards: store the board config in the repository (e.g. `.urutau.json`) or a small backend.
 - Sign in with GitHub (OAuth/device flow) instead of pasting a token.
+- UI copy in Portuguese as well as English.
 - Issue detail panel with the rendered Markdown body and comments.
 - Conditional requests (ETags) and virtualized columns for very large repositories.
 - More providers: GitLab, Gitea/Forgejo.

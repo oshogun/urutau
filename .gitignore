@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Agentic workflow (see CLAUDE.md): run artifacts, run clones and scratch stay
+# local; only the runs README is tracked
+.claude/runs/*
+!.claude/runs/README.md
+.claude/run-clones/
+.claude/scratch/
+.claude/settings.local.json
+
+# Impeccable per-developer state (hook consent and detector cache)
+.impeccable/config.local.json
+.impeccable/hook.cache.json
