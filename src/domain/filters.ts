@@ -1,4 +1,4 @@
-import type { Issue } from './types'
+import type { Issue } from './types.ts'
 
 /**
  * Sentinel for "no assignee" / "no milestone". GitHub logins and milestone

@@ -6,5 +6,5 @@
     "react/exhaustive-deps": "warn",
     "react/only-export-components": ["warn", { "allowConstantExport": true }]
   },
-  "ignorePatterns": ["dist", ".claude/skills/impeccable/**"]
+  "ignorePatterns": ["dist", "data", ".claude/skills/impeccable/**"]
 }

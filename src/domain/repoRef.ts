@@ -1,4 +1,4 @@
-import type { RepoRef } from './types'
+import type { RepoRef } from './types.ts'
 
 const OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
 const NAME = /^[A-Za-z0-9._-]{1,100}$/

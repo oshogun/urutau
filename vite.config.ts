@@ -20,6 +20,10 @@ export default defineConfig({
       },
     },
   },
+  server: {
+    // The API server (npm run dev:server) listens on URUTAU_API_PORT, default 8787.
+    proxy: { '/api': { target: 'http://127.0.0.1:' + (process.env.URUTAU_API_PORT ?? 8787) } },
+  },
   css: {
     preprocessorOptions: {
       scss: {
@@ -30,9 +34,22 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'jsdom',
-    setupFiles: ['./src/test/setup.ts'],
     restoreMocks: true,
     unstubGlobals: true,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'client',
+          environment: 'jsdom',
+          include: ['src/**/*.test.{ts,tsx}'],
+          setupFiles: ['./src/test/setup.ts'],
+        },
+      },
+      {
+        extends: true,
+        test: { name: 'server', environment: 'node', include: ['server/**/*.test.ts'] },
+      },
+    ],
   },
 })

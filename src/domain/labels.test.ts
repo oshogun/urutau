@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { tagTypeForColor } from './labels'
+import { tagTypeForColor } from './labels.ts'
 
 describe('tagTypeForColor', () => {
   // GitHub's default label set.

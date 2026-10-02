@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatRepo, parseRepoInput, repoKey } from './repoRef'
+import { formatRepo, parseRepoInput, repoKey } from './repoRef.ts'
 
 describe('parseRepoInput', () => {
   it.each([

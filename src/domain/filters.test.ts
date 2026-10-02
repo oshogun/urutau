@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { makeIssue } from '../test/fixtures'
-import { EMPTY_FILTERS, NONE, countLabels, isFiltering, matchesFilters } from './filters'
+import { makeIssue } from '../test/fixtures.ts'
+import { EMPTY_FILTERS, NONE, countLabels, isFiltering, matchesFilters } from './filters.ts'
 
 const octocat = { login: 'octocat', avatarUrl: '', url: '' }
 

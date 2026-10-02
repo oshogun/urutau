@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { makeBoard, makeBucket, makeIssue, makeLabel } from '../test/fixtures'
+import { makeBoard, makeBucket, makeIssue, makeLabel } from '../test/fixtures.ts'
 import {
   boardFromExport,
   createDefaultBoard,
@@ -11,8 +11,8 @@ import {
   resolveBuckets,
   saveBucket,
   toBoardExport,
-} from './board'
-import type { BoardConfig, Issue } from './types'
+} from './board.ts'
+import type { BoardConfig, Issue } from './types.ts'
 
 const numbersIn = (config: BoardConfig, issues: Issue[], bucketId: string) =>
   resolveBuckets(issues, config)

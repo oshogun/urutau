@@ -1,0 +1,66 @@
+/** Structured logging: one JSON object per line on stdout, with known secrets removed. */
+
+export type LogFields = Record<string, string | number | boolean | null>
+
+export interface Logger {
+  info(message: string, fields?: LogFields): void
+  warn(message: string, fields?: LogFields): void
+  error(message: string, fields?: LogFields): void
+}
+
+const REDACTED = '[redacted]'
+
+/** Removes every literal occurrence of each secret from the text. Empty secrets are ignored. */
+export function redact(text: string, secrets: readonly string[]): string {
+  let result = text
+  for (const secret of secrets) {
+    if (secret) result = result.split(secret).join(REDACTED)
+  }
+  return result
+}
+
+/**
+ * The strings of a connection URL that must never be printed: the whole URL
+ * and its password component, both as written and percent-decoded.
+ */
+export function urlSecrets(url: string): string[] {
+  const secrets = [url]
+  try {
+    const parsed = new URL(url)
+    if (parsed.password) {
+      secrets.push(parsed.password)
+      try {
+        secrets.push(decodeURIComponent(parsed.password))
+      } catch {
+        // A '%' that is not an escape: the password as written is already listed.
+      }
+    }
+  } catch {
+    // Not parseable as a URL: the whole string is still redacted.
+  }
+  return secrets
+}
+
+export interface LoggerOptions {
+  write?: (line: string) => void
+  now?: () => Date
+  secrets?: readonly string[]
+}
+
+export function createLogger(options: LoggerOptions = {}): Logger {
+  const write = options.write ?? ((line: string) => process.stdout.write(line + '\n'))
+  const now = options.now ?? (() => new Date())
+  const secrets = options.secrets ?? []
+  const emit = (level: string, msg: string, fields: LogFields = {}) => {
+    const clean: LogFields = {}
+    for (const [key, value] of Object.entries(fields)) {
+      clean[key] = typeof value === 'string' ? redact(value, secrets) : value
+    }
+    write(JSON.stringify({ time: now().toISOString(), level, msg: redact(msg, secrets), ...clean }))
+  }
+  return {
+    info: (msg, fields) => emit('info', msg, fields),
+    warn: (msg, fields) => emit('warn', msg, fields),
+    error: (msg, fields) => emit('error', msg, fields),
+  }
+}

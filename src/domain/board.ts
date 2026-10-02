@@ -1,4 +1,4 @@
-import type { BoardConfig, Bucket, Issue, Label } from './types'
+import type { BoardConfig, Bucket, Issue, Label } from './types.ts'
 
 export const DEFAULT_CLOSED_WINDOW_DAYS = 14
 

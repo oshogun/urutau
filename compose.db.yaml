@@ -1,0 +1,35 @@
+# Opt-in database containers for the backend test suites (npm run test:db:postgres,
+# npm run test:db:mariadb). Data lives on tmpfs and is gone when the container stops.
+# Not used by npm test.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: urutau
+      POSTGRES_PASSWORD: urutau-dev
+      POSTGRES_DB: urutau
+    ports:
+      - '127.0.0.1:${URUTAU_PG_PORT:-55432}:5432'
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U urutau']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  mariadb:
+    image: mariadb:11.4
+    environment:
+      MARIADB_USER: urutau
+      MARIADB_PASSWORD: urutau-dev
+      MARIADB_DATABASE: urutau
+      MARIADB_ROOT_PASSWORD: urutau-root-dev
+    ports:
+      - '127.0.0.1:${URUTAU_MARIADB_PORT:-53306}:3306'
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 2s
+      timeout: 3s
+      retries: 30

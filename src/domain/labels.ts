@@ -1,4 +1,4 @@
-import type { Label } from './types'
+import type { Label } from './types.ts'
 
 /** Carbon `Tag` types that can stand in for an arbitrary label color. */
 export type LabelTagType =
