@@ -9,6 +9,7 @@ describe('loadConfig', () => {
       databaseUrl: 'sqlite:data/urutau.db',
       publicUrl: null,
       trustProxy: false,
+      allowedHosts: [],
       secureCookies: false,
       keycloak: null,
     })
@@ -63,5 +64,15 @@ describe('loadConfig', () => {
     expect(() => loadConfig(http)).toThrow('KEYCLOAK_ISSUER')
     expect(loadConfig({ ...http, KEYCLOAK_ALLOW_HTTP: 'true' }).keycloak?.allowHttp).toBe(true)
     expect(loadConfig({ ...keycloak, KEYCLOAK_ISSUER: 'http://localhost:8080/realms/urutau' }).keycloak?.allowHttp).toBe(true)
+  })
+
+  it('parses ALLOWED_HOSTS into lower-case hostnames', () => {
+    expect(loadConfig({ ALLOWED_HOSTS: ' Urutau, board.LAN. ,,urutau ' }).allowedHosts).toEqual(['urutau', 'board.lan'])
+  })
+
+  it('rejects an ALLOWED_HOSTS entry with a scheme, port or wildcard, naming the variable', () => {
+    for (const bad of ['https://x', 'x:8080', '*.example.com', '*', 'a b', '-x', 'x/y']) {
+      expect(() => loadConfig({ ALLOWED_HOSTS: bad })).toThrow('ALLOWED_HOSTS')
+    }
   })
 })

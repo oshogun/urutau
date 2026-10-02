@@ -21,7 +21,8 @@ export default defineConfig({
     },
   },
   server: {
-    // The API server (npm run dev:server) listens on URUTAU_API_PORT, default 8787.
+    // Proxy target for /api: the API server's port (PORT there, default 8787). scripts/dev.mjs
+    // sets URUTAU_API_PORT from PORT; set it yourself when running `vite` alone.
     proxy: { '/api': { target: 'http://127.0.0.1:' + (process.env.URUTAU_API_PORT ?? 8787) } },
   },
   css: {

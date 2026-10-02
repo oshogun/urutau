@@ -1,7 +1,8 @@
 import { Launch, Locked, Renew, Settings } from '@carbon/icons-react'
-import { Button, InlineNotification, Link, Modal, Tag } from '@carbon/react'
+import { ActionableNotification, Button, InlineNotification, Link, Modal, Tag } from '@carbon/react'
 import { useCallback, useMemo, useState } from 'react'
 import {
+  createDefaultBoard,
   deleteBucket,
   moveBucket,
   moveIssue,
@@ -10,8 +11,8 @@ import {
   type BucketContents,
 } from '../domain/board'
 import { EMPTY_FILTERS, isFiltering, matchesFilters } from '../domain/filters'
-import type { Bucket, RepoSnapshot } from '../domain/types'
-import { useBoardConfig, useBoards } from '../state/boards'
+import type { BoardConfig, Bucket, RepoSnapshot } from '../domain/types'
+import type { ConflictNotice } from '../state/boardStore'
 import { BoardCanvas } from './BoardCanvas'
 import { BoardSettingsModal } from './BoardSettingsModal'
 import { BoardToolbar } from './BoardToolbar'
@@ -19,8 +20,15 @@ import { BucketEditorModal } from './BucketEditorModal'
 import './board.scss'
 
 interface BoardProps {
-  boardKey: string
   snapshot: RepoSnapshot
+  config: BoardConfig
+  onUpdateConfig: (recipe: (current: BoardConfig) => BoardConfig) => void
+  /** Set when the server refused the last change because someone else saved first. */
+  conflict: ConflictNotice | null
+  onDismissConflict: () => void
+  /** Set when saving failed and the edit is still only on screen. */
+  saveError: string | null
+  onRetrySave: () => void
   isFetching: boolean
   refreshError: Error | null
   onRefresh: () => void
@@ -31,10 +39,19 @@ type Dialog =
   | { kind: 'delete-bucket'; bucket: Bucket }
   | { kind: 'board-settings' }
 
-export function Board({ boardKey, snapshot, isFetching, refreshError, onRefresh }: BoardProps) {
+export function Board({
+  snapshot,
+  config,
+  onUpdateConfig: updateConfig,
+  conflict,
+  onDismissConflict,
+  saveError,
+  onRetrySave,
+  isFetching,
+  refreshError,
+  onRefresh,
+}: BoardProps) {
   const { repository, issues, labels } = snapshot
-  const [config, updateConfig] = useBoardConfig(boardKey, labels)
-  const resetBoard = useBoards((state) => state.resetBoard)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const closeDialog = () => setDialog(null)
@@ -111,6 +128,32 @@ export function Board({ boardKey, snapshot, isFetching, refreshError, onRefresh 
         </div>
       </header>
 
+      {conflict && (
+        <InlineNotification
+          className="board__notice"
+          kind="warning"
+          lowContrast
+          title="Your last change wasn't saved."
+          subtitle={`${conflict.by ?? 'Someone else'} changed this board. It now shows their version.`}
+          onClose={() => {
+            onDismissConflict()
+            return false
+          }}
+        />
+      )}
+      {saveError && (
+        <ActionableNotification
+          className="board__notice"
+          kind="error"
+          lowContrast
+          inline
+          hideCloseButton
+          title="Your last change isn't saved yet."
+          subtitle={saveError}
+          actionButtonLabel="Retry"
+          onActionButtonClick={onRetrySave}
+        />
+      )}
       {refreshError && (
         <InlineNotification
           className="board__notice"
@@ -188,7 +231,7 @@ export function Board({ boardKey, snapshot, isFetching, refreshError, onRefresh 
           repoName={repository.fullName}
           config={config}
           onSave={(next) => updateConfig(() => next)}
-          onReset={() => resetBoard(boardKey)}
+          onReset={() => updateConfig(() => createDefaultBoard(labels))}
           onClose={closeDialog}
         />
       )}

@@ -18,6 +18,7 @@ export type ApiErrorCode =
   | 'password-too-long' // 400: password over 72 UTF-8 bytes (bcrypt ignores the rest)
   | 'signed-out' // 401: no session, or the session expired or was removed
   | 'invalid-credentials' // 401: wrong username or password on sign-in
+  | 'host-not-allowed' // 403: the request is addressed to a host the server does not answer for
   | 'csrf-rejected' // 403: missing or wrong CSRF header, or a cross-site Origin
   | 'forbidden' // 403: signed in, but the route is for the admin only
   | 'not-found' // 404: unknown route, board, user or invite id

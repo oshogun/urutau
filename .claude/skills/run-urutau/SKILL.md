@@ -3,7 +3,8 @@ name: run-urutau
 description: Build, run, test, and drive the Urutau kanban web app (Vite + React 19 + Carbon). Use when asked to start urutau or its dev server, run its tests, build it, take a screenshot of the board, drag issues between buckets, or check a UI change in a real browser.
 ---
 
-Urutau is a client-only SPA that loads a GitHub repository's issues into a kanban board.
+Urutau is a React SPA, served with a small API server (`server/`) that holds accounts and boards,
+that loads a GitHub repository's issues into a kanban board.
 To drive it, start the dev server, then start `.claude/skills/run-urutau/driver.mjs`: one
 persistent headless Chromium (Playwright) that runs the JavaScript you POST to
 `http://127.0.0.1:9333`. By default the driver answers all GitHub API calls with fixture data,
@@ -75,6 +76,9 @@ Read. Browser state (localStorage) persists between requests until the driver st
 | `keyboardMove(issue, keys)` | Space on the card's handle, press `keys` (e.g. `['ArrowRight']`), Space |
 | `shot(name, options?)` | screenshot (Playwright options: `fullPage`, `clip`, …); returns the path |
 | `goto(path)` | open a path of the app, e.g. `goto('/')` for the start page |
+| `createAdmin(username, password, page?)` | server mode, empty database: fill the first-run form, wait until the app leaves it |
+| `signIn(username, password, page?)` | server mode: fill the sign-in form; throws with the form's error text if it stays |
+| `newUserContext()` | a second isolated browser context with GitHub fixtures; returns `{ context, page }`, pass `page` to `signIn` |
 | `resetStorage()` | clear saved boards, token, theme and recents, then reload |
 | `page`, `context`, `browser` | raw Playwright objects; `mode` and `appUrl` describe the setup |
 
@@ -131,6 +135,38 @@ stops just the driver:
 for port in 9333 5173 4173; do lsof -ti:$port -sTCP:LISTEN | xargs -r kill; done
 ```
 
+## Server mode (accounts and boards on the real API server)
+
+Boards live in the API server's database, so the driver needs the server beside Vite. GitHub is
+still answered from fixtures in the browser (`fixtures.mjs` answers `api.github.com` only, never
+`/api`). An in-memory SQLite database starts empty on every server start, so each start begins at
+first-run. Ports for the user are 8787 (API), 5173 and 9333; agents in a run clone use 8788,
+5174 and 9334. Setting `PORT=8788` keeps the clone's server off the user's 8787:
+
+```bash
+source ~/.nvm/nvm.sh && nvm use >/dev/null
+mkdir -p .claude/scratch/run-urutau .claude/scratch/tmp && export TMPDIR="$PWD/.claude/scratch/tmp"
+DATABASE_URL=sqlite::memory: PORT=8788 nohup node server/main.ts > .claude/scratch/run-urutau/api.log 2>&1 &
+URUTAU_API_PORT=8788 nohup npm run dev:web -- --host 127.0.0.1 --port 5174 --strictPort > .claude/scratch/run-urutau/dev.log 2>&1 &
+timeout 60 bash -c 'until curl -sf http://127.0.0.1:5174/ >/dev/null; do sleep 1; done'
+APP_URL=http://127.0.0.1:5174 DRIVER_PORT=9334 nohup node .claude/skills/run-urutau/driver.mjs > .claude/scratch/run-urutau/driver.log 2>&1 &
+timeout 60 bash -c 'until curl -sf http://127.0.0.1:9334/health >/dev/null; do sleep 1; done' && echo up
+
+curl -s http://127.0.0.1:9334 --data-binary @- <<'EOS'
+await goto('/')
+await createAdmin('admin', 'correct horse battery')
+await openBoard('acme/widgets')
+const moved = await drag(14, 'To do')
+return { moved, shot: await shot('board') }
+EOS
+```
+
+(`dev:web` runs Vite alone; `npm run dev` runs both processes and takes the same `PORT`.) A second
+user: `const u = await newUserContext(); await signIn('admin', '…', u.page)`, then drive
+`u.page` with Playwright. A wrong password makes `signIn` throw. Stop by port, adding 8788:
+`for port in 9334 5174 8788; do lsof -ti:$port -sTCP:LISTEN | xargs -r kill; done`.
+Do not write real passwords, session cookies or invite tokens into scripts or screenshot names.
+
 ## Direct invocation (domain logic)
 
 Node 24 strips types, and `src/domain/*.ts` only import types from each other, so you can call
@@ -157,7 +193,7 @@ source ~/.nvm/nvm.sh && nvm use >/dev/null
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-Expect 86 tests in 7 files to pass. CI (`.github/workflows/ci.yml`) runs the same four steps.
+Expect every test to pass (257 in 23 files on 2026-10-02). CI (`.github/workflows/ci.yml`) runs the same four steps.
 
 ## Gotchas
 

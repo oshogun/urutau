@@ -3,6 +3,7 @@ import { Button, Dropdown, InlineNotification, Modal, Stack } from '@carbon/reac
 import { useRef, useState, type ChangeEvent } from 'react'
 import { boardFromExport, toBoardExport } from '../domain/board'
 import type { BoardConfig } from '../domain/types'
+import { downloadJson } from './downloadJson'
 
 const WINDOWS = [
   { days: 0, text: "Don't show closed issues" },
@@ -38,13 +39,7 @@ export function BoardSettingsModal({
 
   function exportBoard() {
     const file = toBoardExport(config, repoName)
-    const blob = new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `urutau-${repoName.replace('/', '-')}.json`
-    link.click()
-    URL.revokeObjectURL(url)
+    downloadJson(`urutau-${repoName.replace('/', '-')}.json`, file)
   }
 
   async function importBoard(event: ChangeEvent<HTMLInputElement>) {
@@ -96,9 +91,10 @@ export function BoardSettingsModal({
             Share this board
           </h3>
           <p className="board-settings__text">
-            Boards live in this browser. Export the buckets, rules and card positions to move them
-            to another browser or share them with your team. A board exported from another
-            repository brings its buckets and rules, but not card positions.
+            This board is stored on the Urutau server and shared with everyone who has an account.
+            Export its buckets, rules and card positions to keep a copy or reuse them on another
+            server. Importing a board file replaces this board for everyone. A board exported from
+            another repository brings its buckets and rules, but not card positions.
           </p>
           <div className="board-settings__actions">
             <Button kind="tertiary" size="sm" renderIcon={Download} onClick={exportBoard}>

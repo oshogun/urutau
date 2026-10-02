@@ -79,7 +79,9 @@ $page-gutter: $spacing-07;
   }
 }
 
-.board__notice.cds--inline-notification {
+.board__notice.cds--inline-notification,
+.board__notice.cds--actionable-notification {
+  width: auto;
   max-width: none;
   margin: 0 $page-gutter $spacing-03;
 }

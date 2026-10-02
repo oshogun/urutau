@@ -15,11 +15,15 @@ export interface Config {
   databaseUrl: string
   publicUrl: string | null
   trustProxy: boolean
+  /** Extra hostnames the server answers for, from ALLOWED_HOSTS: lower case, no port. */
+  allowedHosts: string[]
   secureCookies: boolean
   keycloak: KeycloakConfig | null
 }
 
 const DEFAULT_DATABASE_URL = 'sqlite:data/urutau.db'
+
+const HOSTNAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/
 
 type Env = Record<string, string | undefined>
 
@@ -73,6 +77,16 @@ export function loadConfig(env: Env): Config {
 
   const trustProxy = flag(env, 'TRUST_PROXY')
 
+  const allowedHosts = (text(env, 'ALLOWED_HOSTS') ?? '')
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase().replace(/\.$/, ''))
+    .filter((entry) => entry !== '')
+  for (const entry of allowedHosts) {
+    if (!HOSTNAME.test(entry)) {
+      throw new Error('ALLOWED_HOSTS must list hostnames separated by commas, without scheme, port or wildcard')
+    }
+  }
+
   const issuer = text(env, 'KEYCLOAK_ISSUER')
   const clientId = text(env, 'KEYCLOAK_CLIENT_ID')
   const clientSecret = text(env, 'KEYCLOAK_CLIENT_SECRET')
@@ -113,6 +127,7 @@ export function loadConfig(env: Env): Config {
     databaseUrl,
     publicUrl,
     trustProxy,
+    allowedHosts: [...new Set(allowedHosts)],
     secureCookies: publicUrl?.startsWith('https://') ?? false,
     keycloak,
   }

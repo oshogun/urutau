@@ -1,0 +1,16 @@
+{
+  "app": "urutau",
+  "repository": "acme/widgets",
+  "exportedAt": "2026-09-20T10:15:00.000Z",
+  "board": {
+    "version": 1,
+    "buckets": [
+      { "id": "backlog", "title": "Ideas", "wipLimit": null, "labelRules": [], "collectsClosed": false },
+      { "id": "doing", "title": "Underway", "wipLimit": 3, "labelRules": ["in progress"], "collectsClosed": false },
+      { "id": "done", "title": "Shipped", "wipLimit": null, "labelRules": [], "collectsClosed": true }
+    ],
+    "placements": { "1": "doing" },
+    "order": { "doing": [1] },
+    "closedWindowDays": 14
+  }
+}

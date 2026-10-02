@@ -2,6 +2,7 @@ import { Modal, PasswordInput, RadioButton, RadioButtonGroup, Stack } from '@car
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { SNAPSHOT_QUERY_ROOT } from '../hooks/useRepoSnapshot'
+import { useSession } from '../state/session'
 import { useSettings, type ThemePreference } from '../state/settings'
 
 interface SettingsModalProps {
@@ -11,6 +12,7 @@ interface SettingsModalProps {
 export function SettingsModal({ onClose }: SettingsModalProps) {
   const queryClient = useQueryClient()
   const token = useSettings((state) => state.token)
+  const browserToken = useSession((state) => state.session?.githubAccess.mode !== 'server')
   const theme = useSettings((state) => state.theme)
   const setToken = useSettings((state) => state.setToken)
   const setTheme = useSettings((state) => state.setTheme)
@@ -19,7 +21,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [themeDraft, setThemeDraft] = useState(theme)
 
   function save() {
-    if (tokenDraft.trim() !== token) {
+    if (browserToken && tokenDraft.trim() !== token) {
       setToken(tokenDraft)
       // Reload with the new credentials (and drop errors caused by the old ones).
       void queryClient.resetQueries({ queryKey: [SNAPSHOT_QUERY_ROOT] })
@@ -39,15 +41,19 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       onRequestClose={onClose}
     >
       <Stack gap={7}>
-        <PasswordInput
-          id="settings-token"
-          labelText="GitHub personal access token"
-          helperText="Optional for public repositories. Use a fine-grained token with read-only access to Issues (and Metadata). It is stored in this browser's local storage and only sent to api.github.com."
-          value={tokenDraft}
-          onChange={(event) => setTokenDraft(event.target.value)}
-          autoComplete="off"
-          data-modal-primary-focus
-        />
+        {browserToken ? (
+          <PasswordInput
+            id="settings-token"
+            labelText="GitHub personal access token"
+            helperText="Optional for public repositories. Use a fine-grained token with read-only access to Issues (and Metadata). It is stored in this browser's local storage and only sent to api.github.com."
+            value={tokenDraft}
+            onChange={(event) => setTokenDraft(event.target.value)}
+            autoComplete="off"
+            data-modal-primary-focus
+          />
+        ) : (
+          <p className="settings-note">GitHub is read through your Keycloak link.</p>
+        )}
         <RadioButtonGroup
           legendText="Theme"
           name="settings-theme"

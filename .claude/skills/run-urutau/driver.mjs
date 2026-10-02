@@ -12,6 +12,8 @@
 //
 // Environment: APP_URL (default http://127.0.0.1:5173), DRIVER_PORT (9333),
 // URUTAU_GITHUB (fixtures | live), COLOR_SCHEME (light | dark), SCREENSHOT_DIR.
+// Server mode needs no setting: the app is the same, the API server runs beside it
+// (see SKILL.md § Server mode).
 import { mkdirSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { dirname, join } from 'node:path'
@@ -77,6 +79,23 @@ const bucketList = (title) =>
 
 function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+async function submitAuthForm(target, username, password, buttonName) {
+  if (target.url() === 'about:blank') await target.goto(`${APP_URL}/`)
+  const usernameField = target.getByLabel('Username', { exact: true })
+  await usernameField.waitFor({ timeout: 30_000 })
+  await usernameField.fill(username)
+  await target.getByLabel('Password', { exact: true }).fill(password)
+  await target.getByRole('button', { name: buttonName, exact: true }).click()
+  // Success removes the form. A rejected submit leaves it in place with an alert.
+  try {
+    await usernameField.waitFor({ state: 'detached', timeout: 15_000 })
+  } catch {
+    const alerts = await target.locator('.auth__form [role="alert"]').allInnerTexts()
+    throw new Error(`${buttonName} did not leave the form: ${alerts.join(' ').trim() || 'no message'}`)
+  }
+  return { ok: true }
 }
 
 const helpers = {
@@ -163,6 +182,37 @@ const helpers = {
     await page.keyboard.press('Space')
     await page.waitForTimeout(300)
     return helpers.buckets()
+  },
+
+  /**
+   * Server mode. On a first run (empty database) the app shows the admin form:
+   * fills it and waits until the app leaves the form. `target` is a page from
+   * newUserContext(); the default is the main page.
+   */
+  async createAdmin(username, password, target = page) {
+    return submitAuthForm(target, username, password, 'Create account')
+  },
+
+  /** Server mode: signs in with an existing account through the sign-in form. */
+  async signIn(username, password, target = page) {
+    return submitAuthForm(target, username, password, 'Sign in')
+  },
+
+  /**
+   * A second, isolated browser context (own cookies and localStorage) for
+   * two-user scenarios. GitHub fixtures are routed in it too. Returns
+   * `{ context, page }`; pass `page` as the last argument of signIn(). It is
+   * closed when the driver stops.
+   */
+  async newUserContext() {
+    const extra = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      colorScheme: process.env.COLOR_SCHEME === 'dark' ? 'dark' : 'light',
+    })
+    if (MODE === 'fixtures') await routeGitHubFixtures(extra)
+    const extraPage = await extra.newPage()
+    await extraPage.goto(`${APP_URL}/`)
+    return { context: extra, page: extraPage }
   },
 
   /** Forgets saved boards, token, theme and recent repositories, then reloads. */

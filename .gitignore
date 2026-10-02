@@ -10,7 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 # default SQLite database of the API server
-data
+/data
 dist-ssr
 *.local
 

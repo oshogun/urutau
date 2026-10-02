@@ -29,3 +29,48 @@
 .connect__recent .cds--contained-list-item__content {
   @include type.type-style('body-compact-01');
 }
+
+.connect__note,
+.settings-note {
+  @include type.type-style('body-compact-01');
+
+  color: $text-secondary;
+}
+
+.connect__empty {
+  @include type.type-style('body-compact-01');
+
+  color: $text-secondary;
+}
+
+.connect__board-name {
+  display: block;
+}
+
+.connect__board-meta {
+  @include type.type-style('helper-text-01');
+
+  display: block;
+  color: $text-secondary;
+}
+
+.connect__recent-message.cds--inline-notification,
+.connect__import .cds--inline-notification,
+.connect__import .cds--actionable-notification {
+  max-width: none;
+}
+
+.connect__import {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+}
+
+.connect__import-skipped {
+  @include type.type-style('body-compact-01');
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-04;
+}

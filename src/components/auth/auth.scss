@@ -1,0 +1,110 @@
+@use '@carbon/react/scss/spacing' as *;
+@use '@carbon/react/scss/theme' as *;
+@use '@carbon/react/scss/type';
+
+.auth {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-06;
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: $spacing-10 $spacing-05 $spacing-09;
+}
+
+.auth__title {
+  @include type.type-style('heading-05');
+}
+
+.auth__lead {
+  @include type.type-style('body-02');
+
+  margin-top: $spacing-04;
+  color: $text-secondary;
+}
+
+.auth__form.cds--tile {
+  padding: $spacing-07;
+}
+
+.auth__actions {
+  display: flex;
+  gap: $spacing-03;
+}
+
+.users {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-08;
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: $spacing-09 $spacing-05;
+}
+
+.users__title {
+  @include type.type-style('heading-05');
+}
+
+.users__heading {
+  @include type.type-style('heading-03');
+}
+
+.users__lead {
+  @include type.type-style('body-02');
+
+  margin-top: $spacing-03;
+  color: $text-secondary;
+}
+
+.users__empty {
+  @include type.type-style('body-compact-01');
+
+  color: $text-secondary;
+}
+
+.users__create {
+  display: flex;
+  align-items: flex-end;
+  gap: $spacing-05;
+  margin-top: $spacing-05;
+
+  .cds--select {
+    width: 12rem;
+  }
+}
+
+.users__link {
+  margin-top: $spacing-05;
+}
+
+.users__link-label {
+  @include type.type-style('body-compact-01');
+
+  margin-bottom: $spacing-03;
+}
+
+.user-menu.cds--overflow-menu {
+  color: $icon-primary;
+}
+
+.app-loading {
+  display: flex;
+  justify-content: center;
+  padding: $spacing-10 $spacing-05;
+}
+
+.app-toast {
+  position: fixed;
+  right: $spacing-05;
+  bottom: $spacing-05;
+  z-index: 9000;
+}
+
+.user-menu__options.cds--overflow-menu-options {
+  width: auto;
+  min-width: 14rem;
+  max-width: 24rem;
+}
+
+.user-menu__options .cds--overflow-menu-options__btn {
+  max-width: none;
+}

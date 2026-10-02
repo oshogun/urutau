@@ -1,10 +1,7 @@
-import { ArrowRight, Close } from '@carbon/icons-react'
+import { ArrowRight } from '@carbon/icons-react'
 import {
   Button,
-  ContainedList,
-  ContainedListItem,
   Form,
-  IconButton,
   Layer,
   PasswordInput,
   Stack,
@@ -15,7 +12,10 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { parseRepoInput } from '../domain/repoRef'
 import type { RepoRef } from '../domain/types'
+import { BoardList } from '../board/BoardList'
+import { V1ImportPrompt } from '../board/V1ImportPrompt'
 import { SNAPSHOT_QUERY_ROOT } from '../hooks/useRepoSnapshot'
+import { useSession } from '../state/session'
 import { useSettings } from '../state/settings'
 import './app.scss'
 
@@ -27,8 +27,7 @@ export function ConnectPage({ onOpen }: ConnectPageProps) {
   const queryClient = useQueryClient()
   const savedToken = useSettings((state) => state.token)
   const setToken = useSettings((state) => state.setToken)
-  const recentRepos = useSettings((state) => state.recentRepos)
-  const forgetRepo = useSettings((state) => state.forgetRepo)
+  const browserToken = useSession((state) => state.session?.githubAccess.mode !== 'server')
 
   const [repoInput, setRepoInput] = useState('')
   const [tokenInput, setTokenInput] = useState(savedToken)
@@ -39,16 +38,11 @@ export function ConnectPage({ onOpen }: ConnectPageProps) {
     event.preventDefault()
     setSubmitted(true)
     if (!repo) return
-    if (tokenInput.trim() !== savedToken) {
+    if (browserToken && tokenInput.trim() !== savedToken) {
       setToken(tokenInput)
       queryClient.removeQueries({ queryKey: [SNAPSHOT_QUERY_ROOT] })
     }
     onOpen(repo)
-  }
-
-  function openRecent(fullName: string) {
-    const recent = parseRepoInput(fullName)
-    if (recent) onOpen(recent)
   }
 
   return (
@@ -58,9 +52,12 @@ export function ConnectPage({ onOpen }: ConnectPageProps) {
         <h1 className="connect__title">Plan GitHub issues on a kanban board</h1>
         <p className="connect__lead">
           Point Urutau at a repository to pull in its issues and labels. Your buckets and card
-          positions are saved in this browser; nothing is written back to GitHub.
+          positions are saved on this server and shared with everyone who has an account; nothing
+          is written back to GitHub.
         </p>
       </div>
+
+      <V1ImportPrompt />
 
       <Tile className="connect__form">
         <Layer>
@@ -77,14 +74,18 @@ export function ConnectPage({ onOpen }: ConnectPageProps) {
               autoComplete="off"
               spellCheck={false}
             />
-            <PasswordInput
-              id="connect-token"
-              labelText="Personal access token (optional)"
-              helperText="Needed for private repositories and to raise GitHub's rate limit. A fine-grained token with read-only Issues access is enough. It is stored only in this browser."
-              value={tokenInput}
-              onChange={(event) => setTokenInput(event.target.value)}
-              autoComplete="off"
-            />
+            {browserToken ? (
+              <PasswordInput
+                id="connect-token"
+                labelText="Personal access token (optional)"
+                helperText="Needed for private repositories and to raise GitHub's rate limit. A fine-grained token with read-only Issues access is enough. It is stored only in this browser and sent only to GitHub."
+                value={tokenInput}
+                onChange={(event) => setTokenInput(event.target.value)}
+                autoComplete="off"
+              />
+            ) : (
+              <p className="connect__note">GitHub is read through your Keycloak link.</p>
+            )}
             <div>
               <Button type="submit" renderIcon={ArrowRight}>
                 Open board
@@ -95,29 +96,7 @@ export function ConnectPage({ onOpen }: ConnectPageProps) {
         </Layer>
       </Tile>
 
-      {recentRepos.length > 0 && (
-        <ContainedList label="Recent repositories" kind="on-page" className="connect__recent">
-          {recentRepos.map((fullName) => (
-            <ContainedListItem
-              key={fullName}
-              onClick={() => openRecent(fullName)}
-              action={
-                <IconButton
-                  kind="ghost"
-                  size="sm"
-                  align="left"
-                  label={`Remove ${fullName} from recent repositories`}
-                  onClick={() => forgetRepo(fullName)}
-                >
-                  <Close />
-                </IconButton>
-              }
-            >
-              {fullName}
-            </ContainedListItem>
-          ))}
-        </ContainedList>
-      )}
+      <BoardList onOpen={onOpen} />
     </div>
   )
 }
