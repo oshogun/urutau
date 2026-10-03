@@ -7,6 +7,7 @@ import {
   InlineNotification,
   Modal,
   SkeletonText,
+  Tag,
 } from '@carbon/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -123,8 +124,16 @@ export function BoardList({ onOpen }: BoardListProps) {
             >
               <span className="connect__board-name">{board.fullName}</span>
               <span className="connect__board-meta">
-                {board.updatedBy ? `Updated by ${board.updatedBy.username}` : 'Updated'} on{' '}
-                {formatWhen(board.updatedAt)}
+                {board.updatedBy ? `Updated by ${board.updatedBy.username}` : 'Updated'}
+                {board.updatedBy?.kind === 'integration' && (
+                  <>
+                    {' '}
+                    <Tag as="span" type="cool-gray" size="sm">
+                      Agent
+                    </Tag>
+                  </>
+                )}{' '}
+                on {formatWhen(board.updatedAt)}
               </span>
             </ContainedListItem>
           ))}

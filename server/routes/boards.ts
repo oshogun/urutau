@@ -9,7 +9,8 @@ import {
 } from '../../src/domain/api.ts'
 import type { AppContext } from '../app.ts'
 import { asBoardConfig, isBoardVersion, repoKeyOf } from '../boards/validate.ts'
-import { createBoard, deleteBoard, getBoard, listBoards, saveBoard } from '../db/boards.ts'
+import { saveAndPublish } from '../boards/save.ts'
+import { createBoard, deleteBoard, getBoard, listBoards } from '../db/boards.ts'
 import { isRecord, readJson } from '../http/body.ts'
 import { HttpError, invalidRequest } from '../http/errors.ts'
 import type { AppEnv } from '../http/types.ts'
@@ -42,9 +43,13 @@ export function boardsRoutes(ctx: AppContext) {
     return c.req.header(CLIENT_ID_HEADER) ?? null
   }
 
-  async function stale(key: string): Promise<HttpError> {
-    const body: Omit<StaleBoardResponse, 'error' | 'message'> = { current: await getBoard(db, key) }
+  function staleWith(current: StoredBoard | null): HttpError {
+    const body: Omit<StaleBoardResponse, 'error' | 'message'> = { current }
     return new HttpError(409, 'stale-board', 'The board changed since you loaded it.', { extra: body })
+  }
+
+  async function stale(key: string): Promise<HttpError> {
+    return staleWith(await getBoard(db, key))
   }
 
   routes.get('/boards', async (c) => {
@@ -74,7 +79,7 @@ export function boardsRoutes(ctx: AppContext) {
           repoKey: key,
           version: 1,
           updatedAt: now.toISOString(),
-          updatedBy: { id: user.id, username: user.username },
+          updatedBy: { id: user.id, username: user.username, kind: 'person' },
           clientId: clientId(c),
         },
       })
@@ -92,36 +97,16 @@ export function boardsRoutes(ctx: AppContext) {
     const key = pathKey(c.req.param('owner'), c.req.param('name'))
     const request = parseSave(await readJson(c), key)
     const user = c.get('auth')!.user
-    const now = ctx.now()
-    let version: number
-    if (request.baseVersion === null) {
-      const created = await createBoard(db, { repoKey: key, fullName: request.fullName, config: request.board, userId: user.id, now })
-      if (!created) throw await stale(key)
-      version = 1
-    } else {
-      const result = await saveBoard(db, {
-        repoKey: key,
-        baseVersion: request.baseVersion,
-        fullName: request.fullName,
-        config: request.board,
-        userId: user.id,
-        now,
-      })
-      if (!result.saved) throw await stale(key)
-      version = result.version
-    }
-    const stored: StoredBoard = {
+    const outcome = await saveAndPublish({ db, now: ctx.now, boardEvents: ctx.boardEvents }, {
       repoKey: key,
+      baseVersion: request.baseVersion,
       fullName: request.fullName,
-      version,
-      updatedAt: now.toISOString(),
-      updatedBy: { id: user.id, username: user.username },
       board: request.board,
-    }
-    ctx.boardEvents.publish({
-      type: 'board-updated',
-      data: { repoKey: key, version, updatedAt: stored.updatedAt, updatedBy: stored.updatedBy, clientId: clientId(c) },
+      editor: { id: user.id, username: user.username, kind: 'person' },
+      clientId: clientId(c),
     })
+    if (!outcome.saved) throw staleWith(outcome.current)
+    const stored = outcome.stored
     return c.json(stored, request.baseVersion === null ? 201 : 200)
   })
 

@@ -67,11 +67,12 @@ function stubBoard(fullName: string, version: number): StoredBoard {
   }
 }
 let unbind: (() => void) | null = null
+let queryClient: QueryClient
 
 function renderApp(search = '', options: ApiStubOptions = {}) {
   window.history.replaceState(null, '', `/${search}`)
   stub = installApiStub(options)
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   unbind = bindQueryClient(queryClient)
   return render(
     <QueryClientProvider client={queryClient}>
@@ -581,6 +582,286 @@ describe('App', () => {
       expect(await screen.findByLabelText('GitHub repository')).toBeInTheDocument()
       expect(screen.queryByRole('heading', { name: 'Users' })).not.toBeInTheDocument()
       expect(stub.requests('GET users')).toHaveLength(0)
+    })
+  })
+  describe('agent integrations', () => {
+    const GITHUB_TOKEN = 'github_pat_urutau_fixture_not_a_real_token'
+    const planner = { username: 'planner-bot', repos: ['acme/widgets'], githubToken: true }
+    const expand = async (user: ReturnType<typeof userEvent.setup>, name = 'planner-bot') =>
+      user.click(await screen.findByRole('button', { name: `Show details of ${name}` }))
+    const cached = (needle: string) => [
+      ...queryClient
+        .getMutationCache()
+        .getAll()
+        .filter((m) => JSON.stringify([m.state.data, m.state.variables]).includes(needle)),
+      ...queryClient
+        .getQueryCache()
+        .getAll()
+        .filter((q) => JSON.stringify(q.state.data ?? null).includes(needle)),
+    ]
+    async function issueToken(user: ReturnType<typeof userEvent.setup>) {
+      await expand(user)
+      await user.type(await screen.findByLabelText('Token name'), 'laptop')
+      await user.click(screen.getByRole('button', { name: 'Create token' }))
+      return screen.findByText(/^urutau_mcp_A+\d$/)
+    }
+
+    it('shows the new token once, with focus on it, and keeps it out of every cache', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      const secret = await issueToken(user)
+
+      const [request] = stub.requests(`POST integrations/${stub.integrations[0].id}/tokens`)
+      expect(request.body).toEqual({ label: 'laptop', expiresInDays: 90 })
+      const tile = secret.closest('.users__link')
+      expect(tile).toHaveFocus()
+      expect(screen.getByText(/Urutau MCP token for laptop\. It is shown only now/)).toBeInTheDocument()
+      const text = secret.textContent ?? ''
+
+      await user.click(screen.getByRole('button', { name: 'Show details of planner-bot' }))
+      expect(screen.queryByText(text)).not.toBeInTheDocument()
+      expect(cached(text)).toEqual([])
+      await user.click(screen.getByRole('button', { name: 'Show details of planner-bot' }))
+      expect(await screen.findByRole('button', { name: 'Revoke token laptop' })).toBeInTheDocument()
+      expect(screen.queryByText(text)).not.toBeInTheDocument()
+    })
+
+    it('puts no token in any client configuration snippet', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      const secret = (await issueToken(user)).textContent ?? ''
+
+      const group = screen.getByRole('group', { name: 'Connect an agent' })
+      const snippets = [...group.querySelectorAll('.cds--snippet')].map((node) => node.textContent ?? '')
+      expect(snippets.length).toBeGreaterThanOrEqual(6)
+      const all = snippets.join('\n')
+      expect(all).not.toContain(secret)
+      expect(all).toContain('--header-file')
+      expect(all).toContain('${URUTAU_MCP_TOKEN}')
+      expect(all).toContain('${env:URUTAU_MCP_TOKEN}')
+      expect(all).toContain('${input:urutau-token}')
+      expect(all).toContain(new URL('mcp', document.baseURI).href)
+      expect(all).not.toContain('AUTH_HEADER')
+      expect(all).not.toContain('"env"')
+      for (const match of all.matchAll(/Bearer /g)) {
+        expect(all.slice(match.index + 7, match.index + 9)).toMatch(/^(\$\{|%s)$/)
+      }
+    })
+
+    it('revokes a token through a danger dialog and moves focus to the heading', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await issueToken(user)
+
+      await user.click(screen.getByRole('button', { name: 'Revoke token laptop' }))
+      expect(await screen.findByText('Revoke laptop?')).toBeInTheDocument()
+      expect(document.querySelector('.cds--modal--danger')).not.toBeNull()
+      expect(screen.getByText(/Agents using this token stop working at once/)).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Revoke token' }))
+
+      await waitFor(() => expect(stub.integrations[0].tokens).toEqual([]))
+      await waitFor(() => expect(screen.getByRole('heading', { name: 'Agent integrations' })).toHaveFocus())
+    })
+
+    it('never echoes the GitHub token and clears the field when the dialog closes', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+
+      await user.click(await screen.findByRole('button', { name: 'Replace GitHub token for planner-bot' }))
+      const field = await screen.findByLabelText('GitHub token (Urutau keeps this)')
+      expect(field).toHaveAttribute('type', 'password')
+      expect(field).toHaveAttribute('autocomplete', 'new-password')
+
+      await user.click(field)
+      await user.paste('urutau_mcp_' + 'A'.repeat(43))
+      await user.click(screen.getByRole('button', { name: 'Save GitHub token' }))
+      expect(await screen.findByText('This is an Urutau MCP token, not a GitHub token.')).toBeInTheDocument()
+
+      await user.clear(field)
+      await user.paste(GITHUB_TOKEN)
+      await user.click(screen.getByRole('button', { name: 'Save GitHub token' }))
+      await waitFor(() => expect(screen.queryByLabelText('GitHub token (Urutau keeps this)')).not.toBeInTheDocument())
+
+      expect(stub.requests(`PUT integrations/${stub.integrations[0].id}/github-token`)).toHaveLength(2)
+      expect(document.body.innerHTML).not.toContain(GITHUB_TOKEN)
+      expect(cached(GITHUB_TOKEN)).toEqual([])
+      await user.click(screen.getByRole('button', { name: 'Replace GitHub token for planner-bot' }))
+      expect(await screen.findByLabelText('GitHub token (Urutau keeps this)')).toHaveValue('')
+    })
+
+    it('gives every field on the page its own label', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+      await user.click(await screen.findByRole('button', { name: 'Replace GitHub token for planner-bot' }))
+      await screen.findByLabelText('GitHub token (Urutau keeps this)')
+
+      const labels = [...document.querySelectorAll('label')].map((node) => node.textContent?.trim())
+      expect(labels).toEqual(expect.arrayContaining(['Integration name', 'Token name', 'Token expires after', 'Link expires after']))
+      expect(new Set(labels).size).toBe(labels.length)
+      const ids = [...document.querySelectorAll('[id]')].map((node) => node.id)
+      expect(new Set(ids).size).toBe(ids.length)
+    })
+
+    it('warns on a plain-HTTP page, in the section and in the token dialog', async () => {
+      const user = userEvent.setup()
+      expect(window.location.protocol).toBe('http:')
+      renderApp('?view=users', { integrations: [planner] })
+      expect(await screen.findAllByText('This page is not served over HTTPS.')).toHaveLength(1)
+      await expand(user)
+      await user.click(await screen.findByRole('button', { name: 'Replace GitHub token for planner-bot' }))
+      expect(await screen.findAllByText('This page is not served over HTTPS.')).toHaveLength(2)
+    })
+
+    it('shows the Agent tag next to an integration in the integrations table', async () => {
+      renderApp('?view=users', { integrations: [planner] })
+      const table = await screen.findByRole('table', { name: 'Agent integrations' })
+      expect(within(table).getByText('planner-bot')).toBeInTheDocument()
+      expect(within(table).getByText('Agent')).toBeInTheDocument()
+    })
+
+    it('shows the Agent tag in the board list and in the toast for an integration editor', async () => {
+      const board = { ...stubBoard('acme/widgets', 1), updatedBy: { id: 'int-1', username: 'planner-bot', kind: 'integration' as const } }
+      const first = renderApp('', { boards: [board] })
+      const row = (await screen.findByText(/Updated by planner-bot/)).closest('.connect__board-meta') as HTMLElement
+      expect(within(row).getByText('Agent')).toBeInTheDocument()
+      first.unmount()
+      unbind?.()
+      stub.restore()
+
+      const personBoard = { ...stubBoard('acme/widgets', 1), updatedBy: { id: 'user-1', username: 'ada', kind: 'person' as const } }
+      renderApp('', { boards: [personBoard] })
+      const personRow = (await screen.findByText(/Updated by ada/)).closest('.connect__board-meta') as HTMLElement
+      expect(within(personRow).queryByText('Agent')).not.toBeInTheDocument()
+    })
+
+    it('shows the Agent tag in the toast when an integration changes the board', async () => {
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      await screen.findByText('Crash on save')
+      await screen.findByText('Live')
+
+      const theirs: BoardConfig = { ...stubBoard('acme/widgets', 1).board, placements: { 1: 'in-review' } }
+      stub.externalSave('acme/widgets', theirs, { id: 'int-1', username: 'planner-bot', kind: 'integration' })
+
+      const title = await screen.findByText('Board updated by planner-bot')
+      const toast = title.closest('.cds--toast-notification') as HTMLElement
+      expect(within(toast).getByText('Agent')).toBeInTheDocument()
+    })
+
+    it('does not show the section to a member', async () => {
+      renderApp('?view=users', { user: { isAdmin: false }, integrations: [planner] })
+      expect(await screen.findByLabelText('GitHub repository')).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Agent integrations' })).not.toBeInTheDocument()
+      expect(stub.requests('GET integrations')).toHaveLength(0)
+    })
+
+    it('creates an integration, expands it, and shows a taken name as a field error', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users')
+      await screen.findByText('No agent integrations yet.')
+
+      await user.type(screen.getByLabelText('Integration name'), 'ada')
+      await user.click(screen.getByRole('button', { name: 'Create integration' }))
+      expect(await screen.findByText('That username is already taken.')).toBeInTheDocument()
+
+      await user.clear(screen.getByLabelText('Integration name'))
+      await user.type(screen.getByLabelText('Integration name'), 'planner-bot')
+      await user.click(screen.getByRole('button', { name: 'Create integration' }))
+      expect(await screen.findByRole('button', { name: 'Remove planner-bot' })).toBeInTheDocument()
+      expect(await screen.findByLabelText('Token name')).toBeInTheDocument()
+      expect(stub.integrations.map((i) => i.username)).toEqual(['planner-bot'])
+    })
+
+    it('sends the repository lines trimmed and shows a 400 on the field', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+
+      await user.click(await screen.findByRole('button', { name: 'Edit repositories of planner-bot' }))
+      const area = await screen.findByLabelText('One repository per line, as owner/name')
+      expect(area).toHaveValue('acme/widgets')
+      await user.clear(area)
+      await user.type(area, '  acme/widgets \n\n acme/other')
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(stub.integrations[0].repos).toEqual(['acme/other', 'acme/widgets']))
+      expect(stub.requests(`PUT integrations/${stub.integrations[0].id}/repos`)[0].body).toEqual({
+        repos: ['acme/widgets', 'acme/other'],
+      })
+
+      await user.click(await screen.findByRole('button', { name: 'Edit repositories of planner-bot' }))
+      const again = await screen.findByLabelText('One repository per line, as owner/name')
+      await user.clear(again)
+      await user.type(again, 'not a repo')
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+      expect(await screen.findByText('Entry 1 is not a repository as owner/name.')).toBeInTheDocument()
+    })
+
+    it('confirms clearing the GitHub token and removing the integration in danger dialogs', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+
+      await user.click(await screen.findByRole('button', { name: 'Clear GitHub token of planner-bot' }))
+      expect(await screen.findByText(/The token still works at GitHub until you revoke it there\./)).toBeInTheDocument()
+      expect(document.querySelector('.cds--modal--danger')).not.toBeNull()
+      await user.click(screen.getByRole('button', { name: 'Clear token' }))
+      await waitFor(() => expect(stub.integrations[0].githubToken.set).toBe(false))
+
+      await user.click(screen.getByRole('button', { name: 'Remove planner-bot' }))
+      expect(await screen.findByText('Remove planner-bot?')).toBeInTheDocument()
+      expect(document.querySelector('.cds--modal--danger')).not.toBeNull()
+      await user.click(screen.getByRole('button', { name: 'Remove integration' }))
+      await waitFor(() => expect(stub.integrations).toEqual([]))
+    })
+
+    it('returns focus to the launcher when a dialog is cancelled, and to the heading when it is gone', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+
+      const edit = await screen.findByRole('button', { name: 'Edit repositories of planner-bot' })
+      await user.click(edit)
+      await screen.findByLabelText('One repository per line, as owner/name')
+      await user.click(screen.getByRole('button', { name: 'Cancel' }))
+      await waitFor(() => expect(edit).toHaveFocus())
+
+      const remove = screen.getByRole('button', { name: 'Remove planner-bot' })
+      await user.click(remove)
+      await screen.findByText('Remove planner-bot?')
+      await user.click(screen.getByRole('button', { name: 'Cancel' }))
+      await waitFor(() => expect(remove).toHaveFocus())
+
+      await user.click(screen.getByRole('button', { name: 'Clear GitHub token of planner-bot' }))
+      await user.click(await screen.findByRole('button', { name: 'Clear token' }))
+      await waitFor(() => expect(stub.integrations[0].githubToken.set).toBe(false))
+      await waitFor(() => expect(screen.getByRole('heading', { name: 'Agent integrations' })).toHaveFocus())
+      expect(document.body).not.toHaveFocus()
+    })
+
+    it('returns focus to the Edit repositories button after saving the list', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+
+      const edit = await screen.findByRole('button', { name: 'Edit repositories of planner-bot' })
+      await user.click(edit)
+      const area = await screen.findByLabelText('One repository per line, as owner/name')
+      await user.clear(area)
+      await user.type(area, 'acme/other')
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(stub.integrations[0].repos).toEqual(['acme/other']))
+      await waitFor(() => expect(screen.queryByLabelText('One repository per line, as owner/name')).toBeNull())
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Edit repositories of planner-bot' })).toHaveFocus())
+      expect(document.body).not.toHaveFocus()
+    })
+
+    it('disables setting a GitHub token and says why when the server has no key', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [{ username: 'planner-bot' }], githubTokenStorage: false })
+      expect(await screen.findByText('GitHub tokens cannot be stored.')).toBeInTheDocument()
+      await expand(user)
+      expect(await screen.findByRole('button', { name: 'Set GitHub token for planner-bot' })).toBeDisabled()
     })
   })
   describe('creating issues', () => {

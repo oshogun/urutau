@@ -273,7 +273,13 @@ export function Board({
                 setToastOpen(false)
                 return false
               }}
-            />
+            >
+              {live.lastRemoteChange.kind === 'integration' && (
+                <Tag as="span" type="cool-gray" size="sm">
+                  Agent
+                </Tag>
+              )}
+            </ToastNotification>
           )}
         </div>
       )}

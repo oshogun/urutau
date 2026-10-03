@@ -138,3 +138,94 @@
     margin-top: 0;
   }
 }
+
+.integrations__notices {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+  margin-top: $spacing-05;
+
+  .cds--inline-notification {
+    max-width: none;
+  }
+}
+
+.users__section > .users__create {
+  margin-bottom: $spacing-05;
+
+  .cds--text-input__field-wrapper,
+  .cds--text-input-wrapper {
+    width: 24rem;
+    max-width: 100%;
+  }
+}
+
+.integrations__name {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-03;
+}
+
+.integrations__details {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-06;
+  padding: $spacing-05 0;
+
+  .users__create {
+    flex-wrap: wrap;
+    margin-bottom: 0;
+  }
+}
+
+.integrations__subheading {
+  @include type.type-style('heading-02');
+
+  margin-bottom: $spacing-03;
+}
+
+.integrations__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-03;
+  align-items: center;
+  margin-bottom: $spacing-03;
+}
+
+.integrations__meta {
+  @include type.type-style('helper-text-01');
+
+  color: $text-secondary;
+}
+
+.integrations__repos {
+  @include type.type-style('code-01');
+
+  margin-bottom: $spacing-03;
+}
+
+.integrations__connect {
+  margin-top: $spacing-06;
+
+  .cds--snippet {
+    max-width: none;
+  }
+}
+
+.integrations__note {
+  @include type.type-style('helper-text-01');
+
+  margin: $spacing-03 0;
+  max-width: 48rem;
+  color: $text-secondary;
+}
+
+.integrations__modal {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-05;
+
+  .cds--inline-notification {
+    max-width: none;
+  }
+}

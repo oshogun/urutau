@@ -30,6 +30,7 @@ import {
 } from '../../api/admin'
 import type { CreateInviteResponse, InviteSummary, UserSummary } from '../../domain/api'
 import { formatDateTime } from './format'
+import { IntegrationsSection } from './IntegrationsSection'
 import './auth.scss'
 
 const EXPIRY_CHOICES = [
@@ -315,6 +316,8 @@ export function UsersPage() {
           </DataTable>
         )}
       </section>
+
+      <IntegrationsSection />
 
       {pending && (
         <Modal

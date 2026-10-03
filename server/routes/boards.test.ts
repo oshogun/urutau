@@ -44,7 +44,7 @@ describe('saving a board', () => {
     await setUp()
     const created = await h.put(PATH, save(null), { 'X-Urutau-Client': 'tab-1' })
     expect(created.status).toBe(201)
-    expect(await created.json()).toMatchObject({ repoKey: 'acme/widgets', version: 1, updatedBy: { username: 'admin' } })
+    expect(await created.json()).toMatchObject({ repoKey: 'acme/widgets', version: 1, updatedBy: { username: 'admin', kind: 'person' } })
 
     const second = await h.put(PATH, save(1, 'Doing'))
     expect(second.status).toBe(200)
@@ -196,7 +196,7 @@ describe('importing version-1 boards', () => {
     const body = (await first.json()) as ImportBoardsResponse
     expect(body).toEqual({ imported: ['acme/widgets', 'acme/gadgets'], skipped: [], invalid: [] })
     const stored = (await (await h.get(PATH)).json()) as StoredBoard
-    expect(stored).toMatchObject({ version: 1, fullName: 'acme/widgets', updatedBy: { username: 'admin' } })
+    expect(stored).toMatchObject({ version: 1, fullName: 'acme/widgets', updatedBy: { username: 'admin', kind: 'person' } })
     expect(h.events.map((event) => event.data)).toHaveLength(2)
 
     await h.put(PATH, save(1, 'Edited on the server'))
