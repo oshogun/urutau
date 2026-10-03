@@ -1,4 +1,6 @@
 /** Structured logging: one JSON object per line on stdout, with known secrets removed. */
+import { redactPatterns } from './github/tokenFormats.ts'
+
 
 export type LogFields = Record<string, string | number | boolean | null>
 
@@ -45,18 +47,21 @@ export interface LoggerOptions {
   write?: (line: string) => void
   now?: () => Date
   secrets?: readonly string[]
+  /** Also replace token-shaped values (SECRET_PATTERNS) with [redacted]. Default false. */
+  patterns?: boolean
 }
 
 export function createLogger(options: LoggerOptions = {}): Logger {
   const write = options.write ?? ((line: string) => process.stdout.write(line + '\n'))
   const now = options.now ?? (() => new Date())
   const secrets = options.secrets ?? []
+  const clean = options.patterns ? (text: string) => redactPatterns(redact(text, secrets)) : (text: string) => redact(text, secrets)
   const emit = (level: string, msg: string, fields: LogFields = {}) => {
-    const clean: LogFields = {}
+    const cleaned: LogFields = {}
     for (const [key, value] of Object.entries(fields)) {
-      clean[key] = typeof value === 'string' ? redact(value, secrets) : value
+      cleaned[key] = typeof value === 'string' ? clean(value) : value
     }
-    write(JSON.stringify({ time: now().toISOString(), level, msg: redact(msg, secrets), ...clean }))
+    write(JSON.stringify({ time: now().toISOString(), level, msg: clean(msg), ...cleaned }))
   }
   return {
     info: (msg, fields) => emit('info', msg, fields),

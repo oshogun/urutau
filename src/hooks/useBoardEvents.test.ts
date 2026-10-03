@@ -60,7 +60,21 @@ describe('useBoardEvents', () => {
     await tick()
     expect(gets(stub)).toBe(2)
     expect(useBoards.getState().entries[KEY].board?.buckets[0].title).toBe('Theirs')
-    expect(result.current.lastRemoteChange).toEqual({ by: 'grace', at: saved.updatedAt, version: 2 })
+    expect(result.current.lastRemoteChange).toEqual({ by: 'grace', kind: 'person', at: saved.updatedAt, version: 2 })
+  })
+
+  it('reports an integration account as the kind of the change', async () => {
+    const { result } = await mount()
+    stub.externalSave('acme/widgets', renamed('Agent'), { id: 'int-1', username: 'planner-bot', kind: 'integration' })
+    await tick()
+    expect(result.current.lastRemoteChange).toMatchObject({ by: 'planner-bot', kind: 'integration' })
+  })
+
+  it('reads a missing kind as a person', async () => {
+    const { result } = await mount()
+    stub.externalSave('acme/widgets', renamed('Old'), { id: 'u3', username: 'linus' })
+    await tick()
+    expect(result.current.lastRemoteChange).toMatchObject({ by: 'linus', kind: 'person' })
   })
 
   it('ignores the event for its own save', async () => {

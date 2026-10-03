@@ -12,6 +12,42 @@ describe('loadConfig', () => {
       allowedHosts: [],
       secureCookies: false,
       keycloak: null,
+      tokenEncryptionKey: null,
+    })
+  })
+
+  describe('TOKEN_ENCRYPTION_KEY', () => {
+    const valid = Buffer.alloc(32, 7).toString('base64')
+
+    it('is null when unset, empty or only whitespace', () => {
+      expect(loadConfig({}).tokenEncryptionKey).toBeNull()
+      expect(loadConfig({ TOKEN_ENCRYPTION_KEY: '' }).tokenEncryptionKey).toBeNull()
+      expect(loadConfig({ TOKEN_ENCRYPTION_KEY: '   ' }).tokenEncryptionKey).toBeNull()
+    })
+
+    it('decodes a valid key to 32 bytes, ignoring surrounding whitespace', () => {
+      const key = loadConfig({ TOKEN_ENCRYPTION_KEY: ` ${valid}\n` }).tokenEncryptionKey
+      expect(key).toEqual(Buffer.alloc(32, 7))
+    })
+
+    it('rejects other lengths and non-base64 values without printing them', () => {
+      const bad = [
+        Buffer.alloc(31, 7).toString('base64'),
+        Buffer.alloc(33, 7).toString('base64'),
+        'not-base64-not-base64-not-base64-not-base64=',
+        valid.slice(0, 43),
+        valid + 'A',
+      ]
+      for (const value of bad) {
+        expect(() => loadConfig({ TOKEN_ENCRYPTION_KEY: value })).toThrow(
+          new Error('TOKEN_ENCRYPTION_KEY must be 32 bytes encoded as base64'),
+        )
+        try {
+          loadConfig({ TOKEN_ENCRYPTION_KEY: value })
+        } catch (error) {
+          expect((error as Error).message).not.toContain(value)
+        }
+      }
     })
   })
 

@@ -5,6 +5,7 @@ import { insertIgnoringDuplicate, isBoardVersion, iso } from './helpers.ts'
 import type { Tables } from './schema.ts'
 
 const LIST_LIMIT = 500
+const BY_KEYS_LIMIT = 200
 
 export interface NewBoard {
   repoKey: string
@@ -35,15 +36,19 @@ interface BoardRow {
   updated_at: string
   updated_by: string | null
   username: string | null
+  integration_id: string | null
 }
 
 function summary(row: BoardRow): BoardSummary {
+  const kind: 'person' | 'integration' = row.integration_id !== null ? 'integration' : 'person'
+  const updatedBy =
+    row.updated_by !== null && row.username !== null ? { id: row.updated_by, username: row.username, kind } : null
   return {
     repoKey: row.repo_key,
     fullName: row.full_name,
     version: row.version,
     updatedAt: row.updated_at,
-    updatedBy: row.updated_by !== null && row.username !== null ? { id: row.updated_by, username: row.username } : null,
+    updatedBy,
   }
 }
 
@@ -51,6 +56,7 @@ function boardQuery(db: Kysely<Tables>) {
   return db
     .selectFrom('boards')
     .leftJoin('users', 'users.id', 'boards.updated_by')
+    .leftJoin('integrations', 'integrations.user_id', 'boards.updated_by')
     .select([
       'boards.repo_key',
       'boards.full_name',
@@ -58,6 +64,7 @@ function boardQuery(db: Kysely<Tables>) {
       'boards.updated_at',
       'boards.updated_by',
       'users.username as username',
+      'integrations.user_id as integration_id',
     ])
 }
 
@@ -120,6 +127,18 @@ export async function listBoards(db: Kysely<Tables>): Promise<BoardSummary[]> {
     .orderBy('boards.updated_at', 'desc')
     .orderBy('boards.repo_key', 'asc')
     .limit(LIST_LIMIT)
+    .execute()
+  return rows.map(summary)
+}
+
+/** Summaries of the boards among these keys (at most 200), most recently updated first, then by key; [] for no keys. */
+export async function listBoardsByKeys(db: Kysely<Tables>, repoKeys: readonly string[]): Promise<BoardSummary[]> {
+  if (repoKeys.length === 0) return []
+  const rows = await boardQuery(db)
+    .where('boards.repo_key', 'in', [...repoKeys])
+    .orderBy('boards.updated_at', 'desc')
+    .orderBy('boards.repo_key', 'asc')
+    .limit(BY_KEYS_LIMIT)
     .execute()
   return rows.map(summary)
 }

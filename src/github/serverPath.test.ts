@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSession } from '../state/session'
 import { installApiStub } from '../test/apiStub'
 import { fetchRepoSnapshot } from './api'
-import { GitHubError, getAllPages, getJson } from './client'
+import { GitHubError, browserTransport, getAllPages, getJson } from './client'
 
 const REPO = { owner: 'acme', name: 'widgets' }
 const TOKEN = 'ghp_pasted_secret'
@@ -54,7 +54,10 @@ describe('server path', () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockClear()
 
-    const snapshot = await fetchRepoSnapshot(REPO, { via: 'server', token: TOKEN, closedWindowDays: 0 })
+    const snapshot = await fetchRepoSnapshot(REPO, {
+      closedWindowDays: 0,
+      transport: browserTransport({ via: 'server', token: TOKEN }),
+    })
 
     expect(snapshot.issues.map((issue) => issue.number)).toEqual([1, 2])
     expect(snapshot.repository.fullName).toBe('acme/widgets')

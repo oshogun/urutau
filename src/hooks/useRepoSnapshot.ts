@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { repoKey } from '../domain/repoRef'
 import type { RepoRef } from '../domain/types'
 import { fetchRepoSnapshot } from '../github/api'
-import { GitHubError } from '../github/client'
+import { GitHubError, browserTransport } from '../github/client'
 import { useSession } from '../state/session'
 import { useSettings } from '../state/settings'
 
@@ -27,12 +27,13 @@ export function useRepoSnapshot(repo: RepoRef, closedWindowDays: number) {
     queryKey: [SNAPSHOT_QUERY_ROOT, key, closedWindowDays, mode],
     queryFn: async ({ signal }) => {
       try {
-        return await fetchRepoSnapshot(
-          repo,
-          mode === 'server'
-            ? { via: 'server', closedWindowDays, signal }
-            : { token: useSettings.getState().token, closedWindowDays, signal },
-        )
+        return await fetchRepoSnapshot(repo, {
+          closedWindowDays,
+          signal,
+          transport: browserTransport(
+            mode === 'server' ? { via: 'server' } : { token: useSettings.getState().token },
+          ),
+        })
       } catch (error) {
         if (error instanceof GitHubError && error.kind === 'server-access') {
           void useSession.getState().refresh()

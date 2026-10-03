@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fetchRepoSnapshot } from './api'
+import { fetchRepoSnapshot, fetchRepoSnapshotDetailed } from './api'
+import { browserTransport } from './client'
+import type { GitHubTransport } from './paging'
 
 const NOW = Date.parse('2026-10-02T12:00:00Z')
 
@@ -56,7 +58,7 @@ describe('fetchRepoSnapshot', () => {
 
     const snapshot = await fetchRepoSnapshot(
       { owner: 'acme', name: 'widgets' },
-      { closedWindowDays: 14 },
+      { closedWindowDays: 14, transport: browserTransport({}) },
     )
 
     expect(snapshot.repository.fullName).toBe('acme/widgets')
@@ -83,8 +85,110 @@ describe('fetchRepoSnapshot', () => {
       '/repos/acme/widgets/labels': [],
       '/repos/acme/widgets/issues?state=open': [],
     })
-    await fetchRepoSnapshot({ owner: 'acme', name: 'widgets' }, { closedWindowDays: 0 })
+    await fetchRepoSnapshot({ owner: 'acme', name: 'widgets' }, {
+      closedWindowDays: 0,
+      transport: browserTransport({}),
+    })
     const states = fetchMock.mock.calls.map(([input]) => new URL(String(input)).searchParams.get('state'))
     expect(states).not.toContain('closed')
+  })
+})
+
+const ROOT = 'https://api.github.com'
+const REPO_BODY = { full_name: 'acme/widgets', description: null, html_url: 'https://github.com/acme/widgets', private: false }
+
+/** A transport that records every request and answers by path; it refuses anything but GET by construction. */
+function fakeTransport(routes: Record<string, (url: URL) => Response | undefined>) {
+  const urls: string[] = []
+  const transport: GitHubTransport = {
+    root: ROOT,
+    get: async (url) => {
+      urls.push(url)
+      const parsed = new URL(url)
+      const answer = routes[parsed.pathname]?.(parsed)
+      if (!answer) throw new Error(`unexpected request ${url}`)
+      return answer
+    },
+  }
+  return { transport, urls }
+}
+
+const ok = (body: unknown, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), { status: 200, headers })
+
+describe('fetchRepoSnapshotDetailed over a fake transport', () => {
+  it('requests the repository first, then labels, open and closed issues, and uses the injected clock', async () => {
+    const { transport, urls } = fakeTransport({
+      '/repos/acme/widgets': () => ok(REPO_BODY),
+      '/repos/acme/widgets/labels': () => ok([{ name: 'bug', color: 'd73a4a', description: null }]),
+      '/repos/acme/widgets/issues': (url) =>
+        ok(url.searchParams.get('state') === 'open' ? [ghIssue(1), ghIssue(7, { pull_request: {} })] : [
+          ghIssue(9, { state: 'closed', closed_at: '2026-09-30T00:00:00Z' }),
+          ghIssue(12, { state: 'closed', closed_at: '2025-01-01T00:00:00Z', pull_request: {} }),
+        ]),
+    })
+    const result = await fetchRepoSnapshotDetailed(
+      { owner: 'acme', name: 'widgets' },
+      { closedWindowDays: 14, transport, now: () => NOW },
+    )
+    expect(urls[0]).toBe(`${ROOT}/repos/acme/widgets`)
+    expect(urls.slice(1)).toEqual([
+      `${ROOT}/repos/acme/widgets/labels?per_page=100`,
+      `${ROOT}/repos/acme/widgets/issues?state=open&per_page=100`,
+      `${ROOT}/repos/acme/widgets/issues?state=closed&since=2026-09-18T12%3A00%3A00.000Z&per_page=100`,
+    ])
+    expect(result.snapshot.issues.map((issue) => issue.number)).toEqual([1, 9])
+    expect(result.snapshot.fetchedAt).toBe(NOW)
+    expect(result.highestNumber).toBe(12)
+    expect(result.pullRequests).toEqual([7, 12])
+    expect(result.openTruncated).toBe(false)
+    expect(result.closedTruncated).toBe(false)
+  })
+
+  it('skips the label pages when labels is false', async () => {
+    const { transport, urls } = fakeTransport({
+      '/repos/acme/widgets': () => ok(REPO_BODY),
+      '/repos/acme/widgets/issues': () => ok([]),
+    })
+    const result = await fetchRepoSnapshotDetailed(
+      { owner: 'acme', name: 'widgets' },
+      { closedWindowDays: 0, transport, labels: false },
+    )
+    expect(result.snapshot.labels).toEqual([])
+    expect(result.highestNumber).toBe(0)
+    expect(urls).toEqual([`${ROOT}/repos/acme/widgets`, `${ROOT}/repos/acme/widgets/issues?state=open&per_page=100`])
+  })
+
+  it('reports which list was truncated', async () => {
+    const { transport } = fakeTransport({
+      '/repos/acme/widgets': () => ok(REPO_BODY),
+      '/repos/acme/widgets/issues': (url) =>
+        ok([ghIssue(1)], url.searchParams.get('state') === 'open' ? { link: '<https://elsewhere.test/x>; rel="next"' } : {}),
+    })
+    const result = await fetchRepoSnapshotDetailed(
+      { owner: 'acme', name: 'widgets' },
+      { closedWindowDays: 7, transport, labels: false, now: () => NOW },
+    )
+    expect(result.openTruncated).toBe(true)
+    expect(result.closedTruncated).toBe(false)
+    expect(result.snapshot.truncated).toBe(true)
+  })
+})
+
+describe('import rules', () => {
+  it('api.ts and paging.ts import only domain and paging modules', () => {
+    const sources = import.meta.glob<string>(['./api.ts', './paging.ts'], {
+      query: '?raw',
+      import: 'default',
+      eager: true,
+    })
+    expect(Object.keys(sources).sort()).toEqual(['./api.ts', './paging.ts'])
+    let found = 0
+    for (const source of Object.values(sources)) {
+      const specifiers = [...source.matchAll(/^(?:import|export)\s[^'"]*?from\s+'([^']+)'/gm)].map((match) => match[1])
+      found += specifiers.length
+      for (const specifier of specifiers) expect(specifier).toMatch(/^(\.\.\/domain\/[\w.]+\.ts|\.\/paging\.ts)$/)
+    }
+    expect(found).toBeGreaterThan(0)
   })
 })

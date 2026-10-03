@@ -5,14 +5,19 @@ import type {
   ApiErrorBody,
   ApiErrorCode,
   AppConfigResponse,
-  BoardAuthor,
+  BoardEditor,
   BoardEventName,
   BoardUpdatedEvent,
+  CreateApiTokenRequest,
+  CreateApiTokenResponse,
+  CreateIntegrationResponse,
   CreateInviteRequest,
   CreateIssueResponse,
   CreateInviteResponse,
   CredentialsRequest,
   GitHubAccess,
+  IntegrationListResponse,
+  IntegrationSummary,
   ImportBoardsResponse,
   ServerSettings,
   InviteSummary,
@@ -20,6 +25,10 @@ import type {
   Session,
   SessionResponse,
   SessionUser,
+  SetGitHubTokenRequest,
+  SetGitHubTokenResponse,
+  SetIntegrationReposRequest,
+  SetIntegrationReposResponse,
   StaleBoardResponse,
   StoredBoard,
   UserSummary,
@@ -73,6 +82,10 @@ export interface ApiStubOptions {
     body: unknown
     headers: Record<string, string>
   }) => Response | undefined
+  /** Whether the server can store GitHub tokens (TOKEN_ENCRYPTION_KEY is set). Default true. */
+  githubTokenStorage?: boolean
+  /** Agent integrations at the start. */
+  integrations?: { username: string; repos?: string[]; githubToken?: boolean }[]
 }
 
 export interface ApiCall {
@@ -100,9 +113,9 @@ export interface ApiStub {
   /** The stored board for a key, or undefined. */
   board(key: string): StoredBoard | undefined
   /** Stores a board as if another user saved it (no event); returns it. */
-  putBoard(fullName: string, board: BoardConfig, by?: BoardAuthor | null): StoredBoard
+  putBoard(fullName: string, board: BoardConfig, by?: BoardEditor | null): StoredBoard
   /** Saves as another browser tab or user would and publishes the event to open streams. */
-  externalSave(fullName: string, board: BoardConfig, by?: BoardAuthor | null): StoredBoard
+  externalSave(fullName: string, board: BoardConfig, by?: BoardEditor | null): StoredBoard
   /** Removes a board as another user would and publishes board-deleted. */
   externalDelete(repoKey: string): void
   /** Sends an event to every open fake EventSource for the repository. */
@@ -112,6 +125,8 @@ export interface ApiStub {
   /** Holds matching requests until `release()`; a held request has not changed any state. */
   hold(matcher: CallMatcher): { release(): void }
   users: UserSummary[]
+  /** The stub's agent integrations, as GET api/integrations lists them. */
+  readonly integrations: IntegrationSummary[]
   invites: { summary: InviteSummary; token: string }[]
   /** Changes the GitHub access of the signed-in session, as the server would report it from now on. */
   setGithubAccess(access: GitHubAccess): void
@@ -169,6 +184,18 @@ export function stubCreatedIssue(fullName: string, number: number, title: string
     created_at: now,
     updated_at: now,
     closed_at: null,
+  }
+}
+
+/** The server's three GitHub token format rules (a local copy: src cannot import server). */
+function githubTokenProblem(value: string): { code: ApiErrorCode; message: string } | null {
+  if (value.startsWith('urutau_mcp_')) {
+    return { code: 'not-a-github-token', message: 'This is an Urutau MCP token, not a GitHub token.' }
+  }
+  if (/^github_pat_[A-Za-z0-9_]{20,255}$/.test(value) || /^ghp_[A-Za-z0-9]{36}$/.test(value)) return null
+  return {
+    code: 'unsupported-token-format',
+    message: 'Use a fine-grained token (github_pat_…) or a classic token (ghp_…).',
   }
 }
 
@@ -303,9 +330,23 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
 
   const boards = new Map<string, StoredBoard>()
   const stamp = () => new Date(Date.UTC(2026, 9, 2, 12, 0, tick++)).toISOString()
-  const author = (): BoardAuthor | null =>
-    current ? { id: current.user.id, username: current.user.username } : null
+  const author = (): BoardEditor | null =>
+    current ? { id: current.user.id, username: current.user.username, kind: 'person' } : null
   for (const stored of options.boards ?? []) boards.set(stored.repoKey, stored)
+
+  const githubTokenStorage = options.githubTokenStorage ?? true
+  const integrations: IntegrationSummary[] = (options.integrations ?? []).map((start) => ({
+    id: `integration-${nextId++}`,
+    username: start.username,
+    createdAt: stamp(),
+    createdBy: author(),
+    tokens: [],
+    githubToken: start.githubToken
+      ? { set: true, readable: githubTokenStorage, status: 'unchecked', updatedAt: stamp() }
+      : { set: false, readable: false, status: null, updatedAt: null },
+    repos: [...new Set((start.repos ?? []).map((r) => r.toLowerCase()))].sort(),
+  }))
+  let issuedTokens = 0
 
   const invites: ApiStub['invites'] = []
   const calls: ApiCall[] = []
@@ -321,7 +362,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     }
   }
 
-  const store = (fullName: string, board: BoardConfig, by: BoardAuthor | null): StoredBoard => {
+  const store = (fullName: string, board: BoardConfig, by: BoardEditor | null): StoredBoard => {
     const key = fullName.toLowerCase()
     const previous = boards.get(key)
     const saved: StoredBoard = {
@@ -357,6 +398,109 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
   const validKey = (path: string): { key: string } | null => {
     const ref = path.split('/').length === 2 ? parseRepoInput(path) : null
     return ref && repoKey(ref) === path ? { key: path } : null
+  }
+
+  function integrationsRoute(method: string, tail: string, body: unknown): Response {
+    const fields = typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : null
+    if (tail === '') {
+      if (method === 'GET') {
+        const list: IntegrationListResponse = { integrations, githubTokenStorage }
+        return toResponse(200, list)
+      }
+      if (method === 'POST') {
+        const username = fields?.username
+        if (typeof username !== 'string') return error(400, 'invalid-request', 'A username is required.')
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/.test(username)) {
+          return error(400, 'invalid-request', 'The username must be 3 to 32 characters: letters, digits, dots, dashes and underscores, starting with a letter or digit.')
+        }
+        const lower = username.toLowerCase()
+        if (accounts.some((a) => a.user.username.toLowerCase() === lower) || integrations.some((i) => i.username.toLowerCase() === lower)) {
+          return error(409, 'username-taken', 'That username is already taken.')
+        }
+        const integration: IntegrationSummary = {
+          id: `integration-${nextId++}`,
+          username,
+          createdAt: stamp(),
+          createdBy: author(),
+          tokens: [],
+          githubToken: { set: false, readable: false, status: null, updatedAt: null },
+          repos: [],
+        }
+        integrations.push(integration)
+        return toResponse(201, { integration } satisfies CreateIntegrationResponse)
+      }
+      return error(404, 'not-found', 'No such route.')
+    }
+
+    const [id, section, sectionId, ...more] = tail.split('/').map(decodeURIComponent)
+    const integration = integrations.find((i) => i.id === id)
+    if (!integration) return error(404, 'not-found', 'There is no agent integration with this id.')
+    if (more.length > 0) return error(404, 'not-found', 'No such route.')
+
+    if (section === undefined && method === 'DELETE') {
+      integrations.splice(integrations.indexOf(integration), 1)
+      return toResponse(204, null)
+    }
+    if (section === 'tokens' && sectionId === undefined && method === 'POST') {
+      const request = fields as Partial<CreateApiTokenRequest> | null
+      const label = typeof request?.label === 'string' ? request.label.trim() : ''
+      if (label === '' || length(label) > 64) return error(400, 'invalid-request', 'label must be 1 to 64 characters.')
+      const days = request?.expiresInDays
+      if (days !== null && days !== 30 && days !== 90 && days !== 365) {
+        return error(400, 'invalid-request', 'expiresInDays must be 30, 90, 365 or null.')
+      }
+      issuedTokens += 1
+      const token: CreateApiTokenResponse['token'] = {
+        id: `token-${nextId++}`,
+        label,
+        createdAt: stamp(),
+        expiresAt: days === null ? null : new Date(Date.now() + days * 86_400_000).toISOString(),
+        lastUsedAt: null,
+      }
+      integration.tokens.unshift(token)
+      const suffix = String(issuedTokens).padStart(43, 'A')
+      return toResponse(201, { token, secret: `urutau_mcp_${suffix}` } satisfies CreateApiTokenResponse)
+    }
+    if (section === 'tokens' && sectionId !== undefined && method === 'DELETE') {
+      const token = integration.tokens.find((t) => t.id === sectionId)
+      if (!token) return error(404, 'not-found', 'There is no such token for this integration.')
+      integration.tokens.splice(integration.tokens.indexOf(token), 1)
+      return toResponse(204, null)
+    }
+    if (section === 'github-token' && sectionId === undefined && method === 'PUT') {
+      const token = (fields as Partial<SetGitHubTokenRequest> | null)?.token
+      if (typeof token !== 'string' || token.length > 300) {
+        return error(400, 'invalid-request', 'token must be text of at most 300 characters.')
+      }
+      if (!githubTokenStorage) {
+        return error(409, 'encryption-key-missing', 'The server has no TOKEN_ENCRYPTION_KEY, so it cannot store a GitHub token.')
+      }
+      const problem = githubTokenProblem(token.trim())
+      if (problem) return error(400, problem.code, problem.message)
+      integration.githubToken = { set: true, readable: true, status: 'unchecked', updatedAt: stamp() }
+      return toResponse(200, { githubToken: integration.githubToken } satisfies SetGitHubTokenResponse)
+    }
+    if (section === 'github-token' && sectionId === undefined && method === 'DELETE') {
+      integration.githubToken = { set: false, readable: false, status: null, updatedAt: null }
+      return toResponse(204, null)
+    }
+    if (section === 'repos' && sectionId === undefined && method === 'PUT') {
+      const repos = (fields as Partial<SetIntegrationReposRequest> | null)?.repos
+      if (!Array.isArray(repos) || repos.length > 200 || repos.some((r) => typeof r !== 'string')) {
+        return error(400, 'invalid-request', 'repos must be a list of at most 200 repositories.')
+      }
+      const keys: string[] = []
+      for (const [index, entry] of (repos as string[]).entries()) {
+        const [owner = '', name = '', ...extra] = entry.trim().split('/')
+        if (extra.length > 0 || !OWNER_PATTERN.test(owner) || !NAME_PATTERN.test(name) || name === '.' || name === '..') {
+          return error(400, 'invalid-request', `Entry ${index + 1} is not a repository as owner/name.`)
+        }
+        keys.push(`${owner}/${name}`.toLowerCase())
+      }
+      integration.repos = [...new Set(keys)].sort()
+      return toResponse(200, { repos: integration.repos } satisfies SetIntegrationReposResponse)
+    }
+    return error(404, 'not-found', 'No such route.')
   }
 
   function route(call: ApiCall, url: URL): Response {
@@ -523,6 +667,11 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
       }
     }
 
+    if (head === 'integrations') {
+      if (!current.user.isAdmin) return error(403, 'forbidden', 'Only the admin can do this.')
+      return integrationsRoute(method, tail, body)
+    }
+
     if (head === 'users' || head === 'invites') {
       if (!current.user.isAdmin) return error(403, 'forbidden', 'Only the admin can do this.')
       if (head === 'users') {
@@ -629,7 +778,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     requests: (matcher) => calls.filter((call) => matches(matcher, call)),
     board: (key) => boards.get(key.toLowerCase()),
     putBoard: (fullName, board, by = null) => store(fullName, board, by),
-    externalSave(fullName, board, by = { id: 'user-other', username: 'grace' }) {
+    externalSave(fullName, board, by = { id: 'user-other', username: 'grace', kind: 'person' }) {
       const saved = store(fullName, board, by)
       publishUpdate(saved, null)
       return saved
@@ -652,6 +801,9 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     },
     get users() {
       return accounts.map((a) => a.user)
+    },
+    get integrations() {
+      return integrations
     },
     invites,
     setGithubAccess(access) {

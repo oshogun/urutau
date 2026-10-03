@@ -30,6 +30,9 @@ export type ApiErrorCode =
   | 'username-taken' // 409
   | 'stale-board' // 409: the save's baseVersion is not the stored version (body: StaleBoardResponse)
   | 'cannot-remove-admin' // 409: removing the admin account
+  | 'encryption-key-missing' // 409: TOKEN_ENCRYPTION_KEY is not set, so the server stores no GitHub token
+  | 'not-a-github-token' // 400: the value is an Urutau MCP token (urutau_mcp_…), not a GitHub token
+  | 'unsupported-token-format' // 400: not a github_pat_… or ghp_… token
   | 'too-large' // 413
   | 'github-access' // 424: the server could not get a GitHub token from Keycloak (body: GitHubAccessError)
   | 'github-rejected' // 502: GitHub answered a write with a non-2xx status (body: GitHubRejectedError)
@@ -109,6 +112,15 @@ export interface BoardAuthor {
   username: string
 }
 
+/** Who saved a board: a person, or an agent integration account. */
+export type EditorKind = 'person' | 'integration'
+
+/** BoardAuthor plus what kind of account it is. */
+export interface BoardEditor extends BoardAuthor {
+  /** Always sent by the server. Optional in the type so values built before it existed stay valid; read a missing kind as 'person'. */
+  kind?: EditorKind
+}
+
 /** One entry of the server-wide board list (GET /api/boards). */
 export interface BoardSummary {
   /** `owner/name` in lower case; the primary key. */
@@ -118,7 +130,7 @@ export interface BoardSummary {
   version: number
   updatedAt: string
   /** null when the user was removed. */
-  updatedBy: BoardAuthor | null
+  updatedBy: BoardEditor | null
 }
 
 /** GET/PUT /api/boards/:owner/:name. */
@@ -227,7 +239,7 @@ export interface BoardUpdatedEvent {
   repoKey: string
   version: number
   updatedAt: string
-  updatedBy: BoardAuthor | null
+  updatedBy: BoardEditor | null
   /** CLIENT_ID_HEADER of the save that caused it; null for imports without the header. */
   clientId: string | null
 }
@@ -307,4 +319,92 @@ export interface GitHubFailureDetail {
 export interface GitHubRejectedError extends ApiErrorBody {
   error: 'github-rejected'
   github: GitHubFailureDetail
+}
+
+// ---------------------------------------------------------------- agent integrations (admin)
+
+export type ApiTokenExpiryDays = 30 | 90 | 365
+
+export interface ApiTokenSummary {
+  id: string
+  label: string
+  createdAt: string
+  /** null: never expires. */
+  expiresAt: string | null
+  /** At most an hour behind the last use; null: never used. */
+  lastUsedAt: string | null
+}
+
+export interface GitHubTokenStatus {
+  /** Whether the server holds a GitHub token for this integration. */
+  set: boolean
+  /** False when the server cannot decrypt it: TOKEN_ENCRYPTION_KEY is unset or changed since. False when not set. */
+  readable: boolean
+  /** null when not set; 'unchecked' until GitHub answers a read; 'rejected' after GitHub answered 401. */
+  status: 'unchecked' | 'ok' | 'rejected' | null
+  /** When it was last set; null when not set. */
+  updatedAt: string | null
+}
+
+export interface IntegrationSummary {
+  /** The integration's account id (users.id). */
+  id: string
+  username: string
+  createdAt: string
+  createdBy: BoardAuthor | null
+  /** Live tokens only (expired ones are left out), newest first. */
+  tokens: ApiTokenSummary[]
+  githubToken: GitHubTokenStatus
+  /** Repository keys (lower-case owner/name) it may read, sorted. */
+  repos: string[]
+}
+
+/** GET /api/integrations. */
+export interface IntegrationListResponse {
+  integrations: IntegrationSummary[]
+  /** True when TOKEN_ENCRYPTION_KEY is set, so GitHub tokens can be stored. */
+  githubTokenStorage: boolean
+}
+
+/** POST /api/integrations. */
+export interface CreateIntegrationRequest {
+  username: string
+}
+
+export interface CreateIntegrationResponse {
+  integration: IntegrationSummary
+}
+
+/** POST /api/integrations/:id/tokens. */
+export interface CreateApiTokenRequest {
+  /** 1-64 characters after trimming. */
+  label: string
+  /** null: never expires. */
+  expiresInDays: ApiTokenExpiryDays | null
+}
+
+export interface CreateApiTokenResponse {
+  token: ApiTokenSummary
+  /** The Urutau MCP token. Shown once; the server keeps only its SHA-256. */
+  secret: string
+}
+
+/** PUT /api/integrations/:id/github-token. Write-only: no response ever contains the token. */
+export interface SetGitHubTokenRequest {
+  token: string
+}
+
+export interface SetGitHubTokenResponse {
+  githubToken: GitHubTokenStatus
+}
+
+/** PUT /api/integrations/:id/repos: replaces the whole list. */
+export interface SetIntegrationReposRequest {
+  /** owner/name in any letter case; at most 200 entries; duplicates are merged. */
+  repos: string[]
+}
+
+export interface SetIntegrationReposResponse {
+  /** The stored keys, lower case, sorted. */
+  repos: string[]
 }

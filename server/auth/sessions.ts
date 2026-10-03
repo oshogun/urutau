@@ -2,8 +2,9 @@ import type { Context, MiddlewareHandler } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import type { AuthMethod, GitHubAccess, Session } from '../../src/domain/api.ts'
 import type { AppContext } from '../app.ts'
-import { createSession, deleteSession, getSession, touchSession } from '../db/sessions.ts'
-import { getUserById, type UserRow } from '../db/users.ts'
+import { isIntegration } from '../db/integrations.ts'
+import { createSession, deleteSession, getSessionWithUser, touchSession } from '../db/sessions.ts'
+import type { UserRow } from '../db/users.ts'
 import { HttpError } from '../http/errors.ts'
 import { isPublicRoute } from '../http/publicRoutes.ts'
 import type { AppEnv } from '../http/types.ts'
@@ -82,6 +83,10 @@ export async function startSessionWithId(
   authMethod: AuthMethod,
   grant?: Grant,
 ): Promise<{ session: Session; idHash: string }> {
+  // The same answer as a wrong password, so a sign-in cannot tell an integration from a bad login.
+  if (await isIntegration(ctx.database.db, user.id)) {
+    throw new HttpError(401, 'invalid-credentials', 'The username or password is wrong.')
+  }
   const previous = getCookie(c, SESSION_COOKIE)
   if (previous) {
     await deleteSession(ctx.database.db, sha256Hex(previous))
@@ -117,9 +122,9 @@ export function loadSession(ctx: AppContext): MiddlewareHandler<AppEnv> {
       const db = ctx.database.db
       const idHash = sha256Hex(id)
       const now = ctx.now()
-      const session = await getSession(db, idHash, now)
-      const user = session ? await getUserById(db, session.user_id) : null
-      if (session && user) {
+      const found = await getSessionWithUser(db, idHash, now)
+      if (found && !found.integration) {
+        const { session, user } = found
         auth = { user, session }
         if (now.getTime() - Date.parse(session.last_seen_at) > REFRESH_AFTER_MS) {
           await touchSession(db, idHash, now, new Date(now.getTime() + LIFETIME_MS))

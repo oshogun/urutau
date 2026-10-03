@@ -11,8 +11,9 @@ function rejected(): HttpError {
   return new HttpError(403, 'csrf-rejected', 'The request was refused: it did not come from this app.')
 }
 
-function originAllowed(ctx: AppContext, origin: string, host: string): boolean {
-  if (ctx.config.publicUrl !== null) return origin === new URL(ctx.config.publicUrl).origin
+/** Whether an Origin header names this app: the configured public origin, or else the request's own host. */
+export function originAllowed(config: { publicUrl: string | null }, origin: string, host: string): boolean {
+  if (config.publicUrl !== null) return origin === new URL(config.publicUrl).origin
   try {
     return new URL(origin).host === host
   } catch {
@@ -31,7 +32,7 @@ export function csrfGuard(ctx: AppContext): MiddlewareHandler<AppEnv> {
     const origin = c.req.header('origin')
     if (origin !== undefined) {
       const host = c.req.header('host') ?? new URL(c.req.url).host
-      if (!originAllowed(ctx, origin, host)) throw rejected()
+      if (!originAllowed(ctx.config, origin, host)) throw rejected()
     } else {
       const site = c.req.header('sec-fetch-site')
       if (site !== undefined && site !== 'same-origin') throw rejected()

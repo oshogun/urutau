@@ -19,11 +19,15 @@ export interface Config {
   allowedHosts: string[]
   secureCookies: boolean
   keycloak: KeycloakConfig | null
+  /** 32 bytes decoded from TOKEN_ENCRYPTION_KEY; null when unset. */
+  tokenEncryptionKey: Buffer | null
 }
 
 const DEFAULT_DATABASE_URL = 'sqlite:data/urutau.db'
 
 const HOSTNAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/
+
+const KEY_ERROR = 'TOKEN_ENCRYPTION_KEY must be 32 bytes encoded as base64'
 
 type Env = Record<string, string | undefined>
 
@@ -121,6 +125,14 @@ export function loadConfig(env: Env): Config {
     }
   }
 
+  let tokenEncryptionKey: Buffer | null = null
+  const rawKey = text(env, 'TOKEN_ENCRYPTION_KEY')
+  if (rawKey !== null) {
+    if (!/^[A-Za-z0-9+/]{43}=$/.test(rawKey)) throw new Error(KEY_ERROR)
+    tokenEncryptionKey = Buffer.from(rawKey, 'base64')
+    if (tokenEncryptionKey.length !== 32) throw new Error(KEY_ERROR)
+  }
+
   return {
     host,
     port,
@@ -130,5 +142,6 @@ export function loadConfig(env: Env): Config {
     allowedHosts: [...new Set(allowedHosts)],
     secureCookies: publicUrl?.startsWith('https://') ?? false,
     keycloak,
+    tokenEncryptionKey,
   }
 }

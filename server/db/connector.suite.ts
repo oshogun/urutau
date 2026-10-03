@@ -1,11 +1,15 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fixtureBoard } from './fixtures.ts'
 import { isUniqueViolation, type Database } from './index.ts'
-import { createBoard, deleteBoard, getBoard, listBoards, saveBoard } from './boards.ts'
+import { createApiToken, deleteApiToken, deleteExpiredApiTokens, findLiveToken, listApiTokens, touchApiToken, apiTokenIsLive } from './apiTokens.ts'
+import { createBoard, deleteBoard, getBoard, listBoards, listBoardsByKeys, saveBoard } from './boards.ts'
+import { deleteGithubToken, getGithubToken, listGithubTokenInfo, putGithubToken, setGithubTokenStatus } from './githubTokens.ts'
+import { createIntegration, deleteIntegration, isIntegration, listIntegrations } from './integrations.ts'
+import { listAllIntegrationRepos, listIntegrationRepos, setIntegrationRepos } from './integrationRepos.ts'
 import { findUserByIdentity, linkIdentity } from './identities.ts'
 import { createInvite, deleteInvite, getUsableInvite, listUsableInvites, markInviteUsed } from './invites.ts'
 import { getGithubWrites, setGithubWrites } from './settings.ts'
-import { createSession, deleteExpiredSessions, getSession } from './sessions.ts'
+import { createSession, deleteExpiredSessions, getSession, getSessionWithUser } from './sessions.ts'
 import { createAccount, deleteUser, getUserById, getUserByUsername, isFirstRun, listUsers } from './users.ts'
 
 const T0 = new Date('2026-01-01T00:00:00.000Z')
@@ -14,7 +18,7 @@ const later = (ms: number) => new Date(T0.getTime() + ms)
 /** Empties every application table except `meta`, children before parents, and turns the GitHub writes switch off. */
 async function resetData(database: Database): Promise<void> {
   const { db } = database
-  for (const table of ['sessions', 'invites', 'identities', 'boards', 'instance_claim', 'users'] as const) {
+  for (const table of ['integration_repos', 'api_tokens', 'github_tokens', 'integrations', 'sessions', 'invites', 'identities', 'boards', 'instance_claim', 'users'] as const) {
     await db.deleteFrom(table).execute()
   }
   await setGithubWrites(db, false)
@@ -62,6 +66,14 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         await database.migrate()
         expect(await read()).toBe(before)
         expect(before).toMatch(/^[0-9a-f-]{36}$/)
+      })
+
+      it('run 0003_integrations again after its row was deleted, keeping the data', async () => {
+        const admin = await seedAdmin()
+        const made = await createIntegration(database.db, { username: 'planner-bot', createdBy: admin.id, now: T0 })
+        await database.db.deleteFrom('kysely_migration' as never).where('name' as never, '=', '0003_integrations' as never).execute()
+        await database.migrate()
+        expect(await isIntegration(database.db, made.id)).toBe(true)
       })
     })
 
@@ -163,7 +175,7 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         await createBoard(database.db, { repoKey: 'a/new', fullName: 'a/new', config: fixtureBoard(), userId: user.user.id, now: later(5000) })
         const listed = await listBoards(database.db)
         expect(listed.map((b) => b.repoKey)).toEqual(['a/new', 'a/old'])
-        expect(listed[0]?.updatedBy).toEqual({ id: user.user.id, username: 'ana' })
+        expect(listed[0]?.updatedBy).toEqual({ id: user.user.id, username: 'ana', kind: 'person' })
         expect(listed[1]?.updatedBy).toBeNull()
 
         await deleteUser(database.db, user.user.id)
@@ -334,6 +346,150 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         expect(await findUserByIdentity(database.db, link.issuer, 'sub-2')).toBeNull()
         await deleteUser(database.db, user.id)
         expect(await findUserByIdentity(database.db, link.issuer, link.subject)).toBeNull()
+      })
+    })
+
+    describe('integrations', () => {
+      const HASH = 'a'.repeat(64)
+
+      async function bot(username = 'planner-bot') {
+        const admin = await seedAdmin()
+        return { admin, bot: await createIntegration(database.db, { username, createdBy: admin.id, now: T0 }) }
+      }
+
+      it('creates a non-admin account without a password and refuses a taken name in any case', async () => {
+        const { admin, bot: made } = await bot('Planner-Bot')
+        expect(made).toMatchObject({ is_admin: 0, password_hash: null, display_name: null })
+        expect(await isIntegration(database.db, made.id)).toBe(true)
+        expect(await isIntegration(database.db, admin.id)).toBe(false)
+        await expect(createIntegration(database.db, { username: 'PLANNER-bot', createdBy: made.id, now: T0 })).rejects.toSatisfy(isUniqueViolation)
+        expect(await listIntegrations(database.db)).toEqual([
+          { id: made.id, username: 'Planner-Bot', created_at: T0.toISOString(), created_by: expect.any(String), created_by_username: 'seed' },
+        ])
+      })
+
+      it('leaves integrations out of the people list', async () => {
+        const { admin } = await bot()
+        expect((await listUsers(database.db)).map((u) => u.id)).toEqual([admin.id])
+      })
+
+      it('reports the editor kind on board summaries', async () => {
+        const { admin, bot: made } = await bot()
+        await createBoard(database.db, { repoKey: 'a/person', fullName: 'a/person', config: fixtureBoard(), userId: admin.id, now: later(1000) })
+        await createBoard(database.db, { repoKey: 'a/agent', fullName: 'a/agent', config: fixtureBoard(), userId: made.id, now: later(2000) })
+        await createBoard(database.db, { repoKey: 'a/none', fullName: 'a/none', config: fixtureBoard(), userId: null, now: later(3000) })
+        expect((await getBoard(database.db, 'a/agent'))?.updatedBy).toEqual({ id: made.id, username: 'planner-bot', kind: 'integration' })
+        expect((await getBoard(database.db, 'a/person'))?.updatedBy).toEqual({ id: admin.id, username: 'seed', kind: 'person' })
+        expect((await listBoards(database.db)).map((b) => [b.repoKey, b.updatedBy?.kind ?? null])).toEqual([
+          ['a/none', null], ['a/agent', 'integration'], ['a/person', 'person'],
+        ])
+        const some = await listBoardsByKeys(database.db, ['a/person', 'a/agent', 'x/missing'])
+        expect(some.map((b) => b.repoKey)).toEqual(['a/agent', 'a/person'])
+        expect(await listBoardsByKeys(database.db, [])).toEqual([])
+      })
+
+      it('reads a session with its user and whether the user is an integration', async () => {
+        const { admin, bot: made } = await bot()
+        const base = { authMethod: 'local' as const, csrfToken: 'c'.repeat(43), now: T0, expiresAt: later(60_000) }
+        await createSession(database.db, { ...base, idHash: 'p'.repeat(64), userId: admin.id })
+        await createSession(database.db, { ...base, idHash: 'q'.repeat(64), userId: made.id })
+        await createSession(database.db, { ...base, idHash: 'x'.repeat(64), userId: admin.id, expiresAt: later(-1) })
+        const person = await getSessionWithUser(database.db, 'p'.repeat(64), T0)
+        expect(person).toMatchObject({ integration: false, session: { user_id: admin.id }, user: { id: admin.id, username: 'seed' } })
+        expect((await getSessionWithUser(database.db, 'q'.repeat(64), T0))?.integration).toBe(true)
+        expect(await getSessionWithUser(database.db, 'x'.repeat(64), T0)).toBeNull()
+        expect(await getSessionWithUser(database.db, 'n'.repeat(64), T0)).toBeNull()
+      })
+
+      it('creates and finds a token; a duplicate hash is a unique violation; an unknown owner is a foreign-key error', async () => {
+        const { admin, bot: made } = await bot()
+        const row = await createApiToken(database.db, { userId: made.id, tokenHash: HASH, label: 'laptop', createdBy: admin.id, now: T0, expiresAt: later(1000) })
+        expect(await findLiveToken(database.db, HASH, T0)).toEqual({ id: row.id, user_id: made.id, username: 'planner-bot', last_used_at: null })
+        expect(await findLiveToken(database.db, HASH, later(1000))).toBeNull()
+        expect(await apiTokenIsLive(database.db, row.id, T0)).toBe(true)
+        expect(await apiTokenIsLive(database.db, row.id, later(1000))).toBe(false)
+        await expect(
+          createApiToken(database.db, { userId: made.id, tokenHash: HASH, label: 'again', createdBy: admin.id, now: T0, expiresAt: null }),
+        ).rejects.toSatisfy(isUniqueViolation)
+        // A person is not an integration: the foreign key to integrations refuses the row.
+        await expect(
+          createApiToken(database.db, { userId: admin.id, tokenHash: 'b'.repeat(64), label: 'person', createdBy: admin.id, now: T0, expiresAt: null }),
+        ).rejects.toSatisfy((error) => !isUniqueViolation(error))
+        expect(await listApiTokens(database.db, null, T0)).toHaveLength(1)
+      })
+
+      it('lists live tokens newest first, touches last_used_at at most hourly, revokes and purges', async () => {
+        const { admin, bot: made } = await bot()
+        const make = (hash: string, label: string, now: Date, expiresAt: Date | null) =>
+          createApiToken(database.db, { userId: made.id, tokenHash: hash.repeat(64), label, createdBy: admin.id, now, expiresAt })
+        const old = await make('1', 'old', T0, later(5000))
+        const fresh = await make('2', 'fresh', later(1000), null)
+        expect((await listApiTokens(database.db, made.id, T0)).map((t) => t.label)).toEqual(['fresh', 'old'])
+        expect((await listApiTokens(database.db, made.id, later(5000))).map((t) => t.label)).toEqual(['fresh'])
+        expect(await listApiTokens(database.db, admin.id, T0)).toEqual([])
+        expect(JSON.stringify(await listApiTokens(database.db, null, T0))).not.toContain('token_hash')
+
+        await touchApiToken(database.db, fresh.id, later(2000))
+        await touchApiToken(database.db, fresh.id, later(3000))
+        expect((await listApiTokens(database.db, made.id, T0)).find((t) => t.id === fresh.id)?.last_used_at).toBe(later(2000).toISOString())
+        await touchApiToken(database.db, fresh.id, later(2000 + 3_600_001))
+        expect((await listApiTokens(database.db, made.id, T0)).find((t) => t.id === fresh.id)?.last_used_at).toBe(later(2000 + 3_600_001).toISOString())
+
+        expect(await deleteExpiredApiTokens(database.db, later(5000))).toBe(1)
+        expect(await deleteApiToken(database.db, made.id, old.id)).toBe(false)
+        expect(await deleteApiToken(database.db, admin.id, fresh.id)).toBe(false)
+        expect(await deleteApiToken(database.db, made.id, fresh.id)).toBe(true)
+        expect(await listApiTokens(database.db, null, T0)).toEqual([])
+      })
+
+      it('round-trips a 1024-character sealed value and replaces it with status unchecked', async () => {
+        const { admin, bot: made } = await bot()
+        const sealed = 'v1.' + 'x'.repeat(1021)
+        expect(sealed).toHaveLength(1024)
+        await putGithubToken(database.db, { userId: made.id, sealed, keyId: 'abcd1234', setBy: admin.id, now: T0 })
+        expect(await getGithubToken(database.db, made.id)).toEqual({ sealed, key_id: 'abcd1234', status: 'unchecked', updated_at: T0.toISOString() })
+        expect(await setGithubTokenStatus(database.db, made.id, 'other', 'ok')).toBe(false)
+        expect(await setGithubTokenStatus(database.db, made.id, sealed, 'rejected')).toBe(true)
+        expect((await getGithubToken(database.db, made.id))?.status).toBe('rejected')
+        const replacement = 'v1.' + 'y'.repeat(20)
+        await putGithubToken(database.db, { userId: made.id, sealed: replacement, keyId: 'abcd1234', setBy: admin.id, now: later(1000) })
+        expect(await getGithubToken(database.db, made.id)).toMatchObject({ sealed: replacement, status: 'unchecked' })
+        expect([...(await listGithubTokenInfo(database.db)).keys()]).toEqual([made.id])
+        expect(JSON.stringify([...(await listGithubTokenInfo(database.db)).values()])).not.toContain('sealed')
+        expect(await deleteGithubToken(database.db, made.id)).toBe(true)
+        expect(await deleteGithubToken(database.db, made.id)).toBe(false)
+      })
+
+      it('round-trips repository lists and returns exactly the keys a replacement removed', async () => {
+        const { bot: made } = await bot()
+        expect(await setIntegrationRepos(database.db, made.id, ['b/two', 'a/one'])).toEqual([])
+        expect(await listIntegrationRepos(database.db, made.id)).toEqual(['a/one', 'b/two'])
+        expect(await setIntegrationRepos(database.db, made.id, ['a/one', 'b/two', 'c/three'])).toEqual([])
+        expect(await setIntegrationRepos(database.db, made.id, ['c/three', 'd/four'])).toEqual(['a/one', 'b/two'])
+        expect(await listAllIntegrationRepos(database.db)).toEqual(new Map([[made.id, ['c/three', 'd/four']]]))
+        expect(await setIntegrationRepos(database.db, made.id, [])).toEqual(['c/three', 'd/four'])
+        expect(await listIntegrationRepos(database.db, made.id)).toEqual([])
+      })
+
+      it('deleting an integration removes its tokens, GitHub token and repositories, and keeps boards it saved', async () => {
+        const { admin, bot: made } = await bot()
+        const other = await createIntegration(database.db, { username: 'other-bot', createdBy: admin.id, now: T0 })
+        await createApiToken(database.db, { userId: made.id, tokenHash: HASH, label: 'laptop', createdBy: admin.id, now: T0, expiresAt: null })
+        await putGithubToken(database.db, { userId: made.id, sealed: 'v1.s', keyId: 'abcd1234', setBy: admin.id, now: T0 })
+        await setIntegrationRepos(database.db, made.id, ['a/one'])
+        await setIntegrationRepos(database.db, other.id, ['a/one'])
+        await createBoard(database.db, { repoKey: 'a/one', fullName: 'a/one', config: fixtureBoard(), userId: made.id, now: T0 })
+
+        expect(await deleteIntegration(database.db, admin.id)).toBe(false)
+        expect(await deleteIntegration(database.db, made.id)).toBe(true)
+        expect(await deleteIntegration(database.db, made.id)).toBe(false)
+        for (const table of ['integrations', 'api_tokens', 'github_tokens', 'integration_repos'] as const) {
+          const rows = await database.db.selectFrom(table).select('user_id').execute()
+          expect(rows.every((row) => row.user_id !== made.id)).toBe(true)
+        }
+        expect(await listIntegrationRepos(database.db, other.id)).toEqual(['a/one'])
+        expect(await getUserById(database.db, made.id)).toBeNull()
+        expect((await getBoard(database.db, 'a/one'))?.updatedBy).toBeNull()
       })
     })
 

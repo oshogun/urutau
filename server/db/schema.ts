@@ -61,6 +61,39 @@ export interface BoardsTable {
   updated_by: string | null // VARCHAR(36) FK users.id ON DELETE SET NULL
 }
 
+export interface IntegrationsTable {
+  user_id: string // VARCHAR(36) PK, FK users.id ON DELETE CASCADE
+  created_by: string | null // VARCHAR(36) FK users.id ON DELETE SET NULL
+  created_at: string // VARCHAR(24)
+}
+
+export interface ApiTokensTable {
+  id: string // VARCHAR(36) PK
+  user_id: string // VARCHAR(36) FK integrations.user_id ON DELETE CASCADE, indexed
+  token_hash: string // VARCHAR(64) UNIQUE, hex SHA-256 of the whole token
+  label: string // VARCHAR(64)
+  created_by: string | null // VARCHAR(36) FK users.id ON DELETE SET NULL
+  created_at: string // VARCHAR(24)
+  expires_at: string | null // VARCHAR(24), indexed; null never expires
+  last_used_at: string | null // VARCHAR(24)
+}
+
+export type GithubTokenRowStatus = 'unchecked' | 'ok' | 'rejected'
+
+export interface GithubTokensTable {
+  user_id: string // VARCHAR(36) PK, FK users.id ON DELETE CASCADE
+  sealed: string // VARCHAR(1024): v1.<kid>.<iv>.<ct>.<tag>
+  key_id: string // VARCHAR(16)
+  status: GithubTokenRowStatus // VARCHAR(16)
+  set_by: string | null // VARCHAR(36) FK users.id ON DELETE SET NULL
+  updated_at: string // VARCHAR(24)
+}
+
+export interface IntegrationReposTable {
+  user_id: string // VARCHAR(36) FK integrations.user_id ON DELETE CASCADE; PK part 1
+  repo_key: string // VARCHAR(200) lower-case owner/name; PK part 2
+}
+
 export interface Tables {
   meta: MetaTable
   users: UsersTable
@@ -69,4 +102,8 @@ export interface Tables {
   invites: InvitesTable
   identities: IdentitiesTable
   boards: BoardsTable
+  integrations: IntegrationsTable
+  api_tokens: ApiTokensTable
+  github_tokens: GithubTokensTable
+  integration_repos: IntegrationReposTable
 }

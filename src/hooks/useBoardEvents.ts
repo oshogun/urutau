@@ -4,6 +4,7 @@ import { openBoardEvents } from '../api/events'
 import type {
   BoardDeletedEvent,
   BoardUpdatedEvent,
+  EditorKind,
   HelloEvent,
   SessionResponse,
 } from '../domain/api'
@@ -19,6 +20,8 @@ export type BoardConnection = 'live' | 'reconnecting' | 'offline'
 export interface RemoteChange {
   /** Username of whoever saved it, null when unknown. */
   by: string | null
+  /** What kind of account saved it: the adopted board's, else the event's, else 'person'. */
+  kind: EditorKind
   /** When the server stored it (ISO). */
   at: string
   version: number
@@ -90,6 +93,7 @@ export function useBoardEvents(repo: RepoRef, enabled = true): BoardEvents {
         key,
         change: {
           by: adopted.updatedBy?.username ?? remote.updatedBy?.username ?? null,
+          kind: adopted.updatedBy?.kind ?? remote.updatedBy?.kind ?? 'person',
           at: adopted.updatedAt,
           version: adopted.version,
         },

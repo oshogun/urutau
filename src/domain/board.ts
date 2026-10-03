@@ -164,6 +164,159 @@ export function moveIssue(
   return { ...config, placements, order }
 }
 
+export type MovePosition = 'top' | 'bottom' | 'before' | 'after'
+
+/** The numbers of the issues in one bucket, in display order; [] for an unknown bucket. */
+export function bucketNumbers(contents: BucketContents, bucketId: string): number[] {
+  return (contents.get(bucketId) ?? []).map((issue) => issue.number)
+}
+
+export interface PlannedMove {
+  config: BoardConfig
+  /** The bucket the card was in ('' when it was in none). */
+  from: string
+  to: string
+  /** The target bucket's display order after the move. */
+  expected: number[]
+  /** The card's index in expected; -1 when a precondition failed. */
+  index: number
+  changed: boolean
+}
+
+const sameNumbers = (a: readonly number[], b: readonly number[]) =>
+  a.length === b.length && a.every((number, index) => number === b[index])
+
+/**
+ * Moves an open issue within or into `toBucketId` to `position`. Positions are counted with the
+ * moving card removed from the target first, because `moveIssue` removes it before it inserts,
+ * so "11 after 10" on [10, 11, 12] is a move that changes nothing.
+ *
+ * When the issue is missing or closed, the bucket does not exist, or a `before`/`after` anchor
+ * is not a card of the target, the config comes back unchanged with `index` -1.
+ */
+export function moveIssueTo(
+  config: BoardConfig,
+  issues: Issue[],
+  issueNumber: number,
+  toBucketId: string,
+  position: MovePosition,
+  anchor: number | null,
+): PlannedMove {
+  const contents = resolveBuckets(issues, config)
+  const from = findBucketOf(contents, issueNumber)
+  const current = bucketNumbers(contents, toBucketId)
+  const target = current.filter((number) => number !== issueNumber)
+  const issue = issues.find((candidate) => candidate.number === issueNumber)
+  const anchorIndex = anchor === null ? -1 : target.indexOf(anchor)
+  const failed =
+    !issue ||
+    issue.state === 'closed' ||
+    !config.buckets.some((bucket) => bucket.id === toBucketId) ||
+    ((position === 'before' || position === 'after') && anchorIndex === -1)
+  if (failed) {
+    return { config, from: from ?? '', to: toBucketId, expected: current, index: -1, changed: false }
+  }
+
+  const index =
+    position === 'top'
+      ? 0
+      : position === 'bottom'
+        ? target.length
+        : position === 'before'
+          ? anchorIndex
+          : anchorIndex + 1
+  const expected = [...target.slice(0, index), issueNumber, ...target.slice(index)]
+  const next = moveIssue(config, issues, issueNumber, toBucketId, expected[index + 1] ?? null)
+  const changed = !(from === toBucketId && sameNumbers(expected, current))
+  return { config: next, from: from ?? '', to: toBucketId, expected, index, changed }
+}
+
+export interface PlannedReorder {
+  config: BoardConfig
+  expected: number[]
+  changed: boolean
+}
+
+/**
+ * Puts the `wanted` cards first in `bucketId`, in the listed order, and the bucket's other cards
+ * after them in their current order. Placements are not touched.
+ */
+export function reorderBucket(
+  config: BoardConfig,
+  issues: Issue[],
+  bucketId: string,
+  wanted: readonly number[],
+): PlannedReorder {
+  const current = bucketNumbers(resolveBuckets(issues, config), bucketId)
+  const expected = [...wanted, ...current.filter((number) => !wanted.includes(number))]
+  return {
+    config: { ...config, order: { ...config.order, [bucketId]: expected } },
+    expected,
+    changed: !sameNumbers(expected, current),
+  }
+}
+
+export interface UnseenOrderOptions {
+  truncated: boolean
+  highestNumber: number
+  /** The numbers of the cards the change placed: the moved issue, or reorder_bucket's listed order. */
+  moved: ReadonlySet<number>
+  /**
+   * True when the change put the moved card against the card after it or against the bucket's
+   * end (bottom or before): an unseen number that lands next to moved cards goes before them.
+   * False for top, after and reorder_bucket: it goes after them.
+   */
+  unseenBeforeMoved: boolean
+}
+
+/**
+ * Puts back hand order of numbers the caller's snapshot did not contain (new issues newer than
+ * `highestNumber`, or any number when the snapshot was truncated). The stored order is walked
+ * from its last number to its first. Each such number goes right before the next later number of
+ * the stored order that is in the result and is not in `moved`, or at the end when there is none.
+ * Numbers this call already put back count as found, so consecutive unseen numbers keep their
+ * stored order, and a number stored twice is put back once. A moved card's old place therefore
+ * never decides where an unseen number goes; `unseenBeforeMoved` picks the side of any moved
+ * cards next to that place. Other unseen numbers are dropped. Returns `next` itself when nothing
+ * was put back.
+ */
+export function keepUnseenOrder(
+  stored: BoardConfig,
+  next: BoardConfig,
+  bucketId: string,
+  seen: ReadonlySet<number>,
+  options: UnseenOrderOptions,
+): BoardConfig {
+  const storedOrder = stored.order[bucketId] ?? []
+  const result = [...(next.order[bucketId] ?? [])]
+  let kept = false
+
+  for (let i = storedOrder.length - 1; i >= 0; i--) {
+    const u = storedOrder[i]
+    if (seen.has(u) || result.includes(u)) continue
+    if (!(u > options.highestNumber || options.truncated)) continue
+
+    let k = result.length
+    for (let j = i + 1; j < storedOrder.length; j++) {
+      const candidate = storedOrder[j]
+      if (options.moved.has(candidate)) continue
+      const at = result.indexOf(candidate)
+      if (at !== -1) {
+        k = at
+        break
+      }
+    }
+    if (options.unseenBeforeMoved) {
+      while (k > 0 && options.moved.has(result[k - 1])) k--
+    }
+    result.splice(k, 0, u)
+    kept = true
+  }
+
+  if (!kept) return next
+  return { ...next, order: { ...next.order, [bucketId]: result } }
+}
+
 /**
  * Puts a just-created issue at the top of `bucketId` and records the bucket in `placements`,
  * whatever the bucket's label rules say, so the card stays there if labels change later.

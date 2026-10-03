@@ -1,5 +1,6 @@
 import type { GitHubAccessProblem } from '../domain/api'
 import { useSession } from '../state/session'
+import { fetchAllPages, fetchJson, parseNextLink, type GitHubTransport, type PagedResult } from './paging'
 
 const API_ROOT = 'https://api.github.com'
 /** Where the Urutau server proxies GitHub reads for users whose session says `mode: 'server'`. */
@@ -182,48 +183,23 @@ async function toGitHubError(response: Response, hasToken: boolean, server = fal
   }
 }
 
-/** Where a GitHub API path (starting with `/`) is requested for the chosen route. */
-function urlFor(path: string, options: RequestOptions): string {
-  return options.via === 'server' ? `${SERVER_ROOT}${path}` : `${API_ROOT}${path}`
-}
-
-/** A next-page URL is followed only if it stays on the host this request may talk to. */
-function isOwnUrl(url: string, options: RequestOptions): boolean {
-  return url.startsWith(options.via === 'server' ? `${SERVER_ROOT}/` : `${API_ROOT}/`)
-}
-
-export async function getJson<T>(path: string, options: RequestOptions): Promise<T> {
-  const response = await request(urlFor(path, options), options)
-  return (await response.json()) as T
-}
-
-/** Extracts the `rel="next"` URL from a GitHub `Link` header. */
-export function parseNextLink(header: string | null): string | null {
-  if (!header) return null
-  for (const part of header.split(',')) {
-    const match = /<([^>]+)>\s*;\s*rel="([^"]+)"/.exec(part)
-    if (match && match[2].split(/\s+/).includes('next')) return match[1]
+/** The browser's transport: api.github.com with the pasted token, or the server's api/github proxy without it. */
+export function browserTransport(options: RequestOptions): GitHubTransport {
+  return {
+    root: options.via === 'server' ? SERVER_ROOT : API_ROOT,
+    get: (url, signal) => request(url, { ...options, signal: signal ?? options.signal }),
   }
-  return null
 }
 
-/**
- * Follows `Link` pagination, stopping after `maxPages` so that a huge
- * repository cannot burn through the rate limit. `truncated` reports whether
- * pages were left unread.
- */
-export async function getAllPages<T>(
+export function getJson<T>(path: string, options: RequestOptions): Promise<T> {
+  return fetchJson<T>(browserTransport(options), path, options.signal)
+}
+
+export { parseNextLink }
+
+export function getAllPages<T>(
   path: string,
   options: RequestOptions & { maxPages: number },
-): Promise<{ items: T[]; truncated: boolean }> {
-  const items: T[] = []
-  let url: string | null = urlFor(path, options)
-  let pages = 0
-  while (url && pages < options.maxPages && isOwnUrl(url, options)) {
-    const response = await request(url, options)
-    items.push(...((await response.json()) as T[]))
-    url = parseNextLink(response.headers.get('link'))
-    pages += 1
-  }
-  return { items, truncated: url !== null }
+): Promise<PagedResult<T>> {
+  return fetchAllPages<T>(browserTransport(options), path, { maxPages: options.maxPages, signal: options.signal })
 }

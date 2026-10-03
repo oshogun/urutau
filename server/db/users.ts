@@ -66,8 +66,16 @@ export async function getUserByUsername(db: Kysely<Tables>, username: string): P
   return row ?? null
 }
 
+/** People only: integration accounts are left out. */
 export async function listUsers(db: Kysely<Tables>): Promise<UserRow[]> {
-  return db.selectFrom('users').selectAll().orderBy('created_at', 'asc').orderBy('id', 'asc').execute()
+  return db
+    .selectFrom('users')
+    .leftJoin('integrations', 'integrations.user_id', 'users.id')
+    .where('integrations.user_id', 'is', null)
+    .selectAll('users')
+    .orderBy('users.created_at', 'asc')
+    .orderBy('users.id', 'asc')
+    .execute()
 }
 
 /** Deletes the account; its sessions and identities go with it. Returns whether a row was removed. */

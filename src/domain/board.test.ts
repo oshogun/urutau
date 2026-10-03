@@ -4,11 +4,15 @@ import {
   boardFromExport,
   createDefaultBoard,
   deleteBucket,
+  bucketNumbers,
   isBoardConfig,
+  keepUnseenOrder,
   moveBucket,
   moveIssue,
+  moveIssueTo,
   normalizeLabelName,
   placeNewIssue,
+  reorderBucket,
   resolveBuckets,
   saveBucket,
   toBoardExport,
@@ -295,5 +299,212 @@ describe('isBoardConfig', () => {
     expect(isBoardConfig({ version: 1, buckets: [] })).toBe(false)
     expect(isBoardConfig(null)).toBe(false)
     expect(isBoardConfig({ ...createDefaultBoard([]), version: 2 })).toBe(false)
+  })
+})
+
+describe('moveIssueTo', () => {
+  const issues = [makeIssue(10), makeIssue(11), makeIssue(12)]
+  const config = (order: number[]) =>
+    makeBoard([makeBucket('todo'), makeBucket('done', { collectsClosed: true })], {
+      placements: { 10: 'todo', 11: 'todo', 12: 'todo' },
+      order: { todo: order },
+    })
+  const display = (planned: { config: BoardConfig }, list = issues) =>
+    numbersIn(planned.config, list, 'todo')
+
+  it('X after N already in place changes nothing', () => {
+    const planned = moveIssueTo(config([10, 11, 12]), issues, 11, 'todo', 'after', 10)
+    expect(planned.changed).toBe(false)
+    expect(planned.expected).toEqual([10, 11, 12])
+    expect(planned.index).toBe(1)
+  })
+
+  it('X after N from the end puts X right after N', () => {
+    const planned = moveIssueTo(config([10, 12, 11]), issues, 11, 'todo', 'after', 10)
+    expect(planned.changed).toBe(true)
+    expect(planned.expected).toEqual([10, 11, 12])
+    expect(display(planned)).toEqual([10, 11, 12])
+  })
+
+  it('X before N counts positions with X removed', () => {
+    const planned = moveIssueTo(config([10, 11, 12]), issues, 12, 'todo', 'before', 11)
+    expect(planned.expected).toEqual([10, 12, 11])
+    expect(display(planned)).toEqual([10, 12, 11])
+  })
+
+  it('top of an empty bucket', () => {
+    const empty = makeBoard([makeBucket('todo'), makeBucket('other')], { placements: { 10: 'other' } })
+    const planned = moveIssueTo(empty, [makeIssue(10)], 10, 'todo', 'top', null)
+    expect(planned.expected).toEqual([10])
+    expect(planned.index).toBe(0)
+    expect(planned.changed).toBe(true)
+    expect(planned.from).toBe('other')
+  })
+
+  it('bottom moves a card to the end', () => {
+    const planned = moveIssueTo(config([10, 11, 12]), issues, 10, 'todo', 'bottom', null)
+    expect(planned.expected).toEqual([11, 12, 10])
+    expect(planned.index).toBe(2)
+  })
+
+  it('returns the config unchanged when a precondition fails', () => {
+    const start = config([10, 11, 12])
+    const noAnchor = moveIssueTo(start, issues, 10, 'todo', 'after', 99)
+    expect(noAnchor).toMatchObject({ config: start, index: -1, changed: false, expected: [10, 11, 12] })
+    const closed = [makeIssue(10, { state: 'closed' })]
+    expect(moveIssueTo(start, closed, 10, 'todo', 'top', null).changed).toBe(false)
+    expect(moveIssueTo(start, issues, 10, 'nowhere', 'top', null).index).toBe(-1)
+  })
+})
+
+describe('reorderBucket', () => {
+  const issues = [1, 2, 3, 4].map((n) => makeIssue(n))
+  const start = makeBoard([makeBucket('todo')], { order: { todo: [1, 2, 3, 4] } })
+
+  it('sets one bucket order: wanted first, the others after in their current order', () => {
+    const planned = reorderBucket(start, issues, 'todo', [3, 1])
+    expect(planned.expected).toEqual([3, 1, 2, 4])
+    expect(planned.changed).toBe(true)
+    expect(planned.config.order.todo).toEqual([3, 1, 2, 4])
+    expect(numbersIn(planned.config, issues, 'todo')).toEqual(planned.expected)
+    expect(planned.config.placements).toBe(start.placements)
+  })
+
+  it('reports no change when the listed cards are already first', () => {
+    const planned = reorderBucket(
+      makeBoard([makeBucket('todo')], { order: { todo: [1, 2, 3] } }),
+      [1, 2, 3].map((n) => makeIssue(n)),
+      'todo',
+      [1, 2],
+    )
+    expect(planned.changed).toBe(false)
+  })
+})
+
+describe('keepUnseenOrder', () => {
+  const open = (...numbers: number[]) => numbers.map((n) => makeIssue(n))
+  const buckets = () => [makeBucket('todo'), makeBucket('other')]
+  const keep = (
+    stored: BoardConfig,
+    next: BoardConfig,
+    seen: number[],
+    options: { truncated?: boolean; highestNumber: number; moved: number[]; unseenBeforeMoved: boolean },
+  ) =>
+    keepUnseenOrder(stored, next, 'todo', new Set(seen), {
+      truncated: options.truncated ?? false,
+      highestNumber: options.highestNumber,
+      moved: new Set(options.moved),
+      unseenBeforeMoved: options.unseenBeforeMoved,
+    })
+
+  const newIssueBoard = () => {
+    const issues = open(1, 2, 3)
+    const stored = makeBoard(buckets(), {
+      placements: { 1: 'todo', 2: 'todo', 3: 'other' },
+      order: { todo: [500, 1, 2] },
+    })
+    return { issues, stored }
+  }
+
+  it('keeps a new issue ranked above the cards it was above, move to bottom', () => {
+    const { issues, stored } = newIssueBoard()
+    const planned = moveIssueTo(stored, issues, 3, 'todo', 'bottom', null)
+    const final = keep(stored, planned.config, [1, 2, 3], { highestNumber: 499, moved: [3], unseenBeforeMoved: true })
+    expect(final.order.todo).toEqual([500, 1, 2, 3])
+    expect(numbersIn(final, issues, 'todo')).toEqual([1, 2, 3])
+    expect(bucketNumbers(resolveBuckets(issues, final), 'todo')).toEqual(planned.expected)
+  })
+
+  it('keeps a new issue when the card moves to top', () => {
+    const { issues, stored } = newIssueBoard()
+    const planned = moveIssueTo(stored, issues, 3, 'todo', 'top', null)
+    const final = keep(stored, planned.config, [1, 2, 3], { highestNumber: 499, moved: [3], unseenBeforeMoved: false })
+    expect(final.order.todo).toEqual([3, 500, 1, 2])
+  })
+
+  const staleBoard = () => {
+    const issues = open(1, 2, 3)
+    const stored = makeBoard(buckets(), {
+      placements: { 1: 'todo', 2: 'todo', 3: 'other' },
+      order: { todo: [1, 9, 2] },
+    })
+    return { issues, stored, planned: moveIssueTo(stored, issues, 3, 'todo', 'bottom', null) }
+  }
+
+  it('truncated snapshot: a stale unseen number is kept', () => {
+    const { stored, planned } = staleBoard()
+    const final = keep(stored, planned.config, [1, 2, 3], { truncated: true, highestNumber: 9, moved: [3], unseenBeforeMoved: true })
+    expect(final.order.todo).toEqual([1, 9, 2, 3])
+  })
+
+  it('complete snapshot: a stale unseen number is dropped', () => {
+    const { stored, planned } = staleBoard()
+    const final = keep(stored, planned.config, [1, 2, 3], { highestNumber: 9, moved: [3], unseenBeforeMoved: true })
+    expect(final.order.todo).toEqual([1, 2, 3])
+  })
+
+  it('returns next itself when nothing is kept', () => {
+    const { stored, planned } = staleBoard()
+    expect(keep(stored, planned.config, [1, 2, 3], { highestNumber: 9, moved: [3], unseenBeforeMoved: true })).toBe(
+      planned.config,
+    )
+  })
+
+  const movedBoard = (order: number[]) => {
+    const issues = open(3, 7)
+    const stored = makeBoard(buckets(), { placements: { 3: 'todo', 7: 'todo' }, order: { todo: order } })
+    return { issues, stored }
+  }
+
+  it('a moved card is never the anchor of an unseen number', () => {
+    const { issues, stored } = movedBoard([7, 500, 3])
+    const planned = moveIssueTo(stored, issues, 3, 'todo', 'top', null)
+    expect(planned.expected).toEqual([3, 7])
+    expect(planned.changed).toBe(true)
+    const final = keep(stored, planned.config, [3, 7], { highestNumber: 7, moved: [3], unseenBeforeMoved: false })
+    expect(final.order.todo).toEqual([3, 7, 500])
+    expect(numbersIn(final, issues, 'todo')).toEqual([3, 7])
+    expect(bucketNumbers(resolveBuckets(issues, final), 'todo')).toEqual(planned.expected)
+  })
+
+  it('reorder keeps unseen numbers after the listed cards', () => {
+    const { issues, stored } = movedBoard([7, 500, 3])
+    const planned = reorderBucket(stored, issues, 'todo', [3])
+    expect(planned.expected).toEqual([3, 7])
+    const final = keep(stored, planned.config, [3, 7], { highestNumber: 7, moved: [3], unseenBeforeMoved: false })
+    expect(final.order.todo).toEqual([3, 7, 500])
+  })
+
+  it('an unseen number goes before a card moved to bottom', () => {
+    const issues = [makeIssue(7), makeIssue(3)]
+    const stored = makeBoard(buckets(), { placements: { 7: 'todo', 3: 'other' }, order: { todo: [7, 500] } })
+    const planned = moveIssueTo(stored, issues, 3, 'todo', 'bottom', null)
+    expect(planned.expected).toEqual([7, 3])
+    const final = keep(stored, planned.config, [3, 7], { highestNumber: 7, moved: [3], unseenBeforeMoved: true })
+    expect(final.order.todo).toEqual([7, 500, 3])
+    expect(bucketNumbers(resolveBuckets(issues, final), 'todo')).toEqual([7, 3])
+  })
+
+  it('an unseen number goes after a card moved after its anchor', () => {
+    const issues = [makeIssue(7), makeIssue(3)]
+    const stored = makeBoard(buckets(), { placements: { 7: 'todo', 3: 'other' }, order: { todo: [7, 500] } })
+    const planned = moveIssueTo(stored, issues, 3, 'todo', 'after', 7)
+    expect(planned.expected).toEqual([7, 3])
+    const final = keep(stored, planned.config, [3, 7], { highestNumber: 7, moved: [3], unseenBeforeMoved: false })
+    expect(final.order.todo).toEqual([7, 3, 500])
+  })
+
+  it('consecutive unseen numbers keep their stored order', () => {
+    const { issues, stored } = movedBoard([7, 500, 600])
+    const planned = moveIssueTo(stored, issues, 3, 'todo', 'top', null)
+    const final = keep(stored, planned.config, [3, 7], { highestNumber: 7, moved: [3], unseenBeforeMoved: false })
+    expect(final.order.todo).toEqual([3, 7, 500, 600])
+  })
+
+  it('a number stored twice is put back once', () => {
+    const { issues, stored } = movedBoard([7, 500, 500, 3])
+    const planned = moveIssueTo(stored, issues, 3, 'todo', 'top', null)
+    const final = keep(stored, planned.config, [3, 7], { highestNumber: 7, moved: [3], unseenBeforeMoved: false })
+    expect(final.order.todo).toEqual([3, 7, 500])
   })
 })

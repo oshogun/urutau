@@ -158,13 +158,13 @@ REPOS['acme/readonly'] = {
 }
 
 /** Answers POST .../issues the way GitHub does for the cases the app handles. */
-function createIssue(route, request, key, fixture) {
-  const authorization = request.headers()['authorization'] ?? ''
+async function createIssue(request, key, fixture) {
+  const authorization = request.headers.get('authorization') ?? ''
   if (authorization.replace(/^Bearer\s*/i, '').trim() === '') {
-    return json(route, 401, { message: 'Requires authentication' })
+    return json(401, { message: 'Requires authentication' })
   }
   if (key === 'acme/readonly') {
-    return json(route, 403, {
+    return json(403, {
       message: 'Resource not accessible by personal access token',
       documentation_url: 'https://docs.github.com/rest/issues/issues#create-an-issue',
       status: '403',
@@ -172,19 +172,19 @@ function createIssue(route, request, key, fixture) {
   }
   let fields
   try {
-    fields = JSON.parse(request.postData() ?? '')
+    fields = JSON.parse((await request.text()) || '')
   } catch {
     fields = null
   }
   if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) {
-    return json(route, 422, { message: 'Validation Failed', errors: [{ resource: 'Issue', code: 'invalid', field: 'body' }] })
+    return json(422, { message: 'Validation Failed', errors: [{ resource: 'Issue', code: 'invalid', field: 'body' }] })
   }
   const unknownKey = Object.keys(fields).find((field) => field !== 'title' && field !== 'body')
   if (unknownKey !== undefined) {
-    return json(route, 422, { message: 'Validation Failed', errors: [{ resource: 'Issue', code: 'invalid', field: unknownKey }] })
+    return json(422, { message: 'Validation Failed', errors: [{ resource: 'Issue', code: 'invalid', field: unknownKey }] })
   }
   if (typeof fields.title !== 'string' || fields.title.trim() === '') {
-    return json(route, 422, { message: 'Validation Failed', errors: [{ resource: 'Issue', code: 'missing_field', field: 'title' }] })
+    return json(422, { message: 'Validation Failed', errors: [{ resource: 'Issue', code: 'missing_field', field: 'title' }] })
   }
   const served = Math.max(0, ...fixture.open.map((item) => item.number), ...fixture.closed.map((item) => item.number))
   const number = served + 1
@@ -195,60 +195,65 @@ function createIssue(route, request, key, fixture) {
     body: typeof fields.body === 'string' ? fields.body : null,
   }
   fixture.open.push(created)
-  return json(route, 201, created)
+  return json(201, created)
 }
 
-function json(route, status, body, headers = {}) {
-  return route.fulfill({
+function json(status, body, headers = {}) {
+  return new Response(JSON.stringify(body), {
     status,
-    contentType: 'application/json',
     headers: {
+      'content-type': 'application/json',
       'access-control-allow-origin': '*',
       'access-control-expose-headers': 'link, x-ratelimit-remaining, x-ratelimit-reset',
       'x-ratelimit-limit': '5000',
       'x-ratelimit-remaining': '4999',
       ...headers,
     },
-    body: JSON.stringify(body),
   })
 }
 
-function handleApi(route) {
-  const request = route.request()
+/** The fake GitHub token the driver stores on an integration. */
+export const FIXTURE_GITHUB_TOKEN = 'github_pat_urutau_fixture_not_a_real_token'
+
+/** Answers one GitHub API request from the canned data; never touches the network. */
+export async function answerGitHub(request) {
   // The app sends custom headers, so the browser may preflight cross-origin requests.
-  if (request.method() === 'OPTIONS') {
-    return route.fulfill({
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
       status: 204,
       headers: {
         'access-control-allow-origin': '*',
         'access-control-allow-methods': 'GET, POST, OPTIONS',
-        'access-control-allow-headers': request.headers()['access-control-request-headers'] ?? '*',
+        'access-control-allow-headers': request.headers.get('access-control-request-headers') ?? '*',
       },
     })
   }
-  const url = new URL(request.url())
+  const url = new URL(request.url)
   const [, repos, owner, name, resource] = url.pathname.split('/')
   const key = `${owner}/${name}`.toLowerCase()
-  if (repos !== 'repos') return json(route, 404, { message: 'Not Found' })
+  if (repos !== 'repos') return json(404, { message: 'Not Found' })
 
   if (key === 'acme/limited') {
     const reset = Math.floor(Date.now() / 1000) + 45 * 60
-    return json(route, 403, { message: 'API rate limit exceeded' }, {
+    return json(403, { message: 'API rate limit exceeded' }, {
       'x-ratelimit-remaining': '0',
       'x-ratelimit-reset': String(reset),
     })
   }
 
   const fixture = REPOS[key]
-  if (!fixture) return json(route, 404, { message: 'Not Found' })
-  if (request.method() === 'POST') {
-    return resource === 'issues' ? createIssue(route, request, key, fixture) : json(route, 404, { message: 'Not Found' })
+  if (!fixture) return json(404, { message: 'Not Found' })
+  if (request.method === 'POST') {
+    return resource === 'issues' ? createIssue(request, key, fixture) : json(404, { message: 'Not Found' })
   }
-  if (!resource) return json(route, 200, fixture.repo)
-  if (resource === 'labels') return json(route, 200, fixture.labels)
-  if (resource !== 'issues') return json(route, 404, { message: 'Not Found' })
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return json(405, { message: 'Method Not Allowed' }, { allow: 'GET, POST, OPTIONS' })
+  }
+  if (!resource) return json(200, fixture.repo)
+  if (resource === 'labels') return json(200, fixture.labels)
+  if (resource !== 'issues') return json(404, { message: 'Not Found' })
 
-  if (url.searchParams.get('state') === 'closed') return json(route, 200, fixture.closed)
+  if (url.searchParams.get('state') === 'closed') return json(200, fixture.closed)
 
   // Serve open issues over two pages to exercise the app's Link-header pagination.
   const page = Number(url.searchParams.get('page') ?? '1')
@@ -256,7 +261,32 @@ function handleApi(route) {
   const hasNext = page * PAGE_SIZE < fixture.open.length
   const next = new URL(url)
   next.searchParams.set('page', String(page + 1))
-  return json(route, 200, items, hasNext ? { link: `<${next}>; rel="next"` } : {})
+  return json(200, items, hasNext ? { link: `<${next}>; rel="next"` } : {})
+}
+
+/** A fetch-shaped function: https://api.github.com/ requests get the canned answers, any other URL rejects. */
+export async function fixtureFetch(input, init) {
+  const request = new Request(input, init)
+  if (!request.url.startsWith('https://api.github.com/')) {
+    throw new TypeError('fixture fetch answers only https://api.github.com')
+  }
+  return answerGitHub(request)
+}
+
+async function handleApi(route) {
+  const source = route.request()
+  const body = source.postData()
+  const request = new Request(source.url(), {
+    method: source.method(),
+    headers: source.headers(),
+    body: body !== null && source.method() !== 'GET' && source.method() !== 'HEAD' ? body : undefined,
+  })
+  const response = await answerGitHub(request)
+  return route.fulfill({
+    status: response.status,
+    headers: Object.fromEntries(response.headers),
+    body: await response.text(),
+  })
 }
 
 function avatar(route) {
