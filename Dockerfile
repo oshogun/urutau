@@ -1,4 +1,4 @@
-# Urutau server image: one Node process serves the built app and /api.
+# Urutau server image: one Node process serves the built app, /api and /mcp.
 #   docker build -t urutau .
 #   docker run -p 127.0.0.1:8787:8080 -v urutau-data:/data urutau
 # SQLite lives in the /data volume unless DATABASE_URL points elsewhere.

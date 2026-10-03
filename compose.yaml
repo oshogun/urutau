@@ -20,7 +20,8 @@ services:
       KEYCLOAK_GITHUB_IDP: ${KEYCLOAK_GITHUB_IDP:-}
       KEYCLOAK_BROKER_API: ${KEYCLOAK_BROKER_API:-v1}
       KEYCLOAK_ALLOW_HTTP: ${KEYCLOAK_ALLOW_HTTP:-false}
-      # Optional. 32 bytes as base64 (openssl rand -base64 32). Without it, agent integrations cannot store a GitHub token.
+      # Optional. 32 bytes as base64 (openssl rand -base64 32). Without it, agent integrations
+      # cannot store a GitHub token.
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
     restart: unless-stopped
 volumes:

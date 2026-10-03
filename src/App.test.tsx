@@ -690,6 +690,15 @@ describe('App', () => {
       expect(await screen.findByLabelText('GitHub token (Urutau keeps this)')).toHaveValue('')
     })
 
+    it('moves focus to the GitHub token field when the dialog opens', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+
+      await user.click(await screen.findByRole('button', { name: 'Replace GitHub token for planner-bot' }))
+      await waitFor(() => expect(screen.getByLabelText('GitHub token (Urutau keeps this)')).toHaveFocus())
+    })
+
     it('gives every field on the page its own label', async () => {
       const user = userEvent.setup()
       renderApp('?view=users', { integrations: [planner] })

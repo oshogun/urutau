@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { BEARER_PATTERN } from '../auth/bearer.ts'
 import { SECRET_PATTERNS, checkGitHubToken, redactPatterns } from './tokenFormats.ts'
 
 const classic = 'ghp_' + 'F'.repeat(36)
@@ -73,6 +74,15 @@ describe('SECRET_PATTERNS', () => {
   })
 
   describe('adjacent tokens', () => {
+    it('redacts bearers holding an inner gh token near the start of the body', () => {
+      const m = 'urutau_mcp_AAAAAghp_abc-' + 'B'.repeat(30)
+      const m19 = 'urutau_mcp_' + 'A'.repeat(19) + 'ghs_' + 'C'.repeat(20)
+      const p1 = 'urutau_mcp_' + 'ghp_' + 'A'.repeat(10) + '-' + 'A'.repeat(29)
+      expect(BEARER_PATTERN.test(m)).toBe(true)
+      expect(BEARER_PATTERN.test(m19)).toBe(true)
+      for (const v of [m, m19, p1]) expect(redactPatterns(v)).toBe('[redacted]')
+    })
+
     const body = (c: string) => c.repeat(36)
     const kinds: Record<string, string> = {
       ghp: 'ghp_' + body('A'),
@@ -85,13 +95,25 @@ describe('SECRET_PATTERNS', () => {
     }
     for (const [a, x] of Object.entries(kinds)) {
       for (const [b, y] of Object.entries(kinds)) {
-        it(`redacts ${a} followed by ${b}`, () => {
-          const out = redactPatterns(x + y)
-          expect(out).toBe('[redacted][redacted]')
-          expect(out).not.toMatch(/[A-Za-z0-9]{20}/)
+        it(`redacts ${a} followed by ${b} as one run`, () => {
+          expect(redactPatterns(x + y)).toBe('[redacted]')
         })
       }
     }
+
+    it('redacts all 343 triples without leaving a body character', () => {
+      const all = Object.values(kinds)
+      for (const x of all) {
+        for (const y of all) {
+          for (const z of all) expect(redactPatterns(x + y + z)).toBe('[redacted]')
+        }
+      }
+    })
+
+    it('keeps the text between and around tokens that is not token characters', () => {
+      expect(redactPatterns(`token=${classic} next ${bearer}, done`)).toBe('token=[redacted] next [redacted], done')
+      expect(redactPatterns(`Bearer ${bearer}, done`)).toBe('Bearer [redacted], done')
+    })
 
     it('removes a short gh[pousr]_ tail inside a github_pat_ body', () => {
       expect(redactPatterns('github_pat_' + 'A'.repeat(25) + 'ghp_ABC')).toBe('[redacted]')
@@ -104,6 +126,11 @@ describe('SECRET_PATTERNS', () => {
       expect(redactPatterns(b)).toBe('[redacted]')
     })
 
+    it('redacts a bearer with an inner ghs_ token', () => {
+      expect(redactPatterns('urutau_mcp_QQQQQghs_AAA_' + 'A'.repeat(30))).toBe('[redacted]')
+      expect(redactPatterns('Bearer urutau_mcp_QQQQQghs_AAA_' + 'A'.repeat(30))).toBe('Bearer [redacted]')
+    })
+
     it('redacts a github_pat_ value with a ghp_ prefix inside its first 20 characters', () => {
       expect(redactPatterns('github_pat_' + 'A'.repeat(5) + 'ghp_' + 'B'.repeat(10) + '_' + 'C'.repeat(60))).toBe('[redacted]')
       expect(redactPatterns('github_pat_' + 'A'.repeat(19) + 'ghp_' + 'C'.repeat(59))).toBe('[redacted]')
@@ -114,6 +141,24 @@ describe('SECRET_PATTERNS', () => {
         const body = ('A'.repeat(i) + 'ghp_' + 'a-').padEnd(43, 'B')
         expect(redactPatterns(`before urutau_mcp_${body} after`)).toBe('before [redacted] after')
       }
+    })
+
+    it('redacts an accepted github_pat_ value holding an inner gh?_ token followed by an underscore', () => {
+      const values = [
+        'github_pat_' + 'A'.repeat(20) + 'ghp_' + 'B'.repeat(20) + '_' + 'C'.repeat(30),
+        'github_pat_' + 'A'.repeat(22) + '_' + 'D'.repeat(10) + 'gho_' + 'B'.repeat(20) + '_' + 'C'.repeat(20),
+        'github_pat_trAsaop0papBgor00p0_p_ptsBigBhshgghu_ssaiBsAg0AprsBstgBrBoaha_goigsur0i',
+        ...['p', 'o', 'u', 's', 'r'].map((l) => 'github_pat_' + 'A'.repeat(30) + `gh${l}_` + 'B'.repeat(25) + '_x' + 'C'.repeat(10)),
+      ]
+      for (const value of values) {
+        expect(checkGitHubToken(value).ok).toBe(true)
+        expect(redactPatterns(value)).toBe('[redacted]')
+      }
+    })
+
+    it('redacts a github_pat_ value followed by a ghp_ token and a second github_pat_ value', () => {
+      const pat = 'github_pat_' + 'A'.repeat(30)
+      expect(redactPatterns(pat + classic + pat).replace(/\[redacted\]/g, '')).toBe('')
     })
   })
 })

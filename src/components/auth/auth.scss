@@ -176,6 +176,16 @@
     flex-wrap: wrap;
     margin-bottom: 0;
   }
+
+  .users__empty {
+    margin-bottom: $spacing-03;
+  }
+}
+
+// Carbon pads every cell of a row that follows an expandable row by 3.5rem, which also reaches
+// the nested tokens table; its cells line up with their headers at the regular padding.
+tr.cds--parent-row.cds--expandable-row + tr[data-child-row] .integrations__details td {
+  padding-inline-start: $spacing-05;
 }
 
 .integrations__subheading {

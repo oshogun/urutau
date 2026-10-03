@@ -106,10 +106,10 @@ The following role-based selectors are verified:
 | `acme/widgets` | 13 open issues over two pages, one PR (the app hides it), 3 recently closed issues plus 1 closed long ago (outside the window), labels that auto-link to *In progress* and *In review* |
 | `acme/empty` | no labels, no issues |
 | `acme/readonly` | two open issues; creating an issue answers 403 `Resource not accessible by personal access token` |
-| `acme/limited` | 403 rate-limit error |
+| `acme/limited` | 403 rate-limit error. Through an agent integration, this also records the token's rate as spent: that integration's other repositories answer `github-rate-limited` with `reserve: true` for about 45 minutes. Use a separate integration for `acme/limited`, or read it last. |
 | anything else | 404 (looks like a private repo without a token) |
 
-On a known repository, `PATCH`, `PUT` and `DELETE` answer 405 with `Allow: GET, POST, OPTIONS`. `fixtureFetch` (the fetch-shaped
+On `acme/widgets`, `acme/empty` and `acme/readonly`, any method other than `GET`, `HEAD`, `POST` and `OPTIONS` answers 405 with `Allow: GET, POST, OPTIONS`; `acme/limited` answers 403 to every method. `fixtureFetch` (the fetch-shaped
 export the launcher uses) rejects any URL that does not start with `https://api.github.com/` with
 `TypeError('fixture fetch answers only https://api.github.com')`; a log line from the launcher
 that is not a `GET`, or a `TypeError` with that text, means something tried to leave the fixtures.

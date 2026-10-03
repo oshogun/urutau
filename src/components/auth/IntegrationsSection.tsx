@@ -105,7 +105,6 @@ function GitHubTokenTag({ status }: { status: GitHubTokenStatus }) {
   )
 }
 
-/** The integration's name followed by the tag that marks it as an agent account. */
 // The table copies new rows into its own state after the section has rendered, so the new row
 // is not in the DOM when the section's effects run. Focusing from the row's own mount avoids that.
 function FocusRowButton({ onFocused }: { onFocused: () => void }) {
@@ -117,11 +116,12 @@ function FocusRowButton({ onFocused }: { onFocused: () => void }) {
   return <span ref={marker} hidden />
 }
 
+/** The integration's name followed by the tag that marks it as an agent account. */
 function AgentName({ name }: { name: string }) {
   return (
     <span className="integrations__name">
       {name}
-      <Tag type="cool-gray" size="sm">
+      <Tag type="cool-gray" size="sm" as="span">
         Agent
       </Tag>
     </span>
@@ -481,6 +481,7 @@ function GitHubTokenModal({ integration, launcher, onClose, onSaved }: FormModal
       open
       size="sm"
       launcherButtonRef={launcher}
+      selectorPrimaryFocus="#integration-github-token"
       modalHeading={`GitHub token for ${integration.username}`}
       primaryButtonText="Save GitHub token"
       secondaryButtonText="Cancel"
@@ -576,7 +577,6 @@ export function IntegrationsSection() {
   const [launcherFocus, setLauncherFocus] = useState(0)
   const launcher = useRef<HTMLElement | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
-  const section = useRef<HTMLElement>(null)
   // Name of the integration just created, until its row has rendered and taken focus.
   const focusNewRow = useRef<string | null>(null)
 
@@ -671,7 +671,7 @@ export function IntegrationsSection() {
   }))
 
   return (
-    <section ref={section} className="users__section" aria-labelledby="integrations-heading">
+    <section className="users__section" aria-labelledby="integrations-heading">
       <h2 id="integrations-heading" ref={heading} tabIndex={-1} className="users__heading">
         Agent integrations
       </h2>

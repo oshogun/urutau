@@ -18,7 +18,7 @@ const env = { ...process.env, DATABASE_URL: 'sqlite::memory:', HOST: '127.0.0.1'
 if (process.env.URUTAU_LAUNCHER_NO_KEY === '1') {
   delete env.TOKEN_ENCRYPTION_KEY
 } else {
-  env.TOKEN_ENCRYPTION_KEY ??= DEVELOPMENT_KEY
+  env.TOKEN_ENCRYPTION_KEY = DEVELOPMENT_KEY
 }
 
 async function loggingFetch(input, init) {

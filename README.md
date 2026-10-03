@@ -143,14 +143,13 @@ is never read. A proxy must also forward `/mcp` and its `Authorization` header (
 
 ### Run one instance only
 
-Live updates, sign-in rate limits, pending Keycloak logins and Keycloak token grants are kept in
-the memory of the single server process. So are the MCP endpoint's GitHub snapshot cache, its
+Live updates, sign-in rate limits, pending Keycloak logins and Keycloak token grants are kept in the
+memory of the single server process. So are the MCP endpoint's GitHub snapshot cache, its
 per-account snapshot queue, its per-repository move lock, its failed-token limiter, its call and
 GitHub request counters and the registry of calls in progress; a restart empties them. Do not run
-two instances behind a load balancer: a change saved through one would not reach a browser
-connected to the other. Restarting the server
-signs Keycloak users out of GitHub reads (their Urutau sign-in survives; they sign in with
-Keycloak again to read GitHub through the server).
+two instances behind a load balancer: a change saved through one would not reach a browser connected
+to the other. Restarting the server signs Keycloak users out of GitHub reads (their Urutau sign-in
+survives; they sign in with Keycloak again to read GitHub through the server).
 
 ### Environment variables
 
@@ -265,7 +264,7 @@ Upgrading again runs the migration and starts with the switch off.
 Urutau serves a [Model Context Protocol](https://modelcontextprotocol.io/) endpoint at
 `<PUBLIC_URL>/mcp` (`http://127.0.0.1:8787/mcp` on a default local start).
 It takes JSON-RPC requests over HTTP `POST`; a request it accepts is answered as a
-`text/event-stream`, and a refused one (400, 401, 403, 405, 429) as JSON. It offers four tools:
+`text/event-stream`, and a refused one (400, 401, 403, 405, 406, 413, 415, 429, 503) as JSON. It offers four tools:
 
 | Tool | What it does |
 | --- | --- |

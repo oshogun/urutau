@@ -38,15 +38,15 @@ describe('createLogger patterns', () => {
     })
   })
 
-  it('redacts two tokens written back to back, each on its own', () => {
+  it('redacts two tokens written back to back as one run', () => {
     const { lines, logger } = capture(true)
     for (const first of values) {
       for (const second of values) logger.warn(first + second, { detail: `${first}${second}` })
     }
     expect(lines).toHaveLength(values.length * values.length)
     for (const line of lines) {
-      expect(line.msg).toBe('[redacted][redacted]')
-      expect(line.detail).toBe('[redacted][redacted]')
+      expect(line.msg).toBe('[redacted]')
+      expect(line.detail).toBe('[redacted]')
     }
   })
 
@@ -61,6 +61,12 @@ describe('createLogger patterns', () => {
     }
     expect(lines.map((line) => line.msg)).toEqual(['Authorization:%20Bearer%20[redacted]', 'token%3D[redacted]', 'x_[redacted]'])
     expect(lines.map((line) => line.field)).toEqual(['Authorization:%20Bearer%20[redacted]', 'token%3D[redacted]', 'x_[redacted]'])
+  })
+
+  it('redacts a bearer holding an inner ghs_ token', () => {
+    const { lines, logger } = capture(true)
+    logger.warn('probe', { detail: 'Bearer urutau_mcp_QQQQQghs_AAA_' + 'A'.repeat(30) })
+    expect(lines[0].detail).toBe('Bearer [redacted]')
   })
 
   it('still removes literal secrets with patterns on', () => {
