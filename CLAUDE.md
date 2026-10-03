@@ -146,8 +146,8 @@ narrow the contract further.
   the `meta` row `github_writes`). Managing issues entirely from Urutau is the
   product's goal (`PRODUCT.md`), but no other code path writes to a
   repository (labels, issue state, comments, edits) unless the run's frozen
-  decisions include it. Such a write goes through Design first and is gated
-  by the same switch. On the browser path only the interface enforces the
+  decisions include it. Such a write goes through Design first and stays off
+  until the admin turns it on. On the browser path only the interface enforces the
   switch, because the browser calls `api.github.com` itself. Agents, tests and
   the driver never create an issue on a real repository; the fixtures answer
   the create request.
