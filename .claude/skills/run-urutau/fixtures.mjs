@@ -15,8 +15,9 @@
 //
 // answerGitHub (Request to Response) and fixtureFetch (fetch-shaped, rejects any URL outside
 // https://api.github.com/) answer the same data for a server-side caller such as the MCP launcher;
-// routeGitHubFixtures wraps answerGitHub for Playwright. Any method other than GET, POST and
-// OPTIONS on a known repository answers 405.
+// routeGitHubFixtures wraps answerGitHub for Playwright. Any method other than GET, HEAD, POST and
+// OPTIONS on acme/widgets, acme/empty or acme/readonly answers 405; acme/limited answers 403 to
+// every method.
 
 const DAY = 86_400_000
 const AVATAR_HOST = 'https://fixtures.urutau.test'

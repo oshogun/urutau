@@ -197,7 +197,16 @@ describe('end to end', () => {
     expect(parse<{ error: string }>(missing.text).error).toBe('github-token-missing')
   })
 
-  test('a token revoked or an integration removed stops the agent at once', async () => {
+  test('a revoked token stops the agent at once', async () => {
+    const { agent } = await setUp()
+    expect((await agent.bearer.tool('list_boards')).isError).toBe(false)
+    expect((await h.delete(`/api/integrations/${agent.id}/tokens/${agent.tokenId}`)).status).toBe(204)
+    const response = await agent.bearer.mcp({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    expect(response.status).toBe(401)
+    expect(h.ctx.mcp.inflight.size()).toBe(0)
+  })
+
+  test('a removed integration stops the agent at once', async () => {
     const { agent } = await setUp()
     expect((await agent.bearer.tool('list_boards')).isError).toBe(false)
     expect((await h.delete(`/api/integrations/${agent.id}`)).status).toBe(204)

@@ -12,7 +12,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name)
-    if (entry.isDirectory()) return entry.name === 'node_modules' || entry.name === 'migrations' ? [] : walk(path)
+    if (entry.isDirectory()) return entry.name === 'node_modules' ? [] : walk(path)
     return entry.name.endsWith('.ts') ? [path] : []
   })
 }
@@ -129,9 +129,13 @@ describe('the MCP modules keep their layers', () => {
   })
 
   test('no MCP module calls a global fetch: GitHub is reached through the reader only', () => {
-    // A bare call only; the SDK handler's own handler.fetch( is a method call and is allowed.
-    const bareFetch = /(?<![.\w])fetch\(/
-    expect(inMcp.filter((path) => bareFetch.test(text(path))).map(rel)).toEqual([])
+    // Any call to fetch( counts, including globalThis.fetch( and deps.fetch(. The only exemption is the
+    // SDK handler's own handler.fetch( in endpoint.ts.
+    const callsFetch = (path: string) => {
+      const source = rel(path) === 'server/mcp/endpoint.ts' ? text(path).replace(/\bhandler\.fetch\(/g, '') : text(path)
+      return /\bfetch\(/.test(source)
+    }
+    expect(inMcp.filter(callsFetch).map(rel)).toEqual([])
   })
 })
 

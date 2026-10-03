@@ -56,8 +56,8 @@ npm run dev    # app at http://localhost:5173, API server at http://localhost:87
 ```
 
 `npm run dev` starts the API server (restarted on change) and the Vite dev server, which proxies
-`/api` and `/mcp` to it. `PORT` changes the API port. The database is a SQLite file, `data/urutau.db`, created
-on first start.
+`/api` and `/mcp` to it. `PORT` changes the API port. The database is a SQLite file,
+`data/urutau.db`, created on first start.
 
 **First run.** The first time the app opens with an empty database it asks for the first account.
 Whoever creates it, with a username and password or through Keycloak, becomes the admin. The admin
@@ -146,8 +146,9 @@ is never read. A proxy must also forward `/mcp` and its `Authorization` header (
 Live updates, sign-in rate limits, pending Keycloak logins and Keycloak token grants are kept in
 the memory of the single server process. So are the MCP endpoint's GitHub snapshot cache, its
 per-account snapshot queue, its per-repository move lock, its failed-token limiter, its call and
-GitHub request counters and the registry of calls in progress; a restart empties them. Do not run two instances behind a load balancer: a
-change saved through one would not reach a browser connected to the other. Restarting the server
+GitHub request counters and the registry of calls in progress; a restart empties them. Do not run
+two instances behind a load balancer: a change saved through one would not reach a browser
+connected to the other. Restarting the server
 signs Keycloak users out of GitHub reads (their Urutau sign-in survives; they sign in with
 Keycloak again to read GitHub through the server).
 
@@ -262,8 +263,9 @@ Upgrading again runs the migration and starts with the switch off.
 ## AI agents (MCP)
 
 Urutau serves a [Model Context Protocol](https://modelcontextprotocol.io/) endpoint at
-`<PUBLIC_URL>/mcp` (`http://127.0.0.1:8787/mcp` on a default local start). It speaks JSON over HTTP
-`POST` and offers four tools:
+`<PUBLIC_URL>/mcp` (`http://127.0.0.1:8787/mcp` on a default local start).
+It takes JSON-RPC requests over HTTP `POST`; a request it accepts is answered as a
+`text/event-stream`, and a refused one (400, 401, 403, 405, 429) as JSON. It offers four tools:
 
 | Tool | What it does |
 | --- | --- |
@@ -289,8 +291,8 @@ treat them as data, not as instructions.
    (at most 200).
 4. **Set its GitHub token.** Use a [fine-grained personal access
    token](https://github.com/settings/personal-access-tokens/new) with access to those repositories
-   and read-only Issues and Metadata permissions. Urutau keeps it encrypted and uses it only for `GET`
-   requests to `api.github.com`.
+   and read-only Issues and Metadata permissions. Urutau keeps it encrypted and uses it only for
+   `GET` requests to `api.github.com`.
 5. **Create an Urutau MCP token** for the integration (expiring in 30, 90 or 365 days, or never).
    Urutau shows it once and keeps only a fingerprint. It is the credential the agent sends as
    `Authorization: Bearer <token>`.
@@ -354,8 +356,9 @@ or in `.mcp.json`:
 }
 ```
 
-**Clients that only start local programs** can use [mcp-remote](https://www.npmjs.com/package/mcp-remote)
-0.12.0 or later, which reads headers from a file with `--header-file`. Write the file once, in a
+**Clients that only start local programs** can use
+[mcp-remote](https://www.npmjs.com/package/mcp-remote) 0.12.0 or later,
+which reads headers from a file with `--header-file`. Write the file once, in a
 terminal where `URUTAU_MCP_TOKEN` is set (the command stops without writing if it is unset):
 
 ```bash
@@ -390,8 +393,9 @@ the token in a text file in your user folder instead, and use a path without spa
   request does). A query string gets 400, so a token in the address is never
   read.
 - Clients must send `Accept: application/json, text/event-stream`.
-- A request with an `Origin` header of another site, which a desktop client does not normally send,
-  gets 403 `origin-rejected`.
+- A request whose `Origin` header is not Urutau's own address (the `PUBLIC_URL` origin, or the
+  server's own host when `PUBLIC_URL` is unset) gets 403 `origin-rejected`. Desktop clients do not
+  normally send `Origin`; one that sends its own is refused.
 - A missing, wrong, revoked or expired token gets 401 `invalid-token`. A client may answer that with
   an OAuth or client-registration error: it means the Urutau MCP token is missing, wrong or revoked.
   The endpoint has no OAuth.
@@ -422,9 +426,9 @@ the token in a text file in your user folder instead, and use a path without spa
 
 An Urutau MCP token: revoke it on the Users page. Calls it is making stop at once. After a suspected
 leak of `TOKEN_ENCRYPTION_KEY` or of the database, revoke each stored GitHub token **at GitHub**
-first, then set a new one in Urutau. Clearing a token in Urutau only deletes the stored copy; it does
-not revoke the token at GitHub. Changing the key makes stored GitHub tokens unreadable until they
-are set again.
+first, then set a new one in Urutau. Clearing a token in Urutau only deletes the stored copy; it
+does not revoke the token at GitHub. Changing the key makes stored GitHub tokens unreadable
+until they are set again.
 
 Use one integration per trust domain. Do not give one integration private repositories and an agent
 that reads untrusted public content and can write elsewhere: text in an issue is untrusted input
@@ -450,8 +454,8 @@ DELETE FROM kysely_migration WHERE name = '0003_integrations';
 ```
 
 The first statement is optional: without it the integration accounts stay as `users` rows with no
-password that an older build lists as Keycloak users who cannot sign in. If you also go back past the
-issue switch, run the `0002_github_writes` statements from *Creating issues* afterwards.
+password that an older build lists as Keycloak users who cannot sign in. If you also go back past
+the issue switch, run the `0002_github_writes` statements from *Creating issues* afterwards.
 
 ## How issues are placed
 
@@ -574,8 +578,8 @@ the UI only uses those types. Adding another provider (GitLab, Gitea, …) means
   on window focus, to stay within the anonymous rate limit. Use **Refresh** to reload. Board
   changes by other people arrive over a server-sent events stream and are not cached that way.
 - **Limits.** At most 1,000 open and 1,000 recently closed issues are loaded per board; a warning
-  is shown when a repository has more. Pull requests are filtered out. The MCP endpoint has its own limits (see
-  [AI agents (MCP)](#ai-agents-mcp)).
+  is shown when a repository has more. Pull requests are filtered out. The MCP endpoint has its
+  own limits (see [AI agents (MCP)](#ai-agents-mcp)).
 
 ## Roadmap ideas
 

@@ -29,7 +29,7 @@ import {
   Tile,
 } from '@carbon/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import {
   INTEGRATIONS_QUERY_KEY,
@@ -106,6 +106,17 @@ function GitHubTokenTag({ status }: { status: GitHubTokenStatus }) {
 }
 
 /** The integration's name followed by the tag that marks it as an agent account. */
+// The table copies new rows into its own state after the section has rendered, so the new row
+// is not in the DOM when the section's effects run. Focusing from the row's own mount avoids that.
+function FocusRowButton({ onFocused }: { onFocused: () => void }) {
+  const marker = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    marker.current?.closest('tr')?.querySelector<HTMLElement>('.cds--table-expand__button')?.focus()
+    onFocused()
+  }, [onFocused])
+  return <span ref={marker} hidden />
+}
+
 function AgentName({ name }: { name: string }) {
   return (
     <span className="integrations__name">
@@ -565,6 +576,9 @@ export function IntegrationsSection() {
   const [launcherFocus, setLauncherFocus] = useState(0)
   const launcher = useRef<HTMLElement | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
+  const section = useRef<HTMLElement>(null)
+  // Name of the integration just created, until its row has rendered and taken focus.
+  const focusNewRow = useRef<string | null>(null)
 
   useEffect(() => {
     if (headingFocus > 0) heading.current?.focus()
@@ -578,11 +592,16 @@ export function IntegrationsSection() {
     else heading.current?.focus()
   }, [launcherFocus])
 
+  const clearNewRow = useCallback(() => {
+    focusNewRow.current = null
+  }, [])
+
   const refresh = () => queryClient.invalidateQueries({ queryKey: INTEGRATIONS_QUERY_KEY })
 
   const create = useMutation({
     mutationFn: () => createIntegration({ username: name.trim() }),
     onSuccess: ({ integration }) => {
+      focusNewRow.current = integration.username
       setName('')
       setNameError(null)
       setActionError(null)
@@ -633,6 +652,14 @@ export function IntegrationsSection() {
   }
 
   const list = integrations.data?.integrations ?? []
+
+  // A pending request that never matched a row (the refetch finished without it) is dropped, so
+  // it cannot take focus from something else later.
+  useEffect(() => {
+    if (integrations.isFetching || focusNewRow.current === null) return
+    const names = integrations.data?.integrations.map((item) => item.username) ?? []
+    if (!names.includes(focusNewRow.current)) focusNewRow.current = null
+  }, [integrations.isFetching, integrations.data])
   const githubTokenStorage = integrations.data?.githubTokenStorage ?? true
   const rows = list.map((integration) => ({
     id: integration.id,
@@ -644,7 +671,7 @@ export function IntegrationsSection() {
   }))
 
   return (
-    <section className="users__section" aria-labelledby="integrations-heading">
+    <section ref={section} className="users__section" aria-labelledby="integrations-heading">
       <h2 id="integrations-heading" ref={heading} tabIndex={-1} className="users__heading">
         Agent integrations
       </h2>
@@ -752,6 +779,9 @@ export function IntegrationsSection() {
                       onExpand={() => setExpanded(isExpanded ? null : integration.id)}
                     >
                       <TableCell>
+                        {focusNewRow.current === integration.username && (
+                          <FocusRowButton onFocused={clearNewRow} />
+                        )}
                         <AgentName name={integration.username} />
                       </TableCell>
                       <TableCell>

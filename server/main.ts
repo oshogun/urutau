@@ -1,5 +1,8 @@
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { realpathSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { closeApp, createApp, purgeExpired, serverSecrets } from './app.ts'
 import { loadConfig } from './config.ts'
@@ -39,7 +42,12 @@ export async function start(options: StartOptions): Promise<RunningServer> {
   const log = createLogger({ secrets: serverSecrets(config), patterns: true, write: options.write })
 
   const database = await openDatabase(config.databaseUrl)
-  await database.migrate()
+  try {
+    await database.migrate()
+  } catch (error) {
+    await database.close()
+    throw error
+  }
 
   const hub = createEventHub()
   const grants = new GrantStore()
@@ -122,6 +130,23 @@ async function main(): Promise<void> {
   process.on('SIGTERM', shutdown)
 }
 
-if (import.meta.main) {
+/**
+ * True when this module is the process entry point. import.meta.main exists from Node 24.2;
+ * on an earlier 24.x it is undefined, and the entry script (argv[1]) is compared with this file.
+ */
+export function isEntryModule(meta: { main?: boolean; url: string }, argv1: string | undefined): boolean {
+  if (meta.main !== undefined) return meta.main
+  if (!argv1) return false
+  const real = (path: string) => {
+    try {
+      return realpathSync(path)
+    } catch {
+      return resolve(path)
+    }
+  }
+  return real(argv1) === real(fileURLToPath(meta.url))
+}
+
+if (isEntryModule(import.meta, process.argv[1])) {
   void main()
 }

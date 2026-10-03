@@ -112,7 +112,7 @@ The following role-based selectors are verified:
 On a known repository, `PATCH`, `PUT` and `DELETE` answer 405 with `Allow: GET, POST, OPTIONS`. `fixtureFetch` (the fetch-shaped
 export the launcher uses) rejects any URL that does not start with `https://api.github.com/` with
 `TypeError('fixture fetch answers only https://api.github.com')`; a log line from the launcher
-that is not a `GET` (or the issue-create `POST`), or a `TypeError` with that text, means something tried to leave the fixtures.
+that is not a `GET`, or a `TypeError` with that text, means something tried to leave the fixtures.
 
 Creating an issue (`POST /repos/{owner}/{repo}/issues`) works on `acme/widgets` and `acme/empty` with any
 non-empty `Authorization` header (paste `fixture-token` in Settings), answers 401 without one, and keeps the new
@@ -232,12 +232,21 @@ await page.getByLabel('Token name').fill('agent')
 await page.getByRole('button', { name: 'Create token' }).click()
 await page.waitForFunction(() => document.querySelector('.users__link code, .users__link pre')?.textContent?.startsWith('urutau_mcp_'))
 const token = (await page.locator('.users__link code, .users__link pre').first().innerText()).trim()
+// role-based alternative, same text: page.getByRole('textbox', { name: 'Urutau MCP token', exact: true })
+// (getByLabel('Urutau MCP token') without exact matches three elements and fails Playwright's strict mode)
 // ... set the GitHub token (fixtureGitHubToken) and the repositories, open the board in
 // context.newPage(), then:
 const moved = await mcp('tools/call', { name: 'move_card', arguments: { repo: 'acme/widgets', issue: 12, bucket: 'todo', position: 'top' } }, token)
+await other.getByRole('status').filter({ hasText: 'Board updated by' }).first().waitFor() // other = the board page
 ```
 
-`grep -c 'fixture-github \(POST\|PATCH\|PUT\|DELETE\)' api.log` must print 0, and `grep -c api.github.com api.log` too.
+The 'Board updated by <name>' toast closes after 4 seconds (`ToastNotification timeout={4000}` in `src/board/Board.tsx`), so wait
+for it and take the screenshot in the same driver script as the `move_card` call.
+
+`grep -c 'fixture-github \(POST\|PATCH\|PUT\|DELETE\)' api.log` must print 0.
+Every outbound request of the launched server goes through the launcher's fetch, which only calls `fixtureFetch` and has no
+network path. A `TypeError` 'fixture fetch answers only https://api.github.com' in the log means a URL outside
+api.github.com was tried.
 Mask the token tile's `CodeSnippet` text in the page before any screenshot. A full-page screenshot draws
 the fixed header in the middle of the image; use a tall viewport (`page.setViewportSize`) instead.
 Stop with `for port in 9334 5174 8788; do lsof -ti:$port -sTCP:LISTEN | xargs -r kill; done`.

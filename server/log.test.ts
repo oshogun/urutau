@@ -38,6 +38,18 @@ describe('createLogger patterns', () => {
     })
   })
 
+  it('redacts two tokens written back to back, each on its own', () => {
+    const { lines, logger } = capture(true)
+    for (const first of values) {
+      for (const second of values) logger.warn(first + second, { detail: `${first}${second}` })
+    }
+    expect(lines).toHaveLength(values.length * values.length)
+    for (const line of lines) {
+      expect(line.msg).toBe('[redacted][redacted]')
+      expect(line.detail).toBe('[redacted][redacted]')
+    }
+  })
+
   it('redacts tokens written after a URL escape or an underscore', () => {
     const { lines, logger } = capture(true)
     for (const text of [

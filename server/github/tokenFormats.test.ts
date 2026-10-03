@@ -71,4 +71,49 @@ describe('SECRET_PATTERNS', () => {
     expect(redactPatterns('token%3D' + classic)).toBe('token%3D[redacted]')
     expect(redactPatterns('x_' + bearer)).toBe('x_[redacted]')
   })
+
+  describe('adjacent tokens', () => {
+    const body = (c: string) => c.repeat(36)
+    const kinds: Record<string, string> = {
+      ghp: 'ghp_' + body('A'),
+      gho: 'gho_' + body('B'),
+      ghu: 'ghu_' + body('C'),
+      ghs: 'ghs_' + body('D'),
+      ghr: 'ghr_' + body('E'),
+      pat: 'github_pat_' + body('F'),
+      mcp: 'urutau_mcp_' + body('G'),
+    }
+    for (const [a, x] of Object.entries(kinds)) {
+      for (const [b, y] of Object.entries(kinds)) {
+        it(`redacts ${a} followed by ${b}`, () => {
+          const out = redactPatterns(x + y)
+          expect(out).toBe('[redacted][redacted]')
+          expect(out).not.toMatch(/[A-Za-z0-9]{20}/)
+        })
+      }
+    }
+
+    it('removes a short gh[pousr]_ tail inside a github_pat_ body', () => {
+      expect(redactPatterns('github_pat_' + 'A'.repeat(25) + 'ghp_ABC')).toBe('[redacted]')
+    })
+
+    it('redacts a bearer with a ghp_ prefix near the start of its body', () => {
+      const a = 'urutau_mcp_' + 'A'.repeat(10) + 'ghp_' + 'B'.repeat(5) + '-' + 'C'.repeat(23)
+      const b = 'urutau_mcp_' + 'A'.repeat(19) + 'ghp_BBB_' + 'C'.repeat(16)
+      expect(redactPatterns(a)).toBe('[redacted]')
+      expect(redactPatterns(b)).toBe('[redacted]')
+    })
+
+    it('redacts a github_pat_ value with a ghp_ prefix inside its first 20 characters', () => {
+      expect(redactPatterns('github_pat_' + 'A'.repeat(5) + 'ghp_' + 'B'.repeat(10) + '_' + 'C'.repeat(60))).toBe('[redacted]')
+      expect(redactPatterns('github_pat_' + 'A'.repeat(19) + 'ghp_' + 'C'.repeat(59))).toBe('[redacted]')
+    })
+
+    it('redacts a bearer with gh[pousr]_ followed by - or _ at every early body index', () => {
+      for (let i = 0; i < 38; i++) {
+        const body = ('A'.repeat(i) + 'ghp_' + 'a-').padEnd(43, 'B')
+        expect(redactPatterns(`before urutau_mcp_${body} after`)).toBe('before [redacted] after')
+      }
+    })
+  })
 })

@@ -122,6 +122,7 @@ describe('apiStub: integration routes', () => {
       repos: ['acme/widgets'],
       githubToken: { set: true, status: 'unchecked' },
     })
+    expect(first.integrations[0].createdBy).toEqual({ id: expect.any(String), username: 'ada' })
     const { integration } = await createIntegration({ username: 'bot-two' })
     expect(integration).toMatchObject({ tokens: [], repos: [], githubToken: { set: false, status: null } })
     expect(stub.integrations.map((i) => i.username)).toEqual(['bot-one', 'bot-two'])
@@ -181,6 +182,9 @@ describe('apiStub: integration routes', () => {
     const id = stub.integrations[0].id
     await expect(setIntegrationRepos(id, { repos: ['acme/widgets', 'nope'] })).rejects.toMatchObject({
       message: 'Entry 2 is not a repository as owner/name.',
+    })
+    await expect(setIntegrationRepos(id, { repos: ['acme/widgets.git'] })).rejects.toMatchObject({
+      message: 'Entry 1 is not a repository as owner/name.',
     })
     await expect(setIntegrationRepos(id, { repos: 'x' as unknown as string[] })).rejects.toMatchObject({ code: 'invalid-request' })
     await expect(setIntegrationRepos(id, { repos: [' Acme/Widgets ', 'acme/empty', 'ACME/empty'] })).resolves.toEqual({

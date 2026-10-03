@@ -770,7 +770,40 @@ describe('App', () => {
       await user.click(screen.getByRole('button', { name: 'Create integration' }))
       expect(await screen.findByRole('button', { name: 'Remove planner-bot' })).toBeInTheDocument()
       expect(await screen.findByLabelText('Token name')).toBeInTheDocument()
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Show details of planner-bot' })).toHaveFocus(),
+      )
       expect(stub.integrations.map((i) => i.username)).toEqual(['planner-bot'])
+    })
+
+    it('moves focus to the new row when the list already has integrations', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await screen.findByRole('button', { name: 'Show details of planner-bot' })
+
+      await user.type(screen.getByLabelText('Integration name'), 'second-bot')
+      await user.click(screen.getByRole('button', { name: 'Create integration' }))
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Show details of second-bot' })).toHaveFocus(),
+      )
+    })
+
+    it('keeps focus on the shown-once token after creating an integration', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await screen.findByRole('button', { name: 'Show details of planner-bot' })
+
+      await user.type(screen.getByLabelText('Integration name'), 'second-bot')
+      await user.click(screen.getByRole('button', { name: 'Create integration' }))
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Show details of second-bot' })).toHaveFocus(),
+      )
+      await user.type(await screen.findByLabelText('Token name'), 'laptop')
+      await user.click(screen.getByRole('button', { name: 'Create token' }))
+      const secret = await screen.findByText(/^urutau_mcp_A+\d$/)
+      await waitFor(() => expect(secret.closest('.users__link')).toHaveFocus())
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(secret.closest('.users__link')).toHaveFocus()
     })
 
     it('sends the repository lines trimmed and shows a 400 on the field', async () => {

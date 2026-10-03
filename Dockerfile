@@ -9,9 +9,11 @@ RUN npm ci
 COPY . .
 RUN npm run build
 # The type-check above needed the tests and their helpers; the runtime image does not.
-# Nothing outside the tests imports server/testing, oidc/support.ts or oidc/fakeKeycloak.ts.
+# Nothing outside the tests imports server/testing, oidc/support.ts, oidc/fakeKeycloak.ts or
+# db/connector.suite.ts (which imports vitest, a dev dependency).
 RUN find server src/domain src/github -name '*.test.ts' -delete \
-    && rm -rf server/testing server/oidc/support.ts server/oidc/fakeKeycloak.ts
+    && rm -rf server/testing server/oidc/support.ts server/oidc/fakeKeycloak.ts \
+    server/db/connector.suite.ts
 
 FROM node:24-alpine
 WORKDIR /app

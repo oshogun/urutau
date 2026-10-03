@@ -27,7 +27,8 @@ export default defineConfig({
     // sets URUTAU_API_PORT from PORT; set it yourself when running `vite` alone.
     proxy: {
       '/api': { target: apiTarget },
-      // The MCP endpoint is mounted at /mcp, outside /api. The key is a regex tested against the request URL including its query: /mcp, /mcp/... and /mcp?... are proxied, /mcp-foo is not.
+      // The MCP endpoint is mounted at /mcp, outside /api. The key is a regex tested against the request URL
+      // including its query: /mcp, /mcp/... and /mcp?... are proxied, /mcp-foo is not.
       '^/mcp(?:[/?]|$)': { target: apiTarget },
     },
   },

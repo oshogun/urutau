@@ -309,14 +309,22 @@ const helpers = {
    * Keep `token` in a variable inside the script; do not return or log it.
    */
   async mcp(method, params, token) {
-    const response = await context.request.post(`${APP_URL}/mcp`, {
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream',
-        authorization: `Bearer ${token}`,
-      },
-      data: { jsonrpc: '2.0', id: ++mcpId, method, ...(params === undefined ? {} : { params }) },
-    })
+    let response
+    try {
+      response = await context.request.post(`${APP_URL}/mcp`, {
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          authorization: `Bearer ${token}`,
+        },
+        data: { jsonrpc: '2.0', id: ++mcpId, method, ...(params === undefined ? {} : { params }) },
+      })
+    } catch (error) {
+      // Playwright's error message ends with a call log that lists every request header,
+      // including the bearer token and the session cookie. Keep only the first line.
+      const firstLine = String(error?.message ?? error).split('\n')[0]
+      throw new Error(`mcp request failed: ${token ? firstLine.split(token).join('<token>') : firstLine}`)
+    }
     const text = await response.text()
     const data = text.split('\n').find((line) => line.startsWith('data:'))
     const body = data === undefined ? text : data.slice('data:'.length).trim()
