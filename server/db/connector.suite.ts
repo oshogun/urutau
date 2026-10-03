@@ -15,6 +15,13 @@ import { createAccount, deleteUser, getUserById, getUserByUsername, isFirstRun, 
 const T0 = new Date('2026-01-01T00:00:00.000Z')
 const later = (ms: number) => new Date(T0.getTime() + ms)
 
+/** True for a foreign-key violation: SQLite errcode 787, PostgreSQL code 23503, MariaDB errno 1452 (ER_NO_REFERENCED_ROW_2). */
+function isForeignKeyViolation(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const e = error as { code?: unknown; errno?: unknown; errcode?: unknown }
+  return e.errcode === 787 || e.code === '23503' || e.errno === 1452
+}
+
 /** Empties every application table except `meta`, children before parents, and turns the GitHub writes switch off. */
 async function resetData(database: Database): Promise<void> {
   const { db } = database
@@ -414,7 +421,8 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         // A person is not an integration: the foreign key to integrations refuses the row.
         await expect(
           createApiToken(database.db, { userId: admin.id, tokenHash: 'b'.repeat(64), label: 'person', createdBy: admin.id, now: T0, expiresAt: null }),
-        ).rejects.toSatisfy((error) => !isUniqueViolation(error))
+        ).rejects.toSatisfy(isForeignKeyViolation)
+        expect(await listApiTokens(database.db, admin.id, T0)).toEqual([])
         expect(await listApiTokens(database.db, null, T0)).toHaveLength(1)
       })
 

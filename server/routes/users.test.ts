@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import type { CreateInviteResponse, InviteListResponse, Session, UserListResponse } from '../../src/domain/api.ts'
-import { createTestApp, type TestApp, type TestClient } from '../testing/harness.ts'
+import { createTestApp, setUpAgent, type TestApp, type TestClient } from '../testing/harness.ts'
 
 const ADMIN = { username: 'admin', password: 'correct horse battery' }
 const HOUR = 60 * 60 * 1000
@@ -186,5 +186,20 @@ describe('admin-only routes', () => {
     const refused = await h.delete(`/api/users/${admin.id}`)
     expect(refused.status).toBe(409)
     expect(await refused.json()).toMatchObject({ error: 'cannot-remove-admin' })
+  })
+
+  test('integrations are left out of the list and cannot be removed here', async () => {
+    await setUp()
+    const agent = await setUpAgent(h, { githubToken: false })
+    h.clock.advance(1000)
+    await invitee()
+    const list = (await (await h.get('/api/users')).json()) as UserListResponse
+    expect(list.users.map((user) => user.username)).toEqual(['admin', 'maria'])
+
+    const refused = await h.delete(`/api/users/${agent.id}`)
+    expect(refused.status).toBe(404)
+    expect(await refused.json()).toEqual({ error: 'not-found', message: 'There is no user with this id.' })
+    expect(await h.database.db.selectFrom('integrations').select('user_id').execute()).toHaveLength(1)
+    expect((await h.delete(`/api/integrations/${agent.id}`)).status).toBe(204)
   })
 })

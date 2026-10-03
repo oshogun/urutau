@@ -414,6 +414,21 @@ describe('the save loop', () => {
     expect(revoked.saves).toHaveLength(0)
   })
 
+  it('stops with call-stopped and no save when the call is aborted while the snapshot loads', async () => {
+    const w = world()
+    const controller = new AbortController()
+    let release!: () => void
+    vi.mocked(w.deps.snapshots.get).mockImplementationOnce(
+      () => new Promise((resolve) => (release = () => resolve(w.snapshot.value))),
+    )
+    const pending = failureOf(moveCard(w.deps, PRINCIPAL, controller.signal, input({ issue: 4, bucket: 'todo' })))
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    controller.abort()
+    release()
+    expect((await pending).code).toBe('call-stopped')
+    expect(w.saves).toHaveLength(0)
+  })
+
   it('refuses to save when the plan does not produce the order it promised', async () => {
     const w = world()
     const failure = await failureOf(
@@ -502,20 +517,5 @@ describe('moveCard after a refresh', () => {
     await moveCard(w.deps, PRINCIPAL, signal(), input({ issue: 1, bucket: 'doing', position: 'top' }))
     expect(w.deps.snapshots.refresh).not.toHaveBeenCalled()
     expect(displayed(w, 'doing', open)).toEqual([1])
-  })
-
-  it('stops with call-stopped and no save when the call is aborted while the snapshot loads', async () => {
-    const w = world()
-    const controller = new AbortController()
-    let release!: () => void
-    vi.mocked(w.deps.snapshots.get).mockImplementationOnce(
-      () => new Promise((resolve) => (release = () => resolve(w.snapshot.value))),
-    )
-    const pending = failureOf(moveCard(w.deps, PRINCIPAL, controller.signal, input({ issue: 4, bucket: 'todo' })))
-    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
-    controller.abort()
-    release()
-    expect((await pending).code).toBe('call-stopped')
-    expect(w.saves).toHaveLength(0)
   })
 })

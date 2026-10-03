@@ -6,6 +6,7 @@ import { bearerFromHeader } from '../auth/bearer.ts'
 import type { Logger } from '../log.ts'
 import {
   MCP_HTTP_ERROR_TEXT,
+  MCP_LIMITS,
   MCP_SERVER_INFO,
   MCP_WWW_AUTHENTICATE,
   type McpCallContext,
@@ -35,7 +36,6 @@ export interface McpEndpoint {
 
 /** Only this text goes into the AuthInfo handed to the SDK; the bearer token itself never does. */
 const VERIFIED_PLACEHOLDER = 'urutau-verified'
-const MAX_REQUEST_BODY_BYTES = 1_048_576
 const REFUSED_PREFIX = 'Rejected inbound request ('
 
 /** A copy of the request without Authorization, Cookie and Proxy-Authorization. */
@@ -69,7 +69,7 @@ export function createMcpEndpoint(deps: McpEndpointDeps): McpEndpoint {
     {
       legacy: 'stateless',
       responseMode: 'sse',
-      maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
+      maxRequestBodySize: MCP_LIMITS.requestBodyBytes,
       // The SDK puts header values into error messages, so only the name and the refusal cell are logged.
       onerror: (error) => {
         if (error.message.startsWith(REFUSED_PREFIX)) {
@@ -114,7 +114,13 @@ export function createMcpEndpoint(deps: McpEndpointDeps): McpEndpoint {
 
     // 3. Bearer: a live token always passes; the failure limiter only gates misses.
     const token = bearerFromHeader(c.req.header('authorization'))
-    const principal = token === null ? null : await deps.verifyBearer(token)
+    let principal: McpPrincipal | null = null
+    try {
+      principal = token === null ? null : await deps.verifyBearer(token)
+    } catch (error) {
+      record(500)
+      throw error
+    }
     if (principal === null) {
       const ip = deps.clientIp(c)
       const wait = deps.failures.retryAfter(ip)
@@ -129,7 +135,12 @@ export function createMcpEndpoint(deps: McpEndpointDeps): McpEndpoint {
     user = principal.userId
     principals.set(c.req.raw, principal)
 
-    await next()
+    try {
+      await next()
+    } catch (error) {
+      record(500)
+      throw error
+    }
     record(c.res.status)
   })
 

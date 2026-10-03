@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono'
 import type { AppContext } from '../app.ts'
 import type { Config } from '../config.ts'
+import { isJsonPath } from './paths.ts'
 import type { AppEnv } from './types.ts'
 
 const MAX_REMEMBERED = 100
@@ -67,7 +68,7 @@ export function hostGuard(ctx: AppContext): MiddlewareHandler<AppEnv> {
       ctx.log.warn('request refused: host not allowed', { host: seen })
     }
     const message = 'This server does not answer for this address. Its administrator can add it with PUBLIC_URL or ALLOWED_HOSTS.'
-    if (c.req.path === '/api' || c.req.path.startsWith('/api/')) {
+    if (isJsonPath(c.req.path)) {
       return c.json({ error: 'host-not-allowed', message }, 403)
     }
     return c.text(message, 403)

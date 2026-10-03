@@ -26,6 +26,12 @@ describe('secret box', () => {
     expect(opener.open(sealed, 'user-1')).toBe(token)
   })
 
+  it('refuses a value whose key id names another key, even when the rest is intact', () => {
+    const parts = sealer.seal(token, 'user-1').split('.')
+    parts[1] = keyIdOf(otherKey)
+    expect(opener.open(parts.join('.'), 'user-1')).toBeNull()
+  })
+
   it('round-trips non-ASCII text and uses a new iv each time', () => {
     const a = sealer.seal('çã✓', 'user-1')
     expect(opener.open(a, 'user-1')).toBe('çã✓')

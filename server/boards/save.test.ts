@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, test } from 'vitest'
-import type { BoardEvent } from '../events/publisher.ts'
-import { createAccount } from '../db/users.ts'
-import { createIntegration } from '../db/integrations.ts'
 import { getBoard } from '../db/boards.ts'
 import { fixtureBoard } from '../db/fixtures.ts'
 import { openDatabase, type Database } from '../db/index.ts'
+import { createIntegration } from '../db/integrations.ts'
+import { createAccount } from '../db/users.ts'
+import type { BoardEvent } from '../events/publisher.ts'
 import { InvalidBoardSave, saveAndPublish, type SaveDeps } from './save.ts'
 
 const NOW = new Date('2026-10-03T10:00:00.000Z')
@@ -106,5 +106,13 @@ test('an integration save publishes exactly one event with clientId null and kin
 test('a repository key that does not match the full name throws and writes nothing', async () => {
   await expect(saveAndPublish(deps, { ...request(null, person, 'person'), repoKey: 'acme/other' })).rejects.toBeInstanceOf(InvalidBoardSave)
   expect(await getBoard(database.db, 'acme/other')).toBeNull()
+  expect(events).toEqual([])
+})
+
+test('a board that is not a valid configuration throws and writes nothing', async () => {
+  await expect(
+    saveAndPublish(deps, { ...request(null, person, 'person'), board: { ...fixtureBoard(), buckets: 'nope' } as never }),
+  ).rejects.toBeInstanceOf(InvalidBoardSave)
+  expect(await getBoard(database.db, 'acme/widgets')).toBeNull()
   expect(events).toEqual([])
 })

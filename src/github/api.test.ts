@@ -185,7 +185,11 @@ describe('import rules', () => {
     expect(Object.keys(sources).sort()).toEqual(['./api.ts', './paging.ts'])
     let found = 0
     for (const source of Object.values(sources)) {
-      const specifiers = [...source.matchAll(/^(?:import|export)\s[^'"]*?from\s+'([^']+)'/gm)].map((match) => match[1])
+      const specifiers = [
+        ...source.matchAll(/^(?:import|export)\s[^'"]*?from\s+(['"])(.+?)\1/gm),
+        ...source.matchAll(/^import\s+(['"])(.+?)\1/gm),
+        ...source.matchAll(/\bimport\(\s*(['"])(.+?)\1\s*\)/g),
+      ].map((match) => match[2])
       found += specifiers.length
       for (const specifier of specifiers) expect(specifier).toMatch(/^(\.\.\/domain\/[\w.]+\.ts|\.\/paging\.ts)$/)
     }

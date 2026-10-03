@@ -18,6 +18,10 @@ describe('cleanText', () => {
       '\u{E0041}',
       '\u{E000}',
       '\uD800',
+      '\u0000',
+      '\u007F',
+      '\u009F',
+      '\u0378',
     ]
     expect(cleanText(`A${hostile.join('B')}C`, 100)).toBe('A' + 'B'.repeat(hostile.length - 1) + 'C')
     expect(cleanText(hostile.join(''), 100)).toBe('')

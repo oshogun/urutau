@@ -1,7 +1,6 @@
 /** Structured logging: one JSON object per line on stdout, with known secrets removed. */
 import { redactPatterns } from './github/tokenFormats.ts'
 
-
 export type LogFields = Record<string, string | number | boolean | null>
 
 export interface Logger {
@@ -55,7 +54,10 @@ export function createLogger(options: LoggerOptions = {}): Logger {
   const write = options.write ?? ((line: string) => process.stdout.write(line + '\n'))
   const now = options.now ?? (() => new Date())
   const secrets = options.secrets ?? []
-  const clean = options.patterns ? (text: string) => redactPatterns(redact(text, secrets)) : (text: string) => redact(text, secrets)
+  const clean = (text: string) => {
+    const literal = redact(text, secrets)
+    return options.patterns ? redactPatterns(literal) : literal
+  }
   const emit = (level: string, msg: string, fields: LogFields = {}) => {
     const cleaned: LogFields = {}
     for (const [key, value] of Object.entries(fields)) {

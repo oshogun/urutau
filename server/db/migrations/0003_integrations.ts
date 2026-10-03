@@ -10,7 +10,7 @@ import type { Backend } from '../index.ts'
 export async function up(db: Kysely<any>, backend: Backend): Promise<void> {
   const tableEnd = backend === 'mysql' ? sql`ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin` : sql``
 
-  // MySQL and MariaDB have no CREATE INDEX IF NOT EXISTS: look the index up first.
+  // MySQL has no CREATE INDEX IF NOT EXISTS, and the mysql backend serves MySQL as well as MariaDB: look the index up first.
   const ensureIndex = async (name: string, table: string, column: string): Promise<void> => {
     if (backend === 'mysql') {
       const found = await sql<{ one: number }>`SELECT 1 AS one FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ${table} AND index_name = ${name}`.execute(db)

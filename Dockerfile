@@ -10,7 +10,7 @@ COPY . .
 RUN npm run build
 # The type-check above needed the tests and their helpers; the runtime image does not.
 # Nothing outside the tests imports server/testing, oidc/support.ts or oidc/fakeKeycloak.ts.
-RUN find server src/domain -name '*.test.ts' -delete \
+RUN find server src/domain src/github -name '*.test.ts' -delete \
     && rm -rf server/testing server/oidc/support.ts server/oidc/fakeKeycloak.ts
 
 FROM node:24-alpine
@@ -26,6 +26,8 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/server ./server
 # The server imports the shared types and API constants from src/domain.
 COPY --from=build /app/src/domain ./src/domain
+# The MCP GitHub reader imports these two files; the rest of src/github is browser code.
+COPY --from=build /app/src/github/api.ts /app/src/github/paging.ts ./src/github/
 RUN mkdir /data && chown node:node /data
 USER node
 VOLUME /data

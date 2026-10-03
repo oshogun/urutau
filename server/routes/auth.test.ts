@@ -157,9 +157,10 @@ describe('signed-out requests', () => {
       const path = route.path.replace(/:\w+/g, 'x')
       const response = await h.request(path, { method: route.method, headers: { 'X-Urutau-CSRF': '1' } })
       expect({ route: key, status: response.status }).toEqual({ route: key, status: 401 })
-      expect(await response.json()).toMatchObject({ error: 'signed-out' })
+      expect(await response.json()).toMatchObject({ error: key === 'POST /mcp' ? 'invalid-token' : 'signed-out' })
       checked.push(key)
     }
+    expect(checked).toContain('POST /mcp')
     expect(checked).toContain('GET /api/boards')
     expect(checked).toContain('GET /api/users')
     expect(checked).toContain('POST /api/invites')

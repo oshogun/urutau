@@ -78,7 +78,10 @@ export function boardJson(
     title: cleanText(bucket.title, DISPLAY_CAPS.bucketTitle),
     wipLimit: bucket.wipLimit,
     collectsClosed: bucket.collectsClosed,
-    labelRules: cleanList(bucket.labelRules, DISPLAY_CAPS.label, DISPLAY_CAPS.labelRulesPerBucket),
+    labelRules: bucket.labelRules
+      .slice(0, DISPLAY_CAPS.labelRulesPerBucket)
+      .map((rule) => cleanText(rule, DISPLAY_CAPS.label))
+      .filter(Boolean),
     total: list.length,
     offset: options.offset,
     more: false,
@@ -121,13 +124,15 @@ export function boardJson(
   return answer
 }
 
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
 /** list_boards' answer: the given summaries (already filtered to the list), and the listed keys without a board. */
 export function boardListJson(
   summaries: readonly BoardSummary[],
   listed: ReadonlySet<string>,
 ): ListBoardsJson {
   const boards: BoardListEntryJson[] = [...summaries]
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.repoKey.localeCompare(b.repoKey))
+    .sort((a, b) => byCodeUnit(b.updatedAt, a.updatedAt) || byCodeUnit(a.repoKey, b.repoKey))
     .map((summary) => ({
       repo: summary.repoKey,
       fullName: cleanText(summary.fullName, DISPLAY_CAPS.fullName),

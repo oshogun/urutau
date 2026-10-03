@@ -8,8 +8,8 @@ import {
   type StoredBoard,
 } from '../../src/domain/api.ts'
 import type { AppContext } from '../app.ts'
-import { asBoardConfig, isBoardVersion, repoKeyOf } from '../boards/validate.ts'
 import { saveAndPublish } from '../boards/save.ts'
+import { asBoardConfig, isBoardVersion, repoKeyOf } from '../boards/validate.ts'
 import { createBoard, deleteBoard, getBoard, listBoards } from '../db/boards.ts'
 import { isRecord, readJson } from '../http/body.ts'
 import { HttpError, invalidRequest } from '../http/errors.ts'

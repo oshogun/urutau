@@ -606,11 +606,7 @@ export function IntegrationsSection() {
       setActionError(null)
       if (target.kind === 'remove' && expanded === target.integration.id) setExpanded(null)
       // The launcher of these three stops rendering once the list refetches.
-      if (target.kind === 'revoke' || target.kind === 'remove' || target.kind === 'clear') {
-        setHeadingFocus((n) => n + 1)
-      } else {
-        returnFocus()
-      }
+      setHeadingFocus((n) => n + 1)
       void refresh()
     },
     onError: (error) => {
@@ -681,7 +677,7 @@ export function IntegrationsSection() {
       </div>
 
       <form
-        className="users__create"
+        className="users__create integrations__create"
         onSubmit={(event) => {
           event.preventDefault()
           create.mutate()

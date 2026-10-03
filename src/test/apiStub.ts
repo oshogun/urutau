@@ -5,6 +5,7 @@ import type {
   ApiErrorBody,
   ApiErrorCode,
   AppConfigResponse,
+  BoardAuthor,
   BoardEditor,
   BoardEventName,
   BoardUpdatedEvent,
@@ -332,6 +333,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
   const stamp = () => new Date(Date.UTC(2026, 9, 2, 12, 0, tick++)).toISOString()
   const author = (): BoardEditor | null =>
     current ? { id: current.user.id, username: current.user.username, kind: 'person' } : null
+  const creator = (): BoardAuthor | null => (current ? { id: current.user.id, username: current.user.username } : null)
   for (const stored of options.boards ?? []) boards.set(stored.repoKey, stored)
 
   const githubTokenStorage = options.githubTokenStorage ?? true
@@ -339,7 +341,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     id: `integration-${nextId++}`,
     username: start.username,
     createdAt: stamp(),
-    createdBy: author(),
+    createdBy: creator(),
     tokens: [],
     githubToken: start.githubToken
       ? { set: true, readable: githubTokenStorage, status: 'unchecked', updatedAt: stamp() }
@@ -421,7 +423,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
           id: `integration-${nextId++}`,
           username,
           createdAt: stamp(),
-          createdBy: author(),
+          createdBy: creator(),
           tokens: [],
           githubToken: { set: false, readable: false, status: null, updatedAt: null },
           repos: [],
@@ -491,11 +493,12 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
       }
       const keys: string[] = []
       for (const [index, entry] of (repos as string[]).entries()) {
-        const [owner = '', name = '', ...extra] = entry.trim().split('/')
-        if (extra.length > 0 || !OWNER_PATTERN.test(owner) || !NAME_PATTERN.test(name) || name === '.' || name === '..') {
+        const text = entry.trim()
+        const ref = parseRepoInput(text)
+        if (!ref || repoKey(ref) !== text.toLowerCase()) {
           return error(400, 'invalid-request', `Entry ${index + 1} is not a repository as owner/name.`)
         }
-        keys.push(`${owner}/${name}`.toLowerCase())
+        keys.push(repoKey(ref))
       }
       integration.repos = [...new Set(keys)].sort()
       return toResponse(200, { repos: integration.repos } satisfies SetIntegrationReposResponse)
@@ -697,7 +700,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
             id: `invite-${nextId++}`,
             createdAt: stamp(),
             expiresAt: new Date(Date.now() + hours * 3_600_000).toISOString(),
-            createdBy: author(),
+            createdBy: creator(),
           }
           const token = `token-${summary.id}`
           invites.push({ summary, token })

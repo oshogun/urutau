@@ -150,6 +150,39 @@ describe('authenticated calls', () => {
     const { secret } = await issue()
     const res = await post(INIT, secret, { accept: 'application/json' })
     expect(res.status).toBe(406)
+    const noAccept = await app.request('http://urutau.test/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: INIT,
+    })
+    expect(noAccept.status).toBe(406)
+  })
+
+  test('a throwing bearer lookup still writes a request line with status 500 and leaks nothing', async () => {
+    const failing = createMcpEndpoint({
+      log: createLogger({ write: (line) => logs.push(line), now: () => T0 }),
+      verifyBearer: async () => {
+        throw new Error('database exploded')
+      },
+      failures,
+      clientIp: () => '10.0.0.1',
+      originAllowed: () => true,
+      registerTools: () => {},
+    })
+    const failingApp = new Hono()
+    failingApp.route('/', failing.routes)
+    const { secret } = await issue()
+    const res = await failingApp.request('http://urutau.test/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: ACCEPT, authorization: `Bearer ${secret}` },
+      body: INIT,
+    })
+    expect(res.status).toBe(500)
+    const lines = logs.map((line) => JSON.parse(line) as Record<string, unknown>).filter((l) => l.msg === 'request')
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({ status: 500 })
+    expect(logs.join('\n')).not.toContain('database exploded')
+    await failing.close()
   })
 
   test('an unknown tool gives -32602 and invalid arguments give an error result', async () => {
@@ -263,10 +296,14 @@ describe('refusals before the SDK', () => {
     expect(unauthenticated.status).toBe(400)
   })
 
-  test('GET and DELETE give 405 with Allow: POST', async () => {
+  test('GET, DELETE and PUT give 405 with Allow: POST', async () => {
     const { secret } = await issue()
-    for (const method of ['GET', 'DELETE']) {
-      const res = await app.request('http://urutau.test/mcp', { method, headers: { authorization: `Bearer ${secret}`, accept: ACCEPT } })
+    for (const method of ['GET', 'DELETE', 'PUT']) {
+      const res = await app.request('http://urutau.test/mcp', {
+        method,
+        headers: { authorization: `Bearer ${secret}`, accept: ACCEPT },
+        ...(method === 'PUT' ? { body: '{}' } : {}),
+      })
       expect(res.status).toBe(405)
       expect(res.headers.get('allow')).toBe('POST')
       expect(await res.json()).toMatchObject({ error: 'method-not-allowed' })

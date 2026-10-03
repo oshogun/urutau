@@ -28,6 +28,7 @@ describe('loadConfig', () => {
     it('decodes a valid key to 32 bytes, ignoring surrounding whitespace', () => {
       const key = loadConfig({ TOKEN_ENCRYPTION_KEY: ` ${valid}\n` }).tokenEncryptionKey
       expect(key).toEqual(Buffer.alloc(32, 7))
+      expect(loadConfig({ TOKEN_ENCRYPTION_KEY: valid })).toEqual({ ...loadConfig({}), tokenEncryptionKey: Buffer.alloc(32, 7) })
     })
 
     it('rejects other lengths and non-base64 values without printing them', () => {

@@ -1,16 +1,15 @@
 import type { Kysely } from 'kysely'
-import type { BoardUpdatedEvent, BoardDeletedEvent, StoredBoard } from '../../src/domain/api.ts'
+import type { StoredBoard } from '../../src/domain/api.ts'
+import type { BoardEventPublisher } from '../app.ts'
 import { createBoard, getBoard, saveBoard } from '../db/boards.ts'
-import type { SaveOutcome, SaveRequest } from '../mcp/contract.ts'
 import type { Tables } from '../db/schema.ts'
+import type { SaveOutcome, SaveRequest } from '../mcp/contract.ts'
 import { asBoardConfig, repoKeyOf } from './validate.ts'
 
 export interface SaveDeps {
   db: Kysely<Tables>
   now: () => Date
-  boardEvents: {
-    publish(event: { type: 'board-updated'; data: BoardUpdatedEvent } | { type: 'board-deleted'; data: BoardDeletedEvent }): void
-  }
+  boardEvents: BoardEventPublisher
 }
 
 /** The request breaks a rule the callers check first, so reaching this is a server bug. */

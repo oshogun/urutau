@@ -158,12 +158,12 @@ export function createGitHubReader(deps: GitHubReaderDeps): GitHubReader {
     }
   }
 
-  const rateLimitedFailure = (userId: string, response: Response): Failure | null => {
-    const retryAfter = wholeHeader(response, 'retry-after')
-    const limited = response.headers.get('x-ratelimit-remaining')?.trim() === '0' || retryAfter !== null
+  const rateLimitedFailure = (response: Response): Failure | null => {
+    const limited = response.headers.get('x-ratelimit-remaining')?.trim() === '0' || response.headers.get('retry-after') !== null
     if (!limited) return null
-    const rate = rates.get(userId)
-    const seconds = retryAfter ?? (rate ? Math.ceil((rate.resetAt - nowMs()) / 1000) : 1)
+    const reset = wholeHeader(response, 'x-ratelimit-reset')
+    const seconds =
+      wholeHeader(response, 'retry-after') ?? (reset === null ? 1 : Math.ceil((reset * 1000 - nowMs()) / 1000))
     return failure('github-rate-limited', response.status, { retryAfterSeconds: Math.max(1, seconds), reserve: false })
   }
 
@@ -175,6 +175,12 @@ export function createGitHubReader(deps: GitHubReaderDeps): GitHubReader {
     const onCallAbort = () => snapshotAbort.abort()
     signal.addEventListener('abort', onCallAbort, { once: true })
     const deadline = setTimeout(() => snapshotAbort.abort(), MCP_LIMITS.snapshotDeadlineMs)
+    // Each request's timeout keeps running while its body is read; all are cleared when the snapshot ends.
+    const requestTimers = new Set<ReturnType<typeof setTimeout>>()
+    const dropTimer = (timer: ReturnType<typeof setTimeout>): void => {
+      clearTimeout(timer)
+      requestTimers.delete(timer)
+    }
     // The first failure ends the snapshot; the requests it aborts reject later with errors of their own.
     const state: { first: Failure | null } = { first: null }
     const fail = (value: Failure): ToolFailure => {
@@ -204,6 +210,7 @@ export function createGitHubReader(deps: GitHubReaderDeps): GitHubReader {
 
           const timeout = new AbortController()
           const timer = setTimeout(() => timeout.abort(), MCP_LIMITS.githubRequestTimeoutMs)
+          requestTimers.add(timer)
           const signals = [snapshotAbort.signal, timeout.signal]
           if (requestSignal) signals.push(requestSignal)
           recentRequests(userId).push(nowMs())
@@ -221,9 +228,8 @@ export function createGitHubReader(deps: GitHubReaderDeps): GitHubReader {
               },
             })
           } catch {
+            dropTimer(timer)
             throw signal.aborted ? new ToolFailure('call-stopped') : fail(failure('github-unavailable', 0))
-          } finally {
-            clearTimeout(timer)
           }
 
           recordRate(userId, response)
@@ -235,6 +241,7 @@ export function createGitHubReader(deps: GitHubReaderDeps): GitHubReader {
             }
             return response
           }
+          dropTimer(timer)
           void response.body?.cancel().catch(() => undefined)
           if (status >= 300 && status < 400) throw fail(failure('repo-moved', status))
           if (status === 401) {
@@ -242,7 +249,7 @@ export function createGitHubReader(deps: GitHubReaderDeps): GitHubReader {
             throw fail(failure('github-token-rejected', status))
           }
           if (status === 403 || status === 429) {
-            const limited = rateLimitedFailure(userId, response)
+            const limited = rateLimitedFailure(response)
             if (limited) throw fail(limited)
             throw fail(failure(status === 403 ? 'repo-not-found' : 'github-unavailable', status))
           }
@@ -283,6 +290,7 @@ export function createGitHubReader(deps: GitHubReaderDeps): GitHubReader {
       throw new ToolFailure('github-unavailable')
     } finally {
       clearTimeout(deadline)
+      for (const timer of requestTimers) clearTimeout(timer)
       signal.removeEventListener('abort', onCallAbort)
       release()
     }

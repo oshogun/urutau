@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { UserListResponse } from '../../src/domain/api.ts'
 import type { AppContext } from '../app.ts'
 import { requireAdmin } from '../auth/sessions.ts'
+import { isIntegration } from '../db/integrations.ts'
 import { deleteUser, getUserById, listUsers } from '../db/users.ts'
 import { HttpError } from '../http/errors.ts'
 import type { AppEnv } from '../http/types.ts'
@@ -26,7 +27,7 @@ export function usersRoutes(ctx: AppContext) {
 
   routes.delete('/users/:id', requireAdmin, async (c) => {
     const user = await getUserById(db, c.req.param('id'))
-    if (!user) throw new HttpError(404, 'not-found', 'There is no user with this id.')
+    if (!user || (await isIntegration(db, user.id))) throw new HttpError(404, 'not-found', 'There is no user with this id.')
     if (user.is_admin === 1) throw new HttpError(409, 'cannot-remove-admin', 'The admin account cannot be removed.')
     const sessions = await db.selectFrom('sessions').select('id_hash').where('user_id', '=', user.id).execute()
     await deleteUser(db, user.id)

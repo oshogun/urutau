@@ -144,6 +144,14 @@ describe('boardJson order', () => {
     expect(json.buckets[0].cards[0]).toMatchObject({ title: 'Fix it', labels: ['bug', 'ok'], assignees: ['octo'], milestone: 'v1' })
   })
 
+  it('takes the first 10 label rules, then drops the ones that clean to nothing', () => {
+    const rules = Array.from({ length: 11 }, (_, i) => `rule${i + 1}`)
+    rules[1] = '\u200B'
+    const json = build(stored(makeBoard([makeBucket('a', { labelRules: rules })])), snapshot([]))
+    expect(json.buckets[0].labelRules).toHaveLength(9)
+    expect(json.buckets[0].labelRules).not.toContain('rule11')
+  })
+
   it('omits buckets beyond the first 50', () => {
     const board = makeBoard(Array.from({ length: 53 }, (_, i) => makeBucket(`b${i}`)))
     const json = build(stored(board), snapshot([]))
@@ -210,6 +218,12 @@ describe('boardListJson', () => {
     version: 1,
     updatedAt,
     updatedBy: null,
+  })
+
+  it('breaks an updatedAt tie by repo key in code-unit order, like the keys without a board', () => {
+    const at = '2026-01-01T00:00:00.000Z'
+    const json = boardListJson([summary('acme/w_x', at), summary('acme/w-x', at), summary('acme/w.x', at)], new Set())
+    expect(json.boards.map((board) => board.repo)).toEqual(['acme/w-x', 'acme/w.x', 'acme/w_x'])
   })
 
   it('orders boards, lists keys without a board sorted, and handles empty', () => {

@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { makeBoard, makeBucket, makeIssue, makeLabel } from '../test/fixtures.ts'
 import {
   boardFromExport,
+  bucketNumbers,
   createDefaultBoard,
   deleteBucket,
-  bucketNumbers,
   isBoardConfig,
   keepUnseenOrder,
   moveBucket,

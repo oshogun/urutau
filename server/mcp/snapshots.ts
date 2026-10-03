@@ -88,7 +88,7 @@ export function createSnapshotCache(deps: SnapshotCacheDeps): SnapshotProvider {
     // The fetch gets its own signal: a caller that stops waiting must not cancel it for the callers sharing it.
     const own = new AbortController()
     const entry = { promise: undefined as unknown as Promise<BoardSnapshot>, generation }
-    const promise = (async (): Promise<BoardSnapshot> => {
+    const promise = Promise.resolve().then(async (): Promise<BoardSnapshot> => {
       try {
         const value = toBoardSnapshot(await deps.fetchSnapshot(request.userId, request.repo, request.closedWindowDays, own.signal))
         if (generationOf(request.userId) === generation) {
@@ -99,10 +99,10 @@ export function createSnapshotCache(deps: SnapshotCacheDeps): SnapshotProvider {
         if (error instanceof ToolFailure && error.code === 'github-token-rejected') invalidate(request.userId)
         throw error
       } finally {
-        // The entry is registered after this function starts, and the first await below always lets that happen first.
+        // The body starts in a later microtask, so the entry is already registered here even if fetchSnapshot throws at once.
         if (running.get(key) === entry) running.delete(key)
       }
-    })()
+    })
     // A failure nobody is waiting on any more is not an unhandled rejection.
     promise.catch(() => undefined)
     entry.promise = promise

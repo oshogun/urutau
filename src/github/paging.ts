@@ -30,7 +30,7 @@ export async function fetchJson<T>(transport: GitHubTransport, path: string, sig
 
 /**
  * Follows `Link` pagination, stopping after `maxPages` so that a huge
- * repository cannot burn through the rate limit. A next-page URL is followed
+ * repository cannot use up the rate limit. A next-page URL is followed
  * only if it stays under the transport's root. `truncated` reports whether
  * pages were left unread.
  */

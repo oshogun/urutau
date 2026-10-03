@@ -12,6 +12,11 @@
 //
 // Creating an issue (POST /repos/{owner}/{repo}/issues) works on acme/widgets and acme/empty with any
 // non-empty Authorization header; the new issue is kept in memory until the driver stops.
+//
+// answerGitHub (Request to Response) and fixtureFetch (fetch-shaped, rejects any URL outside
+// https://api.github.com/) answer the same data for a server-side caller such as the MCP launcher;
+// routeGitHubFixtures wraps answerGitHub for Playwright. Any method other than GET, POST and
+// OPTIONS on a known repository answers 405.
 
 const DAY = 86_400_000
 const AVATAR_HOST = 'https://fixtures.urutau.test'

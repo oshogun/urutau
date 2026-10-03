@@ -197,6 +197,19 @@ describe('answers', () => {
     ).rejects.toMatchObject({ code: 'github-rate-limited', extra: { retryAfterSeconds: 90, reserve: false } })
   })
 
+  it('treats a retry-after that is not a number as rate limited', async () => {
+    const result = snapshotOf(makeReader(answering(403, { 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' })))
+    await expect(result).rejects.toMatchObject({ code: 'github-rate-limited' })
+    await expect(result).rejects.toSatisfy((error: { extra: { retryAfterSeconds: number } }) => error.extra.retryAfterSeconds >= 1)
+  })
+
+  it('reads the wait from x-ratelimit-reset when the other rate headers are missing', async () => {
+    const reset = Math.floor(clock / 1000) + 300
+    await expect(
+      snapshotOf(makeReader(answering(403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(reset) }))),
+    ).rejects.toMatchObject({ code: 'github-rate-limited', extra: { retryAfterSeconds: 300, reserve: false } })
+  })
+
   it.each([
     [403, 'repo-not-found'],
     [404, 'repo-not-found'],
@@ -451,6 +464,21 @@ describe('one snapshot at a time per account', () => {
           init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
         }),
     )
+    const outcome = snapshotOf(reader).catch((e: unknown) => e)
+    await vi.advanceTimersByTimeAsync(MCP_LIMITS.githubRequestTimeoutMs)
+    expect(await outcome).toMatchObject({ code: 'github-unavailable' })
+  })
+
+  it('gives up on a body that stalls after the headers for 20 seconds', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const reader = makeReader((_input, init) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          init?.signal?.addEventListener('abort', () => controller.error(init.signal?.reason))
+        },
+      })
+      return Promise.resolve(new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }))
+    })
     const outcome = snapshotOf(reader).catch((e: unknown) => e)
     await vi.advanceTimersByTimeAsync(MCP_LIMITS.githubRequestTimeoutMs)
     expect(await outcome).toMatchObject({ code: 'github-unavailable' })

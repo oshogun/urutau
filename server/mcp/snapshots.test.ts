@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Issue, RepoRef } from '../../src/domain/types.ts'
 import { MCP_LIMITS, ToolFailure, type FetchSnapshotFn, type ReaderSnapshot, type SnapshotRequest } from './contract.ts'
 import { createSnapshotCache } from './snapshots.ts'
@@ -70,6 +70,20 @@ describe('snapshot cache', () => {
     expect(snapshot.truncated).toBe(true)
     expect(snapshot.isPrivate).toBe(true)
     expect(snapshot.fetchedAt).toBe(1000)
+  })
+
+  it('does not keep a failed entry when fetchSnapshot throws synchronously', async () => {
+    let first = true
+    const { cache, calls, request } = setUp((() => {
+      if (first) {
+        first = false
+        throw new ToolFailure('github-unavailable')
+      }
+      return Promise.resolve(read([1]))
+    }) as FetchSnapshotFn)
+    await expect(cache.get(request())).rejects.toMatchObject({ code: 'github-unavailable' })
+    await expect(cache.get(request())).resolves.toMatchObject({ highestNumber: 1 })
+    expect(calls).toHaveLength(2)
   })
 
   it('makes zero fetches while the cache is warm and fetches again after 60 seconds', async () => {
@@ -174,6 +188,7 @@ describe('snapshot cache', () => {
     const old = cache.get(request())
     cache.invalidate('bot-1')
     const next = cache.get(request())
+    await vi.waitFor(() => expect(gates).toHaveLength(2))
     gates.forEach((open) => open())
     expect([...(await old).seen]).toEqual([1])
     expect([...(await next).seen]).toEqual([2])
