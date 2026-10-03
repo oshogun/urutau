@@ -100,7 +100,8 @@ extra agent re-reads its whole context from scratch.
 **3. Skip the steps a run does not need.** Design is for runs that introduce a
 contract: a change to a persisted store or the board export format, a new
 GitHub API call or any write to GitHub, a shared type in
-`src/domain/types.ts`. A run that adds a button using existing hooks does not
+`src/domain/types.ts`, or the MCP tool contract (tool names, input and output
+schemas, error codes). A run that adds a button using existing hooks does not
 need a freeze, and DevOps is for runs that touch build, CI, packaging or
 deploy. Skipping a step is a decision the Orchestrator records in `intake.md`,
 not something it does silently.

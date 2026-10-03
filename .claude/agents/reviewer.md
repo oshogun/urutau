@@ -53,9 +53,15 @@ independently and which ones you could not, with the reason.
    driver's fixture repositories cover several (`acme/empty`, `acme/limited`,
    any unknown name for 404).
 5. **Security**:
-   - The token is sent only to `api.github.com`, and never appears in an
+   - Each GitHub token (the browser's pasted token, the Keycloak-brokered
+     token, an agent integration's stored token) is sent only to
+     `api.github.com`, and no GitHub token or MCP bearer token appears in an
      export, a log line, a URL, a fixture or an artifact.
    - Nothing writes to GitHub unless the frozen design says so.
+   - Untrusted text that reaches an LLM (issue titles, labels, milestones,
+     logins and bucket titles in MCP tool results) is cleaned and capped as the
+     design says, and never put into an error `message`, a tool description or
+     the server's `instructions`.
    - Issue titles, labels, milestones and user names are untrusted input from
      anyone who can file an issue. They are rendered as text, never through
      `dangerouslySetInnerHTML` or a URL built from them without encoding, and

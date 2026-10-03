@@ -22,7 +22,9 @@ through `DATABASE_URL`. The browser keeps only the theme, a pasted GitHub token 
 import. Its external service is the GitHub REST API at `api.github.com`, which it reads and, when
 the admin turns GitHub writes on, uses to create issues. No agent, test or driver run creates an
 issue on a real repository: the server tests stub `fetch`, and the driver's fixtures answer
-`POST /repos/{owner}/{repo}/issues`. Agents never use `data/urutau.db` of the live checkout: run the server on
+`POST /repos/{owner}/{repo}/issues`. The server also reads GitHub for agent integrations (the MCP
+server at `/mcp`), with the GitHub token the admin stored for each integration; in the run-urutau
+driver, `mcp-launcher.mjs` answers those reads from the same fixtures. Agents never use `data/urutau.db` of the live checkout: run the server on
 `DATABASE_URL=sqlite::memory:`, as the run-urutau driver's server mode does. What remains to protect
 is the user's own dev server and containers, if running (see Ports), and the shared GitHub API
 budget.
@@ -114,6 +116,10 @@ projects' sessions. Loading a board costs about 6 requests (measured on
 - Never put the user's GitHub credentials (`gh auth token`, or a token from
   anywhere else) into the app, the driver, a fixture or a run artifact. Live
   mode runs anonymous.
+- Test the MCP server only against fixtures: the server tests stub `fetch`,
+  and the driver's `mcp-launcher.mjs` answers the server's GitHub reads.
+  Never set a real GitHub token on an agent integration; use the fake
+  `github_pat_urutau_fixture_not_a_real_token`.
 - `gh` is authenticated as `oshogun` and is fine for reading issues and pull
   requests (`gh issue view`). Its requests use that token's own limit, not the
   anonymous one.
@@ -190,7 +196,9 @@ the same four steps CI runs. Beyond it:
 - Modules in `src/domain/` only import types from each other, so Node 24 can
   import them directly with
   `node --input-type=module -e "import … from './src/domain/board.ts'"`.
-  Anything with extensionless value imports (`src/github/`, components) needs
-  a Vitest test instead.
+  `src/github/api.ts` and `src/github/paging.ts` import the same way (the
+  server uses them to read GitHub for agent integrations). Anything else with
+  extensionless value imports (`src/github/client.ts`, components) needs a
+  Vitest test instead.
 
 Claims in a report must name the command that produced them.

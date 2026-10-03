@@ -64,9 +64,11 @@ expensive kind of wrong.
    and not just the result.
 7. **Must-not-change list**: existing behaviour this design guarantees is
    untouched. The Reviewer checks these one by one. It always includes: stored
-   v1 boards still load; the token is sent only to `api.github.com` and never
-   appears in exports, logs or URLs; nothing writes to GitHub unless this
-   design says so.
+   v1 boards still load; every GitHub token (the browser's pasted token, the
+   Keycloak-brokered token, an agent integration's stored token) is sent only
+   to `api.github.com` and never appears in exports, logs or URLs, and neither
+   does an MCP bearer token; nothing writes to GitHub unless this design says
+   so.
 8. **Risks**: what this design is exposed to, and what would falsify it.
 
 ## Rules

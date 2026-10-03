@@ -8,7 +8,10 @@ a local account or through Keycloak; every signed-in user shares every board,
 and changes reach open boards live over Server-Sent Events. Issues and labels
 are read from the GitHub REST API, by the browser or, for Keycloak users whose
 realm brokers GitHub, by the server. When the admin turns GitHub writes on,
-users also create issues from the board, through the same two paths.
+users also create issues from the board, through the same two paths. AI
+agents connect to its MCP server at `/mcp` as agent integration accounts the
+admin creates; they read boards and move cards on them, and the server reads
+GitHub for them with a token the admin stores for each integration.
 `README.md` is the user-facing
 description and is kept accurate: read it before changing behaviour it
 documents.
@@ -88,7 +91,8 @@ Some kinds of work have their own skill. Load it instead of improvising:
    change to a persisted store (`urutau:settings`, `urutau:boards`), the
    database schema, the `/api` contract (`src/domain/api.ts`) or the board
    export format, a new GitHub API call or any write to GitHub, a change to
-   sign-in or sessions, or a shared type in `src/domain/types.ts`. Freeze it
+   sign-in or sessions, a shared type in `src/domain/types.ts`, or the MCP
+   tool contract (tool names, input and output schemas, error codes). Freeze it
    before any code is written. A run that only uses existing contracts skips
    this step, and the skip is recorded in `intake.md`.
 4. **Implement**: create the run's fresh clone of `main` first (see
@@ -150,18 +154,34 @@ narrow the contract further.
   until the admin turns it on. On the browser path only the interface enforces the
   switch, because the browser calls `api.github.com` itself. Agents, tests and
   the driver never create an issue on a real repository; the fixtures answer
-  the create request.
-- **GitHub tokens go only to `api.github.com`.** There are two:
+  the create request. The MCP tools never write to GitHub: a move or reorder
+  changes only the board in urutau's database.
+- **GitHub tokens go only to `api.github.com`.** There are three:
   - the personal access token a user pastes in Settings stays in that browser
     and is sent only from the browser to `api.github.com`, never to urutau's
     own server;
   - a Keycloak user's GitHub token is fetched by the server from Keycloak's
     broker endpoint, held in memory, and sent only from the server to
-    `api.github.com`. It never reaches the browser or the database.
+    `api.github.com`. It never reaches the browser or the database;
+  - an agent integration's GitHub token is entered by the admin on the Users
+    page, sent once from the admin's browser to urutau's server, and stored in
+    `github_tokens` only encrypted with `TOKEN_ENCRYPTION_KEY` (AES-256-GCM;
+    without the key the server stores none). The key is never in the
+    database. Only the MCP GitHub reader (`server/github/reader.ts`) decrypts
+    it, and it sends it only from the server to `api.github.com`, in `GET`
+    requests on the allow-list. No response, event or MCP result carries it.
 
-  Neither ever appears in a board export, a log line, a URL, a fixture or a run
-  artifact, and agents never put their own `gh` credentials into the app or its
-  driver.
+  None of them ever appears in a board export, a log line, a URL, a fixture or a
+  run artifact. Urutau's own MCP bearer tokens (`urutau_mcp_…`) are not GitHub
+  tokens and follow the same rule: each is shown once when the admin creates
+  it, stored only as its SHA-256, accepted only in the `Authorization` header
+  of `/mcp`, and removed from the request before the MCP library sees it. In
+  the driver, a bearer token created in the in-memory database is read from
+  the page into a variable and sent by the driver's own code; it never appears
+  in a screenshot, a command line or a file. Agents never put their own `gh`
+  credentials, or any real GitHub token, into the app, its driver or an
+  integration account; tests and the driver use the fake
+  `github_pat_urutau_fixture_not_a_real_token`.
 - **Persisted state is a contract.**
   - The database: a schema change is a new numbered migration in
     `server/db/migrations/` that keeps existing rows, runs on SQLite,
@@ -221,7 +241,8 @@ the same four steps CI (`.github/workflows/ci.yml`) runs, under Node 24.
   logic in `src/domain/`, the GitHub client in `src/github/`, the stores and
   hooks, and App-level tests of the main flows against an in-memory fake of
   `/api` (`src/test/apiStub.ts`). `server` (node) covers the database layer on
-  in-memory SQLite, auth, the routes, live updates and the GitHub proxy. It is
+  in-memory SQLite, auth, the routes, live updates, the GitHub proxy, and the
+  MCP endpoint and its tools. It is
   hermetic: `fetch` is stubbed, there is no network and no Docker.
 - Opt-in suites need Docker: `npm run test:db:postgres` and
   `npm run test:db:mariadb` run the connector suite against `compose.db.yaml`;
@@ -232,7 +253,9 @@ the same four steps CI (`.github/workflows/ci.yml`) runs, under Node 24.
   server mode: a real API on in-memory SQLite, and the browser's GitHub
   requests answered from fixtures. The driver does not answer GitHub requests
   the server makes for Keycloak users; those are covered by the server tests
-  with a stubbed `fetch`. Screenshots are opened and looked at.
+  with a stubbed `fetch`. For agent integrations, the driver's MCP launcher
+  (`mcp-launcher.mjs`) answers them from the same fixtures. Screenshots are
+  opened and looked at.
 - Live GitHub behaviour uses the driver's live mode after checking the API
   budget (`.claude/ENVIRONMENT.md` § The GitHub API budget is shared).
 

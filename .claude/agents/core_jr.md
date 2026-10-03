@@ -57,9 +57,13 @@ prove it works.
 - **Persisted state is a contract.** The shapes of `urutau:settings`,
   `urutau:boards` and the board export format are not yours to change. If the
   task would change one, return `blocked`: that is Core Sr's work.
-- **GitHub stays read-only, and the token stays put.** Make no request that
-  writes to GitHub unless the frozen design specifies it. The token is sent
-  only to `api.github.com` and is never logged, exported or put in a URL.
+- **GitHub stays read-only, and the tokens stay put.** Make no request that
+  writes to GitHub unless the frozen design specifies it. Each of the three
+  GitHub tokens (the browser's pasted token, the Keycloak-brokered token, an
+  agent integration's stored token) is sent only to `api.github.com`, and
+  neither they nor urutau's MCP bearer tokens are ever logged, exported or put
+  in a URL. Tests use the fake `github_pat_urutau_fixture_not_a_real_token`,
+  never a real token.
 - **Scratch, ports and disk** follow `.claude/ENVIRONMENT.md` § Scratch space
   and § Ports: nothing in `/tmp`, `TMPDIR` redirected, `df -h /` before
   installing, the run-clone ports (5174, 9334), scratch cleaned up before you
