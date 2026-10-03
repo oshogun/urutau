@@ -225,6 +225,14 @@ $page-gutter: $spacing-07;
   .cds--overflow-menu__wrapper {
     margin-left: auto;
   }
+
+  .bucket__create {
+    margin-left: auto;
+
+    + .cds--overflow-menu__wrapper {
+      margin-left: 0;
+    }
+  }
 }
 
 .bucket__title {
@@ -514,9 +522,12 @@ $page-gutter: $spacing-07;
   margin-inline-start: 0;
 }
 
-.board-toast.cds--toast-notification {
+.board-toasts {
   position: fixed;
   right: $spacing-05;
   bottom: $spacing-05;
   z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
 }

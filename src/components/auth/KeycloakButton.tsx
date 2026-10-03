@@ -6,12 +6,13 @@ export const KEYCLOAK_START_URL = 'api/auth/keycloak/start'
 interface KeycloakButtonProps {
   children: string
   kind?: 'tertiary' | 'secondary'
+  size?: 'sm' | 'md'
 }
 
 /** A link that looks like a button: starting a sign-in leaves the page, so it is not a fetch. */
-export function KeycloakButton({ children, kind = 'tertiary' }: KeycloakButtonProps) {
+export function KeycloakButton({ children, kind = 'tertiary', size }: KeycloakButtonProps) {
   return (
-    <Button kind={kind} href={KEYCLOAK_START_URL}>
+    <Button kind={kind} size={size} href={KEYCLOAK_START_URL}>
       {children}
     </Button>
   )

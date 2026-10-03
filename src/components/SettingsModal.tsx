@@ -48,7 +48,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             <PasswordInput
               id="settings-token"
               labelText="GitHub personal access token"
-              helperText="Optional for public repositories. Use a fine-grained token with read-only access to Issues (and Metadata). It is stored in this browser's local storage and only sent to api.github.com."
+              helperText="Optional for public repositories. Use a fine-grained token with access to Issues (and Metadata). Read-only is enough to view boards; creating issues needs Issues read and write. It is stored in this browser's local storage and only sent to api.github.com."
               value={tokenDraft}
               onChange={(event) => setTokenDraft(event.target.value)}
               autoComplete="off"

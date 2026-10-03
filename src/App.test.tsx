@@ -9,7 +9,8 @@ import type { StoredBoard } from './domain/api'
 import type { BoardConfig } from './domain/types'
 import { bindQueryClient } from './hooks/useBoardList'
 import { useSession } from './state/session'
-import { installApiStub } from './test/apiStub'
+import { useSettings } from './state/settings'
+import { installApiStub, stubCreatedIssue } from './test/apiStub'
 import type { ApiStub, ApiStubOptions } from './test/apiStub'
 
 const ghIssue = (number: number, title: string, labels: string[], extra: Record<string, unknown> = {}) => ({
@@ -580,6 +581,218 @@ describe('App', () => {
       expect(await screen.findByLabelText('GitHub repository')).toBeInTheDocument()
       expect(screen.queryByRole('heading', { name: 'Users' })).not.toBeInTheDocument()
       expect(stub.requests('GET users')).toHaveLength(0)
+    })
+  })
+  describe('creating issues', () => {
+    type PostHandler = (init: RequestInit) => Response | Promise<Response>
+    let posts: RequestInit[]
+
+    // Wraps the test's GitHub stub so a POST to the issues endpoint reaches `handler`. A held
+    // answer is dropped with an AbortError when the request's signal aborts, as a real fetch does.
+    function stubGitHubPost(handler: PostHandler) {
+      const read = globalThis.fetch
+      posts = []
+      vi.stubGlobal(
+        'fetch',
+        vi.fn<typeof fetch>(async (input, init) => {
+          if (init?.method !== 'POST' || !String(input).endsWith('/repos/acme/widgets/issues')) {
+            return read(input, init)
+          }
+          posts.push(init)
+          const answer = Promise.resolve(handler(init))
+          return new Promise<Response>((resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+            answer.then(resolve, reject)
+          })
+        }),
+      )
+    }
+
+    const created = (number: number, title: string) =>
+      new Response(JSON.stringify(stubCreatedIssue('acme/widgets', number, title)), { status: 201 })
+    const snapshotGets = () =>
+      vi.mocked(fetch).mock.calls.filter(([input, init]) => !init?.method && String(input).includes('api.github.com'))
+
+    async function openDialog(user: ReturnType<typeof userEvent.setup>, bucketTitle = 'In progress') {
+      await screen.findByText('Dark mode')
+      await user.click(screen.getByRole('button', { name: `Create issue in ${bucketTitle}` }))
+      return screen.findByRole('dialog', { name: /^acme\/widgets · / })
+    }
+
+    const open = (options: ApiStubOptions = {}) =>
+      renderApp('?repo=acme/widgets', { githubWrites: true, boards: [stubBoard('acme/widgets', 1)], ...options })
+
+    beforeEach(() => {
+      useSettings.setState({ token: 'fixture-token' })
+      stubGitHubPost(() => created(11, 'unused'))
+    })
+    afterEach(() => useSettings.setState({ token: '' }))
+
+    it('offers no create action while the switch is off', async () => {
+      open({ githubWrites: false })
+      await screen.findByText('Dark mode')
+      expect(screen.queryByRole('button', { name: /Create issue in/ })).not.toBeInTheDocument()
+    })
+
+    it('offers the action in every bucket except the one that collects closed issues', async () => {
+      open()
+      await screen.findByText('Dark mode')
+      expect(await screen.findByRole('button', { name: 'Create issue in Backlog' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Create issue in In progress' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Create issue in Done' })).not.toBeInTheDocument()
+    })
+
+    it('puts the new card in the bucket it was created from, with no further snapshot request', async () => {
+      const user = userEvent.setup()
+      stubGitHubPost(() => created(11, 'Fix the build'))
+      open()
+      await screen.findByText('Dark mode')
+      await screen.findByRole('button', { name: 'Create issue in In progress' })
+      const before = snapshotGets().length
+
+      await openDialog(user)
+      await user.type(screen.getByLabelText('Title'), 'Fix the build')
+      await user.click(screen.getByRole('button', { name: 'Create issue' }))
+
+      expect(await screen.findByText('Created issue #11')).toBeInTheDocument()
+      expect(within(bucket('In progress')).getByText('Fix the build')).toBeInTheDocument()
+      expect(JSON.parse(String(posts[0].body))).toEqual({ title: 'Fix the build' })
+      expect(snapshotGets()).toHaveLength(before)
+      await waitFor(() => expect(stub.board('acme/widgets')?.board.placements).toMatchObject({ 11: 'in-progress' }))
+      expect(screen.queryByRole('dialog', { name: /^acme\/widgets · / })).not.toBeInTheDocument()
+    })
+
+    it('keeps the typed text and shows the mapped message when GitHub refuses', async () => {
+      const user = userEvent.setup()
+      stubGitHubPost(
+        () => new Response(JSON.stringify({ message: 'Resource not accessible by personal access token' }), { status: 403 }),
+      )
+      open()
+      await openDialog(user)
+      await user.type(screen.getByLabelText('Title'), 'Fix the build')
+      await user.type(screen.getByLabelText('Description (optional)'), 'Steps to reproduce')
+      await user.click(screen.getByRole('button', { name: 'Create issue' }))
+
+      expect(await screen.findByText("Couldn't create the issue.")).toBeInTheDocument()
+      expect(screen.getByText(/Your token can't create issues in acme\/widgets/)).toBeInTheDocument()
+      expect(screen.getByLabelText('Title')).toHaveValue('Fix the build')
+      expect(screen.getByLabelText('Description (optional)')).toHaveValue('Steps to reproduce')
+      expect(screen.getByRole('button', { name: 'Create issue' })).toBeEnabled()
+    })
+
+    it('disables the button while sending and ignores a second Enter', async () => {
+      const user = userEvent.setup()
+      let release: () => void = () => undefined
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      stubGitHubPost(async () => {
+        await gate
+        return created(11, 'Fix the build')
+      })
+      open()
+      await openDialog(user)
+      await user.type(screen.getByLabelText('Title'), 'Fix the build{Enter}')
+
+      const sending = await screen.findByRole('button', { name: /Creating issue/ })
+      expect(sending).toBeDisabled()
+      await user.type(screen.getByLabelText('Title'), '{Enter}')
+      expect(posts).toHaveLength(1)
+
+      release()
+      expect(await screen.findByText('Created issue #11')).toBeInTheDocument()
+      expect(posts).toHaveLength(1)
+    })
+
+    it('stops waiting on Esc while sending, then closes on the next Esc', async () => {
+      const user = userEvent.setup()
+      stubGitHubPost(() => new Promise<Response>(() => undefined))
+      open()
+      await openDialog(user)
+      await user.type(screen.getByLabelText('Title'), 'Fix the build{Enter}')
+      await screen.findByRole('button', { name: /Creating issue/ })
+
+      await user.keyboard('{Escape}')
+      expect(await screen.findByText('The issue may have been created.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Refresh board' })).toBeInTheDocument()
+      expect(screen.getByLabelText('Title')).toHaveValue('Fix the build')
+      expect(posts).toHaveLength(1)
+
+      await user.keyboard('{Escape}')
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: /^acme\/widgets · / })).not.toBeInTheDocument())
+    })
+
+    it('keeps focus inside the dialog, closes on Esc and returns focus to the bucket button', async () => {
+      const user = userEvent.setup()
+      open()
+      const dialog = await openDialog(user, 'Backlog')
+      await waitFor(() => expect(screen.getByLabelText('Title')).toHaveFocus())
+
+      for (let press = 0; press < 8; press += 1) {
+        await user.tab()
+        expect(dialog).toContainElement(document.activeElement as HTMLElement)
+      }
+
+      await user.keyboard('{Escape}')
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: /^acme\/widgets · / })).not.toBeInTheDocument())
+      expect(screen.getByRole('button', { name: 'Create issue in Backlog' })).toHaveFocus()
+    })
+
+    it('refuses a title over 256 characters before sending', async () => {
+      const user = userEvent.setup()
+      open()
+      await openDialog(user)
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('x'.repeat(257))
+
+      expect(screen.getByText('Use at most 256 characters.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Create issue' })).toBeDisabled()
+      expect(posts).toHaveLength(0)
+    })
+
+    it('says a token is needed when none is saved, and disables Create', async () => {
+      const user = userEvent.setup()
+      useSettings.setState({ token: '' })
+      open()
+      await openDialog(user)
+
+      expect(screen.getByText('A token with write access is needed.')).toBeInTheDocument()
+      await user.type(screen.getByLabelText('Title'), 'Fix the build')
+      expect(screen.getByRole('button', { name: 'Create issue' })).toBeDisabled()
+    })
+  })
+
+  describe('server settings', () => {
+    it('shows the switch to the admin and saves a change', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=server-settings')
+
+      expect(await screen.findByRole('heading', { name: 'Server settings' })).toBeInTheDocument()
+      const toggle = await screen.findByRole('switch', { name: 'Create issues on GitHub' })
+      expect(toggle).not.toBeChecked()
+      await user.click(toggle)
+
+      await waitFor(() => expect(screen.getByRole('switch', { name: 'Create issues on GitHub' })).toBeChecked())
+      expect(stub.requests('PATCH settings')[0].body).toEqual({ githubWrites: true })
+      expect(stub.githubWrites).toBe(true)
+    })
+
+    it('reaches the page from the account menu for an admin only', async () => {
+      const user = userEvent.setup()
+      renderApp('')
+      await screen.findByLabelText('GitHub repository')
+      await user.click(screen.getByRole('button', { name: 'Account menu for ada' }))
+      await user.click(await screen.findByText('Server settings'))
+      expect(await screen.findByRole('heading', { name: 'Server settings' })).toBeInTheDocument()
+    })
+
+    it('hides the item and the page from a member', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=server-settings', { user: { isAdmin: false } })
+
+      expect(await screen.findByLabelText('GitHub repository')).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Server settings' })).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: /Account menu for/ }))
+      expect(await screen.findByText(/Signed in as/)).toBeInTheDocument()
+      expect(screen.queryByText('Server settings')).not.toBeInTheDocument()
     })
   })
 })

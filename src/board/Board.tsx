@@ -8,7 +8,7 @@ import {
   Tag,
   ToastNotification,
 } from '@carbon/react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { BoardEvents } from '../hooks/useBoardEvents'
 import {
   createDefaultBoard,
@@ -20,12 +20,14 @@ import {
   type BucketContents,
 } from '../domain/board'
 import { EMPTY_FILTERS, isFiltering, matchesFilters } from '../domain/filters'
-import type { BoardConfig, Bucket, RepoSnapshot } from '../domain/types'
+import type { BoardConfig, Bucket, Issue, RepoSnapshot } from '../domain/types'
+import type { CreateIssueInput } from '../hooks/useCreateIssue'
 import type { ConflictNotice } from '../state/boardStore'
 import { BoardCanvas } from './BoardCanvas'
 import { BoardSettingsModal } from './BoardSettingsModal'
 import { BoardToolbar } from './BoardToolbar'
 import { BucketEditorModal } from './BucketEditorModal'
+import { CreateIssueModal, type IssueDraft } from './CreateIssueModal'
 import './board.scss'
 
 interface BoardProps {
@@ -42,12 +44,17 @@ interface BoardProps {
   isFetching: boolean
   refreshError: Error | null
   onRefresh: () => void
+  /** Creates an issue and places it; null while creating issues is turned off or unavailable. */
+  onCreateIssue: ((input: CreateIssueInput) => Promise<Issue>) | null
+  onOpenSettings: () => void
 }
 
 type Dialog =
   | { kind: 'edit-bucket'; bucket: Bucket | null }
   | { kind: 'delete-bucket'; bucket: Bucket }
   | { kind: 'board-settings' }
+  // `create` is kept here so the dialog survives the switch being turned off while it is open.
+  | { kind: 'create-issue'; bucket: Bucket; create: (input: CreateIssueInput) => Promise<Issue> }
 
 export function Board({
   snapshot,
@@ -61,11 +68,23 @@ export function Board({
   isFetching,
   refreshError,
   onRefresh,
+  onCreateIssue,
+  onOpenSettings,
 }: BoardProps) {
   const { repository, issues, labels } = snapshot
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const closeDialog = () => setDialog(null)
+  const [draft, setDraft] = useState<IssueDraft>({ title: '', body: '' })
+  const [createdToast, setCreatedToast] = useState<{ issue: Issue; bucketTitle: string; hidden: boolean } | null>(
+    null,
+  )
+  const createLauncher = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    if (!createdToast) return
+    const timer = window.setTimeout(() => setCreatedToast(null), 6000)
+    return () => window.clearTimeout(timer)
+  }, [createdToast])
   // Show the toast for each new remote change; adjusted while rendering rather than in an effect.
   const [shownChange, setShownChange] = useState(live.lastRemoteChange)
   const [toastOpen, setToastOpen] = useState(false)
@@ -212,20 +231,79 @@ export function Board({
           updateConfig((current) => moveBucket(current, bucketId, offset))
         }
         onDeleteBucket={(bucket) => setDialog({ kind: 'delete-bucket', bucket })}
+        onCreateIssue={
+          onCreateIssue
+            ? (bucket, launcher) => {
+                createLauncher.current = launcher
+                setDialog({ kind: 'create-issue', bucket, create: onCreateIssue })
+              }
+            : null
+        }
       />
 
-      {toastOpen && live.lastRemoteChange && (
-        <ToastNotification
-          className="board-toast"
-          kind="info"
-          lowContrast
-          role="status"
-          title={`Board updated by ${live.lastRemoteChange.by ?? 'a teammate'}`}
-          timeout={4000}
-          onClose={() => {
-            setToastOpen(false)
-            return false
+      {(createdToast || (toastOpen && live.lastRemoteChange)) && (
+        <div className="board-toasts">
+          {createdToast && (
+            <ActionableNotification
+              className="board-toast"
+              kind="success"
+              lowContrast
+              role="status"
+              hasFocus={false}
+              closeOnEscape={false}
+              title={`Created issue #${createdToast.issue.number}`}
+              subtitle={`Added to ${createdToast.bucketTitle}.${createdToast.hidden ? ' The current filters hide it.' : ''}`}
+              actionButtonLabel="Open on GitHub"
+              onActionButtonClick={() => window.open(createdToast.issue.url, '_blank', 'noopener,noreferrer')}
+              onClose={() => {
+                setCreatedToast(null)
+                return false
+              }}
+            />
+          )}
+          {toastOpen && live.lastRemoteChange && (
+            <ToastNotification
+              className="board-toast"
+              kind="info"
+              lowContrast
+              role="status"
+              title={`Board updated by ${live.lastRemoteChange.by ?? 'a teammate'}`}
+              timeout={4000}
+              onClose={() => {
+                setToastOpen(false)
+                return false
+              }}
+            />
+          )}
+        </div>
+      )}
+      {dialog?.kind === 'create-issue' && (
+        <CreateIssueModal
+          fullName={repository.fullName}
+          bucket={dialog.bucket}
+          draft={draft}
+          onDraftChange={setDraft}
+          create={dialog.create}
+          launcherButtonRef={createLauncher}
+          onCreated={(issue) => {
+            setDraft({ title: '', body: '' })
+            setCreatedToast({
+              issue,
+              bucketTitle: dialog.bucket.title,
+              hidden: filtering && !matchesFilters(issue, filters),
+            })
+            closeDialog()
+            createLauncher.current?.focus()
           }}
+          onClose={() => {
+            closeDialog()
+            createLauncher.current?.focus()
+          }}
+          onOpenSettings={() => {
+            closeDialog()
+            onOpenSettings()
+          }}
+          onRefresh={onRefresh}
         />
       )}
       {dialog?.kind === 'edit-bucket' && (

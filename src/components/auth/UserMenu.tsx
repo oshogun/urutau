@@ -4,11 +4,12 @@ import { useSession } from '../../state/session'
 
 interface UserMenuProps {
   onOpenUsers: () => void
+  onOpenServerSettings: () => void
   onSignOut: () => Promise<void>
 }
 
-/** Header menu for the signed-in user: who they are, the admin's users screen, and sign out. */
-export function UserMenu({ onOpenUsers, onSignOut }: UserMenuProps) {
+/** Header menu for the signed-in user: who they are, the admin's users and server settings screens, and sign out. */
+export function UserMenu({ onOpenUsers, onOpenServerSettings, onSignOut }: UserMenuProps) {
   const user = useSession((state) => state.session?.user)
   if (!user) return null
 
@@ -24,6 +25,7 @@ export function UserMenu({ onOpenUsers, onSignOut }: UserMenuProps) {
     >
       <OverflowMenuItem itemText={`Signed in as ${user.username}`} disabled />
       {user.isAdmin && <OverflowMenuItem itemText="Users" hasDivider onClick={onOpenUsers} />}
+      {user.isAdmin && <OverflowMenuItem itemText="Server settings" onClick={onOpenServerSettings} />}
       <OverflowMenuItem
         itemText="Sign out"
         hasDivider

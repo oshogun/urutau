@@ -17,10 +17,11 @@ interface AppHeaderProps {
   onHome: () => void
   onOpenSettings: () => void
   onOpenUsers: () => void
+  onOpenServerSettings: () => void
   onSignOut: () => Promise<void>
 }
 
-export function AppHeader({ theme, onHome, onOpenSettings, onOpenUsers, onSignOut }: AppHeaderProps) {
+export function AppHeader({ theme, onHome, onOpenSettings, onOpenUsers, onOpenServerSettings, onSignOut }: AppHeaderProps) {
   const signedIn = useSession((state) => state.status === 'signed-in')
   const setTheme = useSettings((state) => state.setTheme)
   const dark = theme === 'g100'
@@ -53,7 +54,11 @@ export function AppHeader({ theme, onHome, onOpenSettings, onOpenUsers, onSignOu
               <HeaderGlobalAction aria-label="Settings" tooltipAlignment="end" onClick={onOpenSettings}>
                 <Settings size={20} />
               </HeaderGlobalAction>
-              <UserMenu onOpenUsers={onOpenUsers} onSignOut={onSignOut} />
+              <UserMenu
+                onOpenUsers={onOpenUsers}
+                onOpenServerSettings={onOpenServerSettings}
+                onSignOut={onSignOut}
+              />
             </>
           )}
         </HeaderGlobalBar>

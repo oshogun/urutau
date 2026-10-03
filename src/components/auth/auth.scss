@@ -122,3 +122,19 @@
   gap: $spacing-04;
   align-items: flex-start;
 }
+
+.server-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-05;
+  align-items: flex-start;
+
+  .cds--inline-notification {
+    max-width: none;
+  }
+
+  .users__lead {
+    max-width: 48rem;
+    margin-top: 0;
+  }
+}

@@ -65,15 +65,17 @@ function subscribe(onChange: () => void) {
 
 const getSearch = () => window.location.search
 
-/** The `?view=` query parameter; only `users` is defined. */
+/** The `?view=` query parameter: `users` and `server-settings` are defined. */
 export function useViewParam() {
   const search = useSyncExternalStore(subscribe, getSearch)
   const view = new URLSearchParams(search).get('view')
-  const openUsers = useCallback(() => {
+  const open = useCallback((name: 'users' | 'server-settings') => {
     const url = new URL(window.location.href)
-    url.search = '?view=users'
+    url.search = `?view=${name}`
     window.history.pushState(null, '', url)
     window.dispatchEvent(new PopStateEvent('popstate'))
   }, [])
-  return { view, openUsers }
+  const openUsers = useCallback(() => open('users'), [open])
+  const openServerSettings = useCallback(() => open('server-settings'), [open])
+  return { view, openUsers, openServerSettings }
 }

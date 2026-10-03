@@ -37,6 +37,8 @@ interface BoardCanvasProps {
   onEditBucket: (bucket: Bucket) => void
   onMoveBucket: (bucketId: string, offset: -1 | 1) => void
   onDeleteBucket: (bucket: Bucket) => void
+  /** Null while creating issues is unavailable. */
+  onCreateIssue: ((bucket: Bucket, launcher: HTMLButtonElement | null) => void) | null
 }
 
 export function BoardCanvas({
@@ -49,6 +51,7 @@ export function BoardCanvas({
   onEditBucket,
   onMoveBucket,
   onDeleteBucket,
+  onCreateIssue,
 }: BoardCanvasProps) {
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
@@ -192,6 +195,12 @@ export function BoardCanvas({
             onEdit={() => onEditBucket(bucket)}
             onMoveBucket={(offset) => onMoveBucket(bucket.id, offset)}
             onDelete={() => onDeleteBucket(bucket)}
+            // New issues are open, so the bucket that collects closed issues cannot take one.
+            onCreateIssue={
+              onCreateIssue && !bucket.collectsClosed
+                ? (launcher) => onCreateIssue(bucket, launcher)
+                : undefined
+            }
           />
         ))}
       </div>

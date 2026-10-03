@@ -53,8 +53,8 @@ export function ConnectPage({ onOpen }: ConnectPageProps) {
         <h1 className="connect__title">Plan GitHub issues on a kanban board</h1>
         <p className="connect__lead">
           Point Urutau at a repository to pull in its issues and labels. Your buckets and card
-          positions are saved on this server and shared with everyone who has an account; nothing
-          is written back to GitHub.
+          positions are saved on this server and shared with everyone who has an account; Urutau
+          writes to GitHub only to create issues, and only after the admin turns that on.
         </p>
       </div>
 
@@ -81,7 +81,7 @@ export function ConnectPage({ onOpen }: ConnectPageProps) {
                 <PasswordInput
                   id="connect-token"
                   labelText="Personal access token (optional)"
-                  helperText="Needed for private repositories and to raise GitHub's rate limit. A fine-grained token with read-only Issues access is enough. It is stored only in this browser and sent only to GitHub."
+                  helperText="Needed for private repositories, to raise GitHub's rate limit and to create issues. A fine-grained token with Issues access is enough: read-only to view, read and write to create issues. It is stored only in this browser and sent only to GitHub."
                   value={tokenInput}
                   onChange={(event) => setTokenInput(event.target.value)}
                   autoComplete="off"

@@ -1,8 +1,9 @@
-import { CheckmarkOutline } from '@carbon/icons-react'
-import { Layer, OverflowMenu, OverflowMenuItem, Tag } from '@carbon/react'
+import { Add, CheckmarkOutline } from '@carbon/icons-react'
+import { Button, Layer, OverflowMenu, OverflowMenuItem, Tag } from '@carbon/react'
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { useRef } from 'react'
 import type { Bucket, Issue, Label } from '../domain/types'
 import { labelFor } from '../domain/labels'
 import { cardId } from './cardIds'
@@ -23,6 +24,8 @@ interface BucketColumnProps {
   onEdit: () => void
   onMoveBucket: (offset: -1 | 1) => void
   onDelete: () => void
+  /** Given only to buckets that can take a new issue; gets the button, so focus can return to it. */
+  onCreateIssue?: (launcher: HTMLButtonElement | null) => void
 }
 
 export function BucketColumn({
@@ -37,7 +40,9 @@ export function BucketColumn({
   onEdit,
   onMoveBucket,
   onDelete,
+  onCreateIssue,
 }: BucketColumnProps) {
+  const createButton = useRef<HTMLButtonElement>(null)
   const { setNodeRef, isOver } = useDroppable({ id: bucket.id })
   const index = buckets.findIndex((candidate) => candidate.id === bucket.id)
   const openCount = total.filter((issue) => issue.state === 'open').length
@@ -69,6 +74,19 @@ export function BucketColumn({
           {count.text}
         </Tag>
         <span className="cds--visually-hidden">{count.label}</span>
+        {onCreateIssue && (
+          <Button
+            ref={createButton}
+            className="bucket__create"
+            kind="ghost"
+            size="sm"
+            hasIconOnly
+            renderIcon={Add}
+            iconDescription={`Create issue in ${bucket.title}`}
+            tooltipPosition="bottom"
+            onClick={() => onCreateIssue(createButton.current)}
+          />
+        )}
         <OverflowMenu
           size="sm"
           flipped

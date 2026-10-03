@@ -6,6 +6,7 @@ import { InvitePage } from './components/auth/InvitePage'
 import { SignInPage } from './components/auth/SignInPage'
 import { signinErrorMessage } from './components/auth/signinMessages'
 import { useEntryParams, useViewParam } from './components/auth/useEntryParams'
+import { ServerSettingsPage } from './components/auth/ServerSettingsPage'
 import { UsersPage } from './components/auth/UsersPage'
 import { ConnectPage } from './components/ConnectPage'
 import { SettingsModal } from './components/SettingsModal'
@@ -18,7 +19,7 @@ export function App() {
   const theme = useCarbonTheme()
   useDocumentTheme(theme)
   const [repo, navigate] = useRepoParam()
-  const { view, openUsers } = useViewParam()
+  const { view, openUsers, openServerSettings } = useViewParam()
   const { inviteToken, signinError, clearInvite, clearSigninError } = useEntryParams()
   const status = useSession((state) => state.status)
   const isAdmin = useSession((state) => state.session?.user.isAdmin ?? false)
@@ -101,6 +102,8 @@ export function App() {
     )
   } else if (view === 'users' && isAdmin) {
     content = <UsersPage />
+  } else if (view === 'server-settings' && isAdmin) {
+    content = <ServerSettingsPage />
   } else {
     content = <ConnectPage onOpen={navigate} />
   }
@@ -112,6 +115,7 @@ export function App() {
         onHome={goHome}
         onOpenSettings={openSettings}
         onOpenUsers={openUsers}
+        onOpenServerSettings={openServerSettings}
         onSignOut={signOut}
       />
       <main id="main-content" className="app-main" ref={mainRef} tabIndex={-1}>
