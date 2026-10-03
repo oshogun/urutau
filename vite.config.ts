@@ -2,6 +2,8 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
+const apiTarget = 'http://127.0.0.1:' + (process.env.URUTAU_API_PORT ?? 8787)
+
 // https://vite.dev/config/
 export default defineConfig({
   // Relative asset paths, so the built app works under a PUBLIC_URL path prefix.
@@ -23,7 +25,11 @@ export default defineConfig({
   server: {
     // Proxy target for /api: the API server's port (PORT there, default 8787). scripts/dev.mjs
     // sets URUTAU_API_PORT from PORT; set it yourself when running `vite` alone.
-    proxy: { '/api': { target: 'http://127.0.0.1:' + (process.env.URUTAU_API_PORT ?? 8787) } },
+    proxy: {
+      '/api': { target: apiTarget },
+      // The MCP endpoint is mounted at /mcp, outside /api. The key is a regex so /mcp-foo is not proxied.
+      '^/mcp(/|$)': { target: apiTarget },
+    },
   },
   css: {
     preprocessorOptions: {
