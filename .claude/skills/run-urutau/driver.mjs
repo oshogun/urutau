@@ -55,9 +55,11 @@ page.on('requestfailed', (request) =>
   logs.push(`[requestfailed] ${request.method()} ${request.url()} ${request.failure()?.errorText ?? ''}`),
 )
 page.on('request', (request) => {
-  if (!request.url().startsWith('https://api.github.com/') || request.method() !== 'GET') return
+  // Method and URL only; a POST body (issue title and text) is never logged.
+  if (!request.url().startsWith('https://api.github.com/')) return
+  if (request.method() === 'OPTIONS') return
   github.requests += 1
-  logs.push(`[github] GET ${request.url()}`)
+  logs.push(`[github] ${request.method()} ${request.url()}`)
 })
 page.on('response', (response) => {
   const remaining = response.headers()['x-ratelimit-remaining']

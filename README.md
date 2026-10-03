@@ -28,11 +28,18 @@ for the app, and Hono, Kysely and a SQL database for the server.
   reload, with a *Live* indicator and a *Board updated by …* notice.
 - **Accounts.** Local username and password accounts, created from invite links by the admin, or
   sign-in with Keycloak.
+- **Create issues.** When the admin turns on *Create issues on GitHub* on the Server settings page
+  (user menu, *Server settings*), each bucket header gets a **+** button. It opens a dialog for a
+  title and an optional description, creates the issue on GitHub as the person who clicked, and
+  puts the new card in that bucket. The closed-issues bucket has no **+**. The switch is off by
+  default and is server-wide.
 - **Export and import** of a board as JSON, to move it to another server or share it. A board
   exported from another repository brings its buckets and rules, but not card positions.
 
-Urutau is **read-only towards GitHub**: nothing is written back to a repository. Buckets, rules
-and card positions live in the server's database.
+Urutau reads issues and labels from GitHub and, when the admin turns on issue creation, creates
+issues. It writes nothing else to a repository: no labels, no state changes, no comments. Buckets,
+rules and card positions live in the server's database. Creating an issue adds no labels, whatever
+the bucket's rules are.
 
 ## Getting started
 
@@ -69,15 +76,20 @@ hour and is required for private repositories. There are two ways to give Urutau
 1. **A token pasted in the browser** (local accounts, Keycloak accounts when `KEYCLOAK_GITHUB_IDP`
    is unset, and Keycloak users without a usable GitHub link). Create a
    [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)
-   with access to the repositories you want and these **read-only** permissions: Issues, Metadata.
-   Paste it in **Settings** (the gear icon). It stays in this browser's local storage, is sent
-   only to `api.github.com`, and never reaches the Urutau server or a board export. Anyone with
-   access to your browser profile can read it, so use a read-only token.
+   with access to the repositories you want and these permissions: Issues (read-only to view a
+   board, **read and write** to create issues) and Metadata (read-only). Paste it in **Settings**
+   (the gear icon). It stays in this browser's local storage, is sent only to `api.github.com`,
+   and never reaches the Urutau server or a board export. Anyone with access to your browser
+   profile can read it. A token with Issues write can create and edit issues in those
+   repositories, so give it only the repositories you need, and use a token with Issues read-only
+   if you only view boards.
 2. **A token held by Keycloak** (Keycloak accounts, when `KEYCLOAK_GITHUB_IDP` is set). The user
    signs in to Keycloak with GitHub. The server asks Keycloak for the GitHub token and keeps it in
    server memory for up to 5 minutes per session, so it does not ask on every request. It drops the
-   token at once when GitHub rejects it, on sign-out and on restart. The server forwards only `GET`
-   requests for issues, labels and repository data to `api.github.com`. The token is never stored
+   token at once when GitHub rejects it, on sign-out and on restart. The server forwards `GET`
+   requests for issues, labels and repository data to `api.github.com`, and one `POST` that
+   creates an issue from a title and a description the server rebuilds itself; it forwards no
+   other method and no other fields. The token is never stored
    in the database or sent to the browser. The user's Keycloak tokens are held in server memory
    too, and are not stored in the database either.
 
@@ -191,9 +203,43 @@ Keycloak again.
 
 The last hop, Keycloak's GitHub provider handing over a real GitHub token, is **not proven** against
 real GitHub: the tests use a second Keycloak realm in GitHub's place. The GitHub provider's default
-scope, `user:email`, reaches public repositories only. For private repositories use an OAuth App
-with the `repo` scope (OAuth Apps have no read-only private scope) or a GitHub App's OAuth
-credentials with Issues and Metadata read access.
+scope, `user:email`, reaches public repositories only and cannot create issues. For private
+repositories use an OAuth App with the `repo` scope (OAuth Apps have no read-only private scope) or
+a GitHub App's OAuth credentials with Issues and Metadata read access. To create issues, an OAuth
+App would need `public_repo` or `repo`, and a GitHub App needs Issues write access. Which OAuth
+scope allows creating an issue is **not confirmed**: GitHub's scope page does not mention issues
+under `public_repo` or `repo`, and no real GitHub account was tried.
+
+### Creating issues
+
+The switch is a row in the database, off after a first start or an upgrade, and only the admin can
+change it (`PATCH /api/settings`). What it enforces depends on the path the token takes:
+
+- **Token held by Keycloak:** the server checks the switch before it fetches the token, and
+  refuses the create while it is off.
+- **Token pasted in the browser:** only the interface enforces the switch. It hides the **+**
+  buttons while the switch is off and re-reads the switch before each create, but the browser
+  sends the request straight to `api.github.com`, which the server cannot refuse. Anyone holding a
+  token with Issues write can create issues with it outside Urutau. The switch is a product
+  setting, not a security boundary for pasted tokens: GitHub's permissions on the token decide
+  what it can do.
+
+Creating an issue notifies the repository's watchers, like creating it on github.com. GitHub
+limits requests that create content (80 a minute, 500 an hour); Urutau reports a rejection and
+does not retry.
+
+**Downgrading past the switch.** Migration `0002_github_writes` adds the switch to the `meta`
+table. An older server build refuses to start on a database that has run it, because Kysely
+reports a missing migration. To go back to the older build, stop the server and run these two
+statements against the database (they run on SQLite, PostgreSQL and MariaDB), then start the
+older build:
+
+```sql
+DELETE FROM kysely_migration WHERE name = '0002_github_writes';
+DELETE FROM meta WHERE meta.key = 'github_writes';
+```
+
+Upgrading again runs the migration and starts with the switch off.
 
 ## How issues are placed
 
@@ -265,23 +311,23 @@ can open a second signed-in browser for two-user checks such as live updates.
 ```
 src/
 ├── domain/        Model and pure logic shared with the server (placement, filters, label colors, API types)
-├── github/        GitHub REST client: pagination, error mapping, mapping to domain types
+├── github/        GitHub REST client: pagination, error mapping, mapping to domain types, issue creation (createIssue.ts)
 ├── api/           Client for the server's /api
 ├── state/         Zustand stores: session, settings (token, theme) and the open board
 ├── hooks/         Data fetching (TanStack Query), live updates, theme and URL helpers
-├── board/         Board UI: buckets, cards, drag and drop, dialogs
-├── components/    App shell: header, start page, settings, sign-in and users pages
+├── board/         Board UI: buckets, cards, drag and drop, dialogs (including CreateIssueModal.tsx)
+├── components/    App shell: header, start page, settings, sign-in, users and server settings pages
 └── styles/        Global Carbon styles
 server/
 ├── main.ts        Starts the server (config, database, shutdown)
 ├── app.ts         The Hono app: middleware and routes
-├── routes/        /api endpoints: auth, invites, users, boards, events, GitHub proxy
+├── routes/        /api endpoints: auth, invites, users, boards, settings (the switch), events, GitHub reads and issue creation
 ├── db/            Kysely schema, migrations and one repository module per table
 ├── auth/          Passwords, sessions, CSRF and sign-in rate limits
 ├── oidc/          Keycloak sign-in and GitHub token brokering
 ├── boards/        Validation of board configs
 ├── events/        In-memory publisher for live updates
-├── github/        Allow-list for the GitHub proxy
+├── github/        Allow-list for the GitHub proxy, the rebuilt create-issue request
 └── http/          Host allow-list, errors, request helpers
 scripts/           dev.mjs
 compose*.yaml      The app (compose.yaml) and the opt-in test containers
@@ -308,7 +354,8 @@ the UI only uses those types. Adding another provider (GitLab, Gitea, …) means
 
 ## Roadmap ideas
 
-- Two-way sync: apply a bucket's label (or close/reopen the issue) on GitHub when a card moves.
+- More writes to GitHub from the board: editing, closing and reopening, labelling, assigning and
+  commenting. Creating issues is the only write today.
 - Boards stored in the repository itself (e.g. `.urutau.json`).
 - Sign in with GitHub (OAuth/device flow) instead of pasting a token.
 - UI copy in Portuguese as well as English.

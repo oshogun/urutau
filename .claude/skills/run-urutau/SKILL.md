@@ -66,7 +66,8 @@ EOF
 ```
 
 The reply looks like `{ ok, result, githubRequests, rateLimitRemaining, logs }`. `logs` lists
-console errors, page errors, failed requests and every GitHub call made during that request. If
+console errors, page errors, failed requests and every GitHub `GET` and `POST` made during that request
+(method and URL only, never a body or header; CORS preflight `OPTIONS` calls are not listed). If
 your code throws, the reply is HTTP 500 with `{ ok: false, error, logs }`.
 Screenshots go to `.claude/skills/run-urutau/shots/<name>.png` (git-ignored); open them with
 Read. Browser state (localStorage) persists between requests until the driver stops.
@@ -102,8 +103,13 @@ The following role-based selectors are verified:
 |---|---|
 | `acme/widgets` | 13 open issues over two pages, one PR (the app hides it), 3 recently closed issues plus 1 closed long ago (outside the window), labels that auto-link to *In progress* and *In review* |
 | `acme/empty` | no labels, no issues |
+| `acme/readonly` | two open issues; creating an issue answers 403 `Resource not accessible by personal access token` |
 | `acme/limited` | 403 rate-limit error |
 | anything else | 404 (looks like a private repo without a token) |
+
+Creating an issue (`POST /repos/{owner}/{repo}/issues`) works on `acme/widgets` and `acme/empty` with any
+non-empty `Authorization` header (paste `fixture-token` in Settings), answers 401 without one, and keeps the new
+issue until the driver stops. No create reaches real GitHub in fixtures mode.
 
 **Real GitHub.** Restart the driver with `URUTAU_GITHUB=live`. Anonymous use allows 60 requests
 an hour; `expressjs/express` costs about 6 per load. The first line checks the budget, and that
@@ -213,7 +219,7 @@ source ~/.nvm/nvm.sh && nvm use >/dev/null
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-Expect every test to pass (257 in 23 files on 2026-10-02). CI (`.github/workflows/ci.yml`) runs the same four steps.
+Expect every test to pass (644 passed and 3 skipped, in 43 files, on 2026-10-03). CI (`.github/workflows/ci.yml`) runs the same four steps.
 
 ## Gotchas
 
