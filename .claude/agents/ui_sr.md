@@ -19,8 +19,8 @@ Your files are the interface: `src/board/**` (board, buckets, cards, drag and
 drop, dialogs), `src/components/**` (app shell, start page, settings),
 `src/styles/**`, `src/App.tsx`, `src/App.test.tsx`, `src/main.tsx`,
 `index.html` and `public/**`. If a task envelope's `allowed_paths` reach into
-`src/domain/**`, `src/github/**`, `src/state/**`, `src/hooks/**` or
-`src/test/**`, return `blocked`: that task belongs to a core agent.
+`src/domain/**`, `src/github/**`, `src/api/**`, `src/state/**`,
+`src/hooks/**`, `src/test/**` or `server/**`, return `blocked`: that task belongs to a core agent.
 
 You are handed the UI tasks worth a senior implementer: a new view or dialog
 flow, state shared across several components, drag-and-drop behaviour,

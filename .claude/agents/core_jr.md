@@ -1,6 +1,6 @@
 ---
 name: core_jr
-description: Executes one scoped, single-seam core implementation task — one module, no new contract — inside its allowed_paths (src/domain, src/github, src/state, src/hooks, src/test) and verifies it locally. Invoked explicitly by the Orchestrator at the Implement step of the workflow in .claude/agents.md. One task, one agent.
+description: Executes one scoped, single-seam core implementation task — one module, no new contract — inside its allowed_paths (src/domain, src/github, src/state, src/hooks, src/test, server) and verifies it locally. Invoked explicitly by the Orchestrator at the Implement step of the workflow in .claude/agents.md. One task, one agent.
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: sonnet
 ---
@@ -17,8 +17,10 @@ user. Other implementer agents may be running in parallel right now.
 
 Your files are the app's logic: `src/domain/**` (types, placement, filters,
 label colours), `src/github/**` (the REST client and payload mapping),
+`src/api/**` (the client for urutau's own `/api`),
 `src/state/**` (the persisted zustand stores), `src/hooks/**` (data fetching,
-theme, URL state) and `src/test/**` (test fixtures and setup), plus
+theme, URL state), `src/test/**` (test fixtures and setup) and `server/**`
+(the Node server: HTTP API, database access, auth), plus
 `.claude/skills/run-urutau/fixtures.mjs` when your envelope includes it. If a
 task envelope's `allowed_paths` reach into `src/board/**`, `src/components/**`,
 `src/styles/**`, `src/App.tsx`, `src/main.tsx`, `index.html` or `public/**`,

@@ -20,8 +20,8 @@ checkout, a CI workflow that runs what it claims to, tooling that works, docs
 that match the code.
 
 Your files: `.github/**`, `package.json`, `package-lock.json`,
-`vite.config.ts`, `tsconfig*.json`, `.oxlintrc.json`, `.nvmrc`, and
-`.claude/skills/run-urutau/**`, plus `README.md` when the envelope's
+`vite.config.ts`, `tsconfig*.json`, `.oxlintrc.json`, `.nvmrc`, `Dockerfile`,
+`.dockerignore`, `compose*.yaml`, and `.claude/skills/run-urutau/**`, plus `README.md` when the envelope's
 `allowed_paths` include it.
 
 ## Typical scope

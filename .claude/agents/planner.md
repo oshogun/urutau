@@ -75,14 +75,17 @@ planning, establish for yourself:
   (usually `src/domain/types.ts`, owned by one core task).
 - **`role` picks the implementer's domain and seniority in one field.** The
   domains, with their paths:
-  - core: `src/domain/**`, `src/github/**`, `src/state/**`, `src/hooks/**`,
-    `src/test/**`, plus `.claude/skills/run-urutau/fixtures.mjs` when the task
+  - core: `src/domain/**`, `src/github/**`, `src/api/**` (the client for
+    urutau's own `/api`), `src/state/**`, `src/hooks/**`,
+    `src/test/**`, `server/**` (the Node server: HTTP API, database access,
+    auth), plus `.claude/skills/run-urutau/fixtures.mjs` when the task
     changes how the app calls the GitHub API (the fixtures must answer the new
     calls);
   - ui: `src/board/**`, `src/components/**`, `src/styles/**`, `src/App.tsx`,
     `src/App.test.tsx`, `src/main.tsx`, `index.html`, `public/**`;
   - devops: `.github/**`, `package.json`, `package-lock.json`,
     `vite.config.ts`, `tsconfig*.json`, `.oxlintrc.json`, `.nvmrc`,
+    `Dockerfile`, `.dockerignore`, `compose*.yaml`,
     `.claude/skills/run-urutau/**`.
 
   `core_jr`/`ui_jr` take a single-seam task: one module or component, no new

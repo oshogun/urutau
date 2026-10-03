@@ -48,9 +48,9 @@ The `impeccable-*` agents in `.claude/agents/` are not part of this loop. The
 
 | Domain | Paths |
 | --- | --- |
-| core | `src/domain/**`, `src/github/**`, `src/state/**`, `src/hooks/**`, `src/test/**`, and `.claude/skills/run-urutau/fixtures.mjs` when the task changes how the app calls the GitHub API |
+| core | `src/domain/**`, `src/github/**`, `src/api/**` (the client for urutau's own `/api`), `src/state/**`, `src/hooks/**`, `src/test/**`, `server/**` (the Node server: HTTP API, database access, auth), and `.claude/skills/run-urutau/fixtures.mjs` when the task changes how the app calls the GitHub API |
 | ui | `src/board/**`, `src/components/**`, `src/styles/**`, `src/App.tsx`, `src/App.test.tsx`, `src/main.tsx`, `index.html`, `public/**` |
-| devops | `.github/**`, `package.json`, `package-lock.json`, `vite.config.ts`, `tsconfig*.json`, `.oxlintrc.json`, `.nvmrc`, `.claude/skills/run-urutau/**` (except `fixtures.mjs` when a core task owns it) |
+| devops | `.github/**`, `package.json`, `package-lock.json`, `vite.config.ts`, `tsconfig*.json`, `.oxlintrc.json`, `.nvmrc`, `Dockerfile`, `.dockerignore`, `compose*.yaml`, `.claude/skills/run-urutau/**` (except `fixtures.mjs` when a core task owns it) |
 
 Core and UI never share a task. The Planner (or the Orchestrator, for tier-2
 work) picks the matching agent: Jr by default, Sr when the task is a contract
