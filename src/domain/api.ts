@@ -25,12 +25,15 @@ export type ApiErrorCode =
   | 'invite-invalid' // 404: invite token unknown, already used, revoked or expired
   | 'keycloak-disabled' // 404: a Keycloak route while Keycloak is not configured
   | 'github-path-not-allowed' // 404: GitHub proxy path or query outside the allow-list
+  | 'github-writes-off' // 403: the admin has not turned on GitHub writes for this server
   | 'already-set-up' // 409: first-run after the first account exists
   | 'username-taken' // 409
   | 'stale-board' // 409: the save's baseVersion is not the stored version (body: StaleBoardResponse)
   | 'cannot-remove-admin' // 409: removing the admin account
   | 'too-large' // 413
   | 'github-access' // 424: the server could not get a GitHub token from Keycloak (body: GitHubAccessError)
+  | 'github-rejected' // 502: GitHub answered a write with a non-2xx status (body: GitHubRejectedError)
+  | 'github-no-answer' // 504: a write was sent to GitHub and no answer came back (timeout or connection failure); GitHub may have applied it
   | 'too-many-attempts' // 429: sign-in rate limit; Retry-After header in seconds
   | 'server-error' // 500
   | 'unavailable' // 503: database unreachable
@@ -240,4 +243,68 @@ export interface BoardDeletedEvent {
 export interface GitHubAccessError extends ApiErrorBody {
   error: 'github-access'
   problem: GitHubAccessProblem | 'unavailable'
+}
+
+// ---------------------------------------------------------------- server settings
+
+/** GET /api/settings (any signed-in user) and the 200 body of PATCH /api/settings. */
+export interface ServerSettings {
+  /** True when the admin has turned on creating issues on GitHub from Urutau. False on new and upgraded servers. */
+  githubWrites: boolean
+}
+
+/** PATCH /api/settings (admin only): at least one known key; unknown keys are refused with 400. */
+export type UpdateServerSettingsRequest = Partial<ServerSettings>
+
+// ---------------------------------------------------------------- creating issues
+
+/** Longest title accepted, in Unicode code points (`[...title].length`), after trimming. */
+export const NEW_ISSUE_TITLE_MAX = 256
+/** Longest description accepted, in Unicode code points (`[...body].length`), before trimming. */
+export const NEW_ISSUE_BODY_MAX = 65_536
+
+/**
+ * POST /api/issues/:owner/:name, and the JSON body Urutau sends to GitHub's
+ * POST /repos/{owner}/{repo}/issues on either path. GitHub uses the same two names.
+ * `title` is sent trimmed; `body` is left out when it is missing or only whitespace.
+ */
+export interface CreateIssueRequest {
+  title: string
+  body?: string
+}
+
+/** 201 from POST /api/issues/:owner/:name. */
+export interface CreateIssueResponse {
+  /** GitHub's 201 body, unchanged; null when GitHub's answer was not JSON. The browser validates and maps it. */
+  issue: unknown
+}
+
+/** One entry of GitHub's `errors` array on a 422, each field cut to 200 characters. */
+export interface GitHubValidationError {
+  resource: string | null
+  field: string | null
+  code: string | null
+  message: string | null
+}
+
+/** What the server read from GitHub's non-2xx answer. Never contains a token, a title or a body. */
+export interface GitHubFailureDetail {
+  /** GitHub's HTTP status. */
+  status: number
+  /** GitHub's `message`, cut to 500 characters; null when absent or not a string. */
+  message: string | null
+  /** GitHub's `errors`, at most the first 5 entries; [] when absent. */
+  errors: GitHubValidationError[]
+  /** `retry-after` in whole seconds; null when absent or not a whole number. */
+  retryAfter: number | null
+  /** `x-ratelimit-remaining`; null when absent or not a whole number. */
+  rateLimitRemaining: number | null
+  /** `x-ratelimit-reset`, epoch seconds; null when absent or not a whole number. */
+  rateLimitReset: number | null
+}
+
+/** Body of a 502 `github-rejected`. */
+export interface GitHubRejectedError extends ApiErrorBody {
+  error: 'github-rejected'
+  github: GitHubFailureDetail
 }

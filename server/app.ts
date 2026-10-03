@@ -20,7 +20,9 @@ import { boardsRoutes } from './routes/boards.ts'
 import { eventsRoutes } from './routes/events.ts'
 import { githubRoutes } from './routes/github.ts'
 import { invitesRoutes } from './routes/invites.ts'
+import { issuesRoutes } from './routes/issues.ts'
 import { oidcRoutes } from './routes/oidc.ts'
+import { settingsRoutes } from './routes/settings.ts'
 import { usersRoutes } from './routes/users.ts'
 
 export interface BoardEventPublisher {
@@ -89,6 +91,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.route('/api', eventsRoutes(ctx))
   app.route('/api', oidcRoutes(ctx))
   app.route('/api', githubRoutes(ctx))
+  app.route('/api', settingsRoutes(ctx))
+  app.route('/api', issuesRoutes(ctx))
 
   app.notFound((c) => {
     if (c.req.path.startsWith('/api/') || c.req.path === '/api') {

@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { CLIENT_ID_HEADER, CSRF_HEADER } from '../domain/api'
+import { CLIENT_ID_HEADER, CSRF_HEADER, NEW_ISSUE_BODY_MAX, NEW_ISSUE_TITLE_MAX } from '../domain/api'
 import type {
   AcceptInviteRequest,
   ApiErrorBody,
@@ -9,10 +9,12 @@ import type {
   BoardEventName,
   BoardUpdatedEvent,
   CreateInviteRequest,
+  CreateIssueResponse,
   CreateInviteResponse,
   CredentialsRequest,
   GitHubAccess,
   ImportBoardsResponse,
+  ServerSettings,
   InviteSummary,
   SaveBoardRequest,
   Session,
@@ -53,6 +55,24 @@ export interface ApiStubOptions {
    * answers 404 github-path-not-allowed. In browser mode the stub answers 403 forbidden.
    */
   github?: (request: { path: string; query: string; headers: Record<string, string> }) => Response | undefined
+  /** The server-wide GitHub writes switch at the start. Default false. */
+  githubWrites?: boolean
+  /**
+   * Answers POST api/issues/<owner>/<name> once the stub's own checks pass, in the server's order:
+   * CSRF (403 csrf-rejected), session (401 signed-out), session mode 'server' (else 403 forbidden),
+   * switch on (else 403 github-writes-off), owner and name by the proxy's patterns (else 400
+   * invalid-request), fields valid by the server's rules, lengths in code points (else 400
+   * invalid-request). The host guard, body limit, 424, 503 and 504 are not modelled; inject them
+   * with failNext. Return undefined for the default answer: 201 with
+   * `{ issue: stubCreatedIssue(`${owner}/${name}`, 1000 + n, title, body) }`, n counting the
+   * stub's successful creates from 1.
+   */
+  createIssue?: (request: {
+    owner: string
+    name: string
+    body: unknown
+    headers: Record<string, string>
+  }) => Response | undefined
 }
 
 export interface ApiCall {
@@ -97,6 +117,10 @@ export interface ApiStub {
   setGithubAccess(access: GitHubAccess): void
   /** The signed-in session, or null. */
   readonly session: Session | null
+  /** The GitHub writes switch as the stub's server holds it now. */
+  readonly githubWrites: boolean
+  /** Changes the switch as the admin would from another browser; this client is not told. */
+  setGithubWrites(on: boolean): void
   /** Number of EventSource instances currently open. */
   openStreams(): number
   /** Fails every open stream: 'reconnect' (the browser retries) or 'closed' (HTTP error, source ended). */
@@ -122,6 +146,48 @@ function toResponse(status: number, body: unknown): Response {
 function error(status: number, code: ApiErrorCode, message: string, extra: object = {}): Response {
   const body: ApiErrorBody = { error: code, message }
   return toResponse(status, { ...body, ...extra })
+}
+
+/**
+ * A GitHub issue JSON object as GitHub's create-issue 201 returns it, with the fields the app's
+ * issue mapping reads. Exported for App tests that answer the browser path's POST to api.github.com.
+ */
+export function stubCreatedIssue(fullName: string, number: number, title: string, body?: string): Record<string, unknown> {
+  const now = new Date().toISOString()
+  return {
+    number,
+    title,
+    body: body ?? null,
+    state: 'open',
+    state_reason: null,
+    html_url: `https://github.com/${fullName}/issues/${number}`,
+    labels: [],
+    assignees: [],
+    user: { login: 'ada', avatar_url: 'https://avatars.githubusercontent.com/u/1?v=4', html_url: 'https://github.com/ada' },
+    milestone: null,
+    comments: 0,
+    created_at: now,
+    updated_at: now,
+    closed_at: null,
+  }
+}
+
+const OWNER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/
+const NAME_PATTERN = /^[A-Za-z0-9._-]{1,100}$/
+const length = (text: string) => [...text].length
+
+/** The server's field rules for a new issue; the message is for the 400 answer. */
+function newIssueProblem(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return 'The request body must be a JSON object.'
+  const fields = body as Record<string, unknown>
+  if (Object.keys(fields).some((key) => key !== 'title' && key !== 'body')) return 'Only title and body can be set.'
+  if (typeof fields.title !== 'string') return 'title must be text.'
+  const title = fields.title.trim()
+  if (title === '') return 'title is required.'
+  if (length(title) > NEW_ISSUE_TITLE_MAX) return `title must be at most ${NEW_ISSUE_TITLE_MAX} characters.`
+  if (fields.body !== undefined && typeof fields.body !== 'string') return 'body must be text.'
+  if (typeof fields.body === 'string' && length(fields.body) > NEW_ISSUE_BODY_MAX) return `body must be at most ${NEW_ISSUE_BODY_MAX.toLocaleString('en-US')} characters.`
+  return null
 }
 
 class FakeEventSource {
@@ -221,6 +287,8 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     accounts.push(makeAccount(extra.username, extra.password, extra.isAdmin ?? false))
   }
 
+  let githubWrites = options.githubWrites ?? false
+  let createdIssues = 0
   let current: Session | null = null
   const startSession = (account: Account): Session => {
     const { id, username, displayName, isAdmin, authMethod } = account.user
@@ -352,6 +420,39 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
 
     // Everything else needs a session.
     if (!current) return error(401, 'signed-out', 'Sign in to continue.')
+
+    if (head === 'settings' && method === 'GET' && tail === '') {
+      return toResponse(200, { githubWrites } satisfies ServerSettings)
+    }
+    if (head === 'settings' && method === 'PATCH' && tail === '') {
+      if (!current.user.isAdmin) return error(403, 'forbidden', 'Only the admin can do this.')
+      const request = body as Partial<ServerSettings> | null
+      const keys = request && typeof request === 'object' && !Array.isArray(request) ? Object.keys(request) : []
+      if (keys.length === 0 || keys.some((key) => key !== 'githubWrites') || typeof request?.githubWrites !== 'boolean') {
+        return error(400, 'invalid-request', 'The settings request is not valid.')
+      }
+      githubWrites = request.githubWrites
+      return toResponse(200, { githubWrites } satisfies ServerSettings)
+    }
+    if (head === 'issues' && method === 'POST') {
+      const [owner = '', name = '', ...more] = tail.split('/').map(decodeURIComponent)
+      if (more.length > 0) return error(404, 'not-found', 'No such route.')
+      if (current.githubAccess.mode !== 'server') {
+        return error(403, 'forbidden', 'This account creates issues from the browser.')
+      }
+      if (!githubWrites) return error(403, 'github-writes-off', 'The admin has not turned on creating issues on GitHub.')
+      if (!OWNER_PATTERN.test(owner) || !NAME_PATTERN.test(name) || name === '.' || name === '..') {
+        return error(400, 'invalid-request', 'The path must be a repository as owner/name.')
+      }
+      const problem = newIssueProblem(body)
+      if (problem) return error(400, 'invalid-request', problem)
+      const answer = options.createIssue?.({ owner, name, body, headers: call.headers })
+      if (answer) return answer
+      const fields = body as { title: string; body?: string }
+      createdIssues += 1
+      const issue = stubCreatedIssue(`${owner}/${name}`, 1000 + createdIssues, fields.title.trim(), fields.body?.trim() === '' ? undefined : fields.body)
+      return toResponse(201, { issue } satisfies CreateIssueResponse)
+    }
 
     if (head === 'github' && method === 'GET') {
       if (current.githubAccess.mode !== 'server') {
@@ -558,6 +659,12 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     },
     get session() {
       return current
+    },
+    get githubWrites() {
+      return githubWrites
+    },
+    setGithubWrites(on) {
+      githubWrites = on
     },
     openStreams: () => FakeEventSource.instances.size,
     failStreams: (mode) => [...FakeEventSource.instances].forEach((source) => source.fail(mode)),

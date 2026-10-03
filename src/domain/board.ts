@@ -164,6 +164,23 @@ export function moveIssue(
   return { ...config, placements, order }
 }
 
+/**
+ * Puts a just-created issue at the top of `bucketId` and records the bucket in `placements`,
+ * whatever the bucket's label rules say, so the card stays there if labels change later.
+ * Returns `config` itself when `bucketId` is not a bucket of the board.
+ */
+export function placeNewIssue(config: BoardConfig, issueNumber: number, bucketId: string): BoardConfig {
+  if (!config.buckets.some((bucket) => bucket.id === bucketId)) return config
+
+  const order: Record<string, number[]> = {}
+  for (const [id, numbers] of Object.entries(config.order)) {
+    order[id] = numbers.filter((number) => number !== issueNumber)
+  }
+  order[bucketId] = [issueNumber, ...(order[bucketId] ?? [])]
+
+  return { ...config, placements: { ...config.placements, [issueNumber]: bucketId }, order }
+}
+
 /** Adds a bucket or replaces the one with the same id. */
 export function saveBucket(config: BoardConfig, bucket: Bucket): BoardConfig {
   const exists = config.buckets.some((candidate) => candidate.id === bucket.id)

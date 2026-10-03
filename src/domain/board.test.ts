@@ -8,6 +8,7 @@ import {
   moveBucket,
   moveIssue,
   normalizeLabelName,
+  placeNewIssue,
   resolveBuckets,
   saveBucket,
   toBoardExport,
@@ -167,6 +168,51 @@ describe('moveIssue', () => {
   it('ignores unknown target buckets', () => {
     const config = board()
     expect(moveIssue(config, issues, 1, 'nope', null)).toBe(config)
+  })
+})
+
+describe('placeNewIssue', () => {
+  it('puts the issue first in its bucket even when label rules would send it elsewhere', () => {
+    const issues = [makeIssue(1), makeIssue(6, { labels: ['in progress'] })]
+    const placed = placeNewIssue(board(), 6, 'backlog')
+    expect(placed.placements[6]).toBe('backlog')
+    expect(numbersIn(placed, issues, 'backlog')).toEqual([6, 1])
+    expect(numbersIn(placed, issues, 'doing')).toEqual([])
+  })
+
+  it('records the placement even when the label rules would pick the same bucket', () => {
+    const placed = placeNewIssue(board(), 6, 'doing')
+    expect(placed.placements).toEqual({ 6: 'doing' })
+    expect(placed.order.doing).toEqual([6])
+  })
+
+  it('goes before the hand order of the bucket and leaves other buckets alone', () => {
+    const config = { ...board(), placements: { 3: 'doing' }, order: { backlog: [2, 4], doing: [3] } }
+    const issues = [2, 3, 4, 5, 7].map((number) => makeIssue(number))
+    const placed = placeNewIssue(config, 7, 'backlog')
+    expect(placed.order).toEqual({ backlog: [7, 2, 4], doing: [3] })
+    expect(numbersIn(placed, issues, 'backlog')).toEqual([7, 2, 4, 5])
+  })
+
+  it('removes a stale entry of the same number from every other order list', () => {
+    const config = { ...board(), order: { doing: [7, 3], review: [7] } }
+    expect(placeNewIssue(config, 7, 'backlog').order).toEqual({ doing: [3], review: [], backlog: [7] })
+  })
+
+  it('accepts a bucket that collects closed issues', () => {
+    expect(placeNewIssue(board(), 7, 'done').placements[7]).toBe('done')
+  })
+
+  it('returns the same object for a bucket the board does not have', () => {
+    const config = board()
+    expect(placeNewIssue(config, 7, 'gone')).toBe(config)
+  })
+
+  it('does not change the config it was given', () => {
+    const config = board()
+    const before = JSON.stringify(config)
+    placeNewIssue(config, 7, 'backlog')
+    expect(JSON.stringify(config)).toBe(before)
   })
 })
 

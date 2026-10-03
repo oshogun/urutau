@@ -6,8 +6,12 @@
 //   acme/widgets  labeled open issues (two pages), one PR (filtered out by the app),
 //                 recently closed issues, and one closed long ago (outside the window)
 //   acme/empty    no labels, no issues
+//   acme/readonly two open issues; creating an issue answers 403, like a token without write access
 //   acme/limited  403 with an exhausted rate limit
 //   anything else 404, like a private repository without a token
+//
+// Creating an issue (POST /repos/{owner}/{repo}/issues) works on acme/widgets and acme/empty with any
+// non-empty Authorization header; the new issue is kept in memory until the driver stops.
 
 const DAY = 86_400_000
 const AVATAR_HOST = 'https://fixtures.urutau.test'
@@ -138,6 +142,62 @@ const REPOS = {
 
 const PAGE_SIZE = 8
 
+REPOS['acme/readonly'] = {
+  repo: {
+    full_name: 'acme/readonly',
+    description: 'Public repository the fixture token cannot write to',
+    html_url: 'https://github.com/acme/readonly',
+    private: false,
+  },
+  labels: LABELS,
+  open: [
+    { ...issue(1, 'Clarify the install steps', ['documentation'], { age: 10 }), html_url: 'https://github.com/acme/readonly/issues/1' },
+    { ...issue(2, 'Add a changelog', ['enhancement'], { age: 8 }), html_url: 'https://github.com/acme/readonly/issues/2' },
+  ],
+  closed: [],
+}
+
+/** Answers POST .../issues the way GitHub does for the cases the app handles. */
+function createIssue(route, request, key, fixture) {
+  const authorization = request.headers()['authorization'] ?? ''
+  if (authorization.replace(/^Bearer\s*/i, '').trim() === '') {
+    return json(route, 401, { message: 'Requires authentication' })
+  }
+  if (key === 'acme/readonly') {
+    return json(route, 403, {
+      message: 'Resource not accessible by personal access token',
+      documentation_url: 'https://docs.github.com/rest/issues/issues#create-an-issue',
+      status: '403',
+    })
+  }
+  let fields
+  try {
+    fields = JSON.parse(request.postData() ?? '')
+  } catch {
+    fields = null
+  }
+  if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) {
+    return json(route, 422, { message: 'Validation Failed', errors: [{ resource: 'Issue', code: 'invalid', field: 'body' }] })
+  }
+  const unknownKey = Object.keys(fields).find((field) => field !== 'title' && field !== 'body')
+  if (unknownKey !== undefined) {
+    return json(route, 422, { message: 'Validation Failed', errors: [{ resource: 'Issue', code: 'invalid', field: unknownKey }] })
+  }
+  if (typeof fields.title !== 'string' || fields.title.trim() === '') {
+    return json(route, 422, { message: 'Validation Failed', errors: [{ resource: 'Issue', code: 'missing_field', field: 'title' }] })
+  }
+  const served = Math.max(0, ...fixture.open.map((item) => item.number), ...fixture.closed.map((item) => item.number))
+  const number = served + 1
+  const created = {
+    ...issue(number, fields.title, [], { user: user('fixture-user'), age: 0 }),
+    html_url: `https://github.com/${fixture.repo.full_name}/issues/${number}`,
+    updated_at: new Date().toISOString(),
+    body: typeof fields.body === 'string' ? fields.body : null,
+  }
+  fixture.open.push(created)
+  return json(route, 201, created)
+}
+
 function json(route, status, body, headers = {}) {
   return route.fulfill({
     status,
@@ -161,7 +221,7 @@ function handleApi(route) {
       status: 204,
       headers: {
         'access-control-allow-origin': '*',
-        'access-control-allow-methods': 'GET, OPTIONS',
+        'access-control-allow-methods': 'GET, POST, OPTIONS',
         'access-control-allow-headers': request.headers()['access-control-request-headers'] ?? '*',
       },
     })
@@ -181,6 +241,9 @@ function handleApi(route) {
 
   const fixture = REPOS[key]
   if (!fixture) return json(route, 404, { message: 'Not Found' })
+  if (request.method() === 'POST') {
+    return resource === 'issues' ? createIssue(route, request, key, fixture) : json(route, 404, { message: 'Not Found' })
+  }
   if (!resource) return json(route, 200, fixture.repo)
   if (resource === 'labels') return json(route, 200, fixture.labels)
   if (resource !== 'issues') return json(route, 404, { message: 'Not Found' })

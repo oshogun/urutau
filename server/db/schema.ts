@@ -4,7 +4,7 @@
  * booleans are 0 or 1, JSON is text.
  */
 export interface MetaTable {
-  key: string // VARCHAR(64) PK; rows: 'instance_id'
+  key: string // VARCHAR(64) PK; rows: 'instance_id', and 'github_writes' ('1' when the admin has turned on GitHub writes, '0' otherwise)
   value: string // VARCHAR(255)
 }
 

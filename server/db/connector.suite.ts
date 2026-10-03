@@ -4,18 +4,20 @@ import { isUniqueViolation, type Database } from './index.ts'
 import { createBoard, deleteBoard, getBoard, listBoards, saveBoard } from './boards.ts'
 import { findUserByIdentity, linkIdentity } from './identities.ts'
 import { createInvite, deleteInvite, getUsableInvite, listUsableInvites, markInviteUsed } from './invites.ts'
+import { getGithubWrites, setGithubWrites } from './settings.ts'
 import { createSession, deleteExpiredSessions, getSession } from './sessions.ts'
 import { createAccount, deleteUser, getUserById, getUserByUsername, isFirstRun, listUsers } from './users.ts'
 
 const T0 = new Date('2026-01-01T00:00:00.000Z')
 const later = (ms: number) => new Date(T0.getTime() + ms)
 
-/** Empties every application table except `meta`, children before parents. */
+/** Empties every application table except `meta`, children before parents, and turns the GitHub writes switch off. */
 async function resetData(database: Database): Promise<void> {
   const { db } = database
   for (const table of ['sessions', 'invites', 'identities', 'boards', 'instance_claim', 'users'] as const) {
     await db.deleteFrom(table).execute()
   }
+  await setGithubWrites(db, false)
 }
 
 /**
@@ -60,6 +62,20 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         await database.migrate()
         expect(await read()).toBe(before)
         expect(before).toMatch(/^[0-9a-f-]{36}$/)
+      })
+    })
+
+    describe('github writes switch', () => {
+      it('is off after migrate and round-trips', async () => {
+        const row = await database.db.selectFrom('meta').select('value').where('key', '=', 'github_writes').executeTakeFirstOrThrow()
+        expect(row.value).toBe('0')
+        expect(await getGithubWrites(database.db)).toBe(false)
+        await setGithubWrites(database.db, true)
+        expect(await getGithubWrites(database.db)).toBe(true)
+        await database.migrate()
+        expect(await getGithubWrites(database.db)).toBe(true)
+        await setGithubWrites(database.db, false)
+        expect(await getGithubWrites(database.db)).toBe(false)
       })
     })
 

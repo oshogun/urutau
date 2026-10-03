@@ -1,11 +1,10 @@
 import { Hono, type Context } from 'hono'
-import type { GitHubAccessError } from '../../src/domain/api.ts'
 import type { AppContext } from '../app.ts'
+import { accessError } from '../github/accessError.ts'
 import { allowedGitHubPath } from '../github/allowlist.ts'
 import { rewriteLinkHeader } from '../github/links.ts'
 import { HttpError } from '../http/errors.ts'
 import type { AppEnv } from '../http/types.ts'
-import type { GitHubTokenResult } from '../oidc/grants.ts'
 
 const UPSTREAM = 'https://api.github.com/'
 const PREFIX = '/api/github/'
@@ -18,17 +17,6 @@ function splitTarget(url: string): { path: string; query: string } {
   const target = hash === -1 ? afterOrigin : afterOrigin.slice(0, hash)
   const queryStart = target.indexOf('?')
   return queryStart === -1 ? { path: target, query: '' } : { path: target.slice(0, queryStart), query: target.slice(queryStart + 1) }
-}
-
-function accessError(problem: Extract<GitHubTokenResult, { ok: false }>['problem']): HttpError {
-  const messages = {
-    'signin-expired': 'Sign in with Keycloak again to read GitHub through this server.',
-    'not-linked': 'Your Keycloak account is not linked to a GitHub account.',
-    refused: 'Keycloak did not hand over a GitHub token for your account.',
-    unavailable: 'Keycloak could not be reached to get a GitHub token. Try again shortly.',
-  } as const
-  const body: Omit<GitHubAccessError, 'error' | 'message'> = { problem }
-  return new HttpError(424, 'github-access', messages[problem], { extra: body })
 }
 
 export function githubRoutes(ctx: AppContext) {
