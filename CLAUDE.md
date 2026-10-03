@@ -7,7 +7,9 @@ PostgreSQL or MariaDB optionally) and serves the built app. Users sign in with
 a local account or through Keycloak; every signed-in user shares every board,
 and changes reach open boards live over Server-Sent Events. Issues and labels
 are read from the GitHub REST API, by the browser or, for Keycloak users whose
-realm brokers GitHub, by the server. `README.md` is the user-facing
+realm brokers GitHub, by the server. When the admin turns GitHub writes on,
+users also create issues from the board, through the same two paths.
+`README.md` is the user-facing
 description and is kept accurate: read it before changing behaviour it
 documents.
 
@@ -139,11 +141,16 @@ narrow the contract further.
   clone), `df -h /` checked before any clone or install, everything cleaned up
   per task. Rules in `.claude/ENVIRONMENT.md` § Scratch space; repeat them in
   every envelope.
-- **Urutau only reads from GitHub today.** Opt-in two-way sync is the
-  confirmed direction (`PRODUCT.md`), but no code path writes to a repository
-  (labels, issue state, comments) unless the run's frozen decisions include
-  it. Such a write goes through Design first, and stays off until the user
-  turns it on.
+- **Creating an issue is the only write to GitHub, and it is off until the
+  admin turns it on.** The switch is server-wide (`GET`/`PATCH /api/settings`,
+  the `meta` row `github_writes`). Managing issues entirely from Urutau is the
+  product's goal (`PRODUCT.md`), but no other code path writes to a
+  repository (labels, issue state, comments, edits) unless the run's frozen
+  decisions include it. Such a write goes through Design first and is gated
+  by the same switch. On the browser path only the interface enforces the
+  switch, because the browser calls `api.github.com` itself. Agents, tests and
+  the driver never create an issue on a real repository; the fixtures answer
+  the create request.
 - **GitHub tokens go only to `api.github.com`.** There are two:
   - the personal access token a user pastes in Settings stays in that browser
     and is sent only from the browser to `api.github.com`, never to urutau's

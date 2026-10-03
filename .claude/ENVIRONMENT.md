@@ -19,8 +19,10 @@ untracked files: run `npm ci` in the clone.
 Urutau is a React app plus a small API server (`server/`, Hono and Kysely). Boards and accounts
 live in a SQL database: SQLite by default (`data/urutau.db`, git-ignored), PostgreSQL or MariaDB
 through `DATABASE_URL`. The browser keeps only the theme, a pasted GitHub token and v1 data it may
-import. Its external service is the GitHub REST API at `api.github.com`, which it reads and never
-writes. Agents never use `data/urutau.db` of the live checkout: run the server on
+import. Its external service is the GitHub REST API at `api.github.com`, which it reads and, when
+the admin turns GitHub writes on, uses to create issues. No agent, test or driver run creates an
+issue on a real repository: the server tests stub `fetch`, and the driver's fixtures answer
+`POST /repos/{owner}/{repo}/issues`. Agents never use `data/urutau.db` of the live checkout: run the server on
 `DATABASE_URL=sqlite::memory:`, as the run-urutau driver's server mode does. What remains to protect
 is the user's own dev server and containers, if running (see Ports), and the shared GitHub API
 budget.

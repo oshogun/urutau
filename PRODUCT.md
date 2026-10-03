@@ -30,20 +30,24 @@ Lighter than GitHub's own Projects boards: there is no project to create and
 no fields to configure. Any repository's issues, with its labels imported,
 become a board straight away.
 
-Writing back to GitHub is opt-in. Urutau only reads today. The confirmed
-direction is two-way sync that each user turns on explicitly: moving a card
-updates the issue's labels or its open/closed state on GitHub.
+The goal is to create and manage a repository's issues entirely from
+urutau. Writing to GitHub is off until the team's admin turns it on for the
+whole server. The first write is creating an issue, with a title and a body,
+from a bucket: the card lands in that bucket, and no labels are sent, because
+buckets are internal to urutau and never label issues on GitHub.
 
 ## Operating Context
 
 - Data comes from the GitHub REST API: issues (pull requests excluded), labels,
-  assignees and milestones.
+  assignees and milestones. When the admin has turned GitHub writes on, issues
+  are created through the same API, with the same token that reads them.
 - Public repositories work without a token, within GitHub's anonymous limit of
   60 API requests an hour. Private repositories and heavier use need a GitHub
   token: either the user's own personal access token, kept in their browser
   and sent only to GitHub, or, for teams that sign in through Keycloak with
   GitHub as a brokered identity provider, the token Keycloak stores, which
-  urutau's server uses to read from GitHub on the user's behalf.
+  urutau's server uses to read from GitHub, and to create issues, on the
+  user's behalf. Creating issues needs a token with Issues write permission.
 - The server is self-hosted by the team. It stores accounts and boards in
   SQLite by default, or in PostgreSQL or MariaDB.
 - A board has buckets (by default Backlog, To do, In progress, In review and
@@ -53,7 +57,8 @@ updates the issue's labels or its open/closed state on GitHub.
 
 ## Capabilities and Constraints
 
-- Today: read-only access to GitHub; boards stored on the team's server and
+- Today: reads from GitHub, and creates issues from a bucket once the admin
+  turns GitHub writes on; boards stored on the team's server and
   shared by every signed-in user, with live updates and a refusal (and notice)
   when two people save the same board at once; local accounts, where the first
   account is the admin and invites the others by link, and Keycloak sign-in;
@@ -66,9 +71,12 @@ updates the issue's labels or its open/closed state on GitHub.
   with a given label into a bucket; a **board** is the buckets, rules and card
   positions for one repository.
 - Settled: a team shares boards through a self-hosted backend (2026-10-02).
+- Settled: writing to GitHub is turned on for the whole server by the admin,
+  not per user (2026-10-03).
 - Open decisions:
-  - The exact two-way sync behaviour: which buckets map to which labels or
-    states, and what happens when GitHub changed in the meantime.
+  - Which other writes come next (editing, closing, labelling, assigning,
+    commenting), and what happens when GitHub changed in the meantime.
+    Buckets do not map to labels: they are internal to urutau (2026-10-03).
 
 ## Brand Commitments
 
@@ -89,7 +97,7 @@ or published screenshots yet; future work must not invent any.
 
 1. A repository name is all it takes to get a useful board.
 2. GitHub stays the source of truth for issues. Urutau organizes them, and
-   writes back only when a user opts in.
+   writes to GitHub only after the admin has turned writes on for the server.
 3. Built for a team: anything that works only in one person's browser is a
    stopgap.
 4. Accessible and bilingual by default.
