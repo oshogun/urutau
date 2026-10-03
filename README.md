@@ -33,13 +33,17 @@ for the app, and Hono, Kysely and a SQL database for the server.
   title and an optional description, creates the issue on GitHub as the person who clicked, and
   puts the new card in that bucket. The closed-issues bucket has no **+**. The switch is off by
   default and is server-wide.
+- **AI agents (MCP).** An admin can create agent integrations: accounts of their own that an AI
+  agent uses to list boards, read them and move cards through Urutau's MCP server, with no
+  access to GitHub beyond reading. See [AI agents (MCP)](#ai-agents-mcp).
 - **Export and import** of a board as JSON, to move it to another server or share it. A board
   exported from another repository brings its buckets and rules, but not card positions.
 
 Urutau reads issues and labels from GitHub and, when the admin turns on issue creation, creates
 issues. It writes nothing else to a repository: no labels, no state changes, no comments. Buckets,
 rules and card positions live in the server's database. Creating an issue adds no labels, whatever
-the bucket's rules are.
+the bucket's rules are. The moves an AI agent makes through MCP are Urutau-only: they change card
+positions in Urutau's database and never write to GitHub.
 
 ## Getting started
 
@@ -52,7 +56,7 @@ npm run dev    # app at http://localhost:5173, API server at http://localhost:87
 ```
 
 `npm run dev` starts the API server (restarted on change) and the Vite dev server, which proxies
-`/api` to it. `PORT` changes the API port. The database is a SQLite file, `data/urutau.db`, created
+`/api` and `/mcp` to it. `PORT` changes the API port. The database is a SQLite file, `data/urutau.db`, created
 on first start.
 
 **First run.** The first time the app opens with an empty database it asks for the first account.
@@ -71,7 +75,7 @@ Enter a repository on the start page. Boards can be bookmarked; the URL looks li
 
 Without a token, GitHub allows 60 API requests per hour per IP address. Loading a board takes
 roughly 3–10 requests, depending on how many issues it has. A token raises the limit to 5,000 an
-hour and is required for private repositories. There are two ways to give Urutau one:
+hour and is required for private repositories. There are three ways to give Urutau one:
 
 1. **A token pasted in the browser** (local accounts, Keycloak accounts when `KEYCLOAK_GITHUB_IDP`
    is unset, and Keycloak users without a usable GitHub link). Create a
@@ -92,10 +96,16 @@ hour and is required for private repositories. There are two ways to give Urutau
    other method and no other fields. The token is never stored
    in the database or sent to the browser. The user's Keycloak tokens are held in server memory
    too, and are not stored in the database either.
+3. **A token stored for an agent integration** (only for the MCP endpoint). The admin gives an
+   integration its own GitHub token on the Users page. The server encrypts it with
+   `TOKEN_ENCRYPTION_KEY` before it stores it, decrypts it in memory when an agent asks for a
+   board, and sends it only to `api.github.com`, in `GET` requests. It never reaches the browser,
+   a log line or a board export, and no signed-in person's request uses it. See
+   [AI agents (MCP)](#ai-agents-mcp).
 
 ## Deploying
 
-One Node process serves the built app and `/api`:
+One Node process serves the built app, `/api` and `/mcp`:
 
 ```bash
 npm ci
@@ -103,12 +113,15 @@ npm run build
 npm start      # http://127.0.0.1:8787
 ```
 
-`npm start` needs `server/`, `src/domain/`, `dist/`, `node_modules/` and `package.json`.
+`npm start` needs `server/`, `src/domain/`, `src/github/api.ts`, `src/github/paging.ts`, `dist/`,
+`node_modules/` and `package.json`. (The MCP GitHub reader imports the two `src/github` files; the
+rest of `src/github` is browser code.)
 
 Or with Docker: `docker compose up -d --build` builds the image and runs it with a SQLite database
 in a named volume (`<project>_urutau-data`, `urutau_urutau-data` by default), published on
 `127.0.0.1:8787` (`URUTAU_HOST_PORT` changes the host port). The image listens on `0.0.0.0:8080`
-inside the container and runs as the `node` user.
+inside the container and runs as the `node` user. `TOKEN_ENCRYPTION_KEY` is passed through to the
+container if it is set in the shell or in a `.env` file.
 
 ### Reaching the server by a name
 
@@ -124,12 +137,16 @@ Behind a reverse proxy, set `PUBLIC_URL` to the address people open, for example
 other writes compare the browser's `Origin` with it, and nginx's default `proxy_pass` rewrites
 `Host`. An `https:` value also makes the session cookie `Secure`. Set `TRUST_PROXY=true` only when
 a proxy you control sets `X-Forwarded-For`: the server then takes the last entry as the client
-address, which the sign-in rate limit uses. `X-Forwarded-Host` is never read.
+address, which the sign-in rate limit and the `/mcp` failed-token limiter use. `X-Forwarded-Host`
+is never read. A proxy must also forward `/mcp` and its `Authorization` header (see
+[AI agents (MCP)](#ai-agents-mcp)).
 
 ### Run one instance only
 
 Live updates, sign-in rate limits, pending Keycloak logins and Keycloak token grants are kept in
-the memory of the single server process. Do not run two instances behind a load balancer: a
+the memory of the single server process. So are the MCP endpoint's GitHub snapshot cache, its
+per-account snapshot queue, its per-repository move lock, its failed-token limiter, its call and
+GitHub request counters and the registry of calls in progress; a restart empties them. Do not run two instances behind a load balancer: a
 change saved through one would not reach a browser connected to the other. Restarting the server
 signs Keycloak users out of GitHub reads (their Urutau sign-in survives; they sign in with
 Keycloak again to read GitHub through the server).
@@ -146,7 +163,8 @@ value.
 | `DATABASE_URL` | `sqlite:data/urutau.db` | `sqlite:<path>` (relative to the working directory; the directory is created), `sqlite::memory:` (gone on exit), `postgres://…`, `postgresql://…`, `mysql://…` or `mariadb://…`. |
 | `PUBLIC_URL` | unset | The address people open: origin and optional path prefix, no trailing slash. Required with Keycloak. |
 | `ALLOWED_HOSTS` | unset | Extra hostnames the server answers for, comma-separated, without scheme, port or wildcard, for example `urutau,board.lan`. |
-| `TRUST_PROXY` | `false` | `true` to take the client address from the last `X-Forwarded-For` entry. |
+| `TRUST_PROXY` | `false` | `true` to take the client address from the last `X-Forwarded-For` entry. The sign-in rate limit and the `/mcp` failed-token limiter use that address. |
+| `TOKEN_ENCRYPTION_KEY` | unset | 32 random bytes, base64 (`openssl rand -base64 32`). Without it the server stores no GitHub token for agent integrations. Keep it away from the place the database backups are kept; changing it makes stored tokens unreadable until they are set again. A value that is not 32 bytes of base64 stops the server at start. |
 | `KEYCLOAK_ISSUER` | unset | Realm URL, for example `https://keycloak.example.com/realms/urutau`. Set with the next two or not at all. An `http:` issuer is accepted only on a loopback host unless `KEYCLOAK_ALLOW_HTTP=true`. |
 | `KEYCLOAK_CLIENT_ID` | unset | The confidential client's id. |
 | `KEYCLOAK_CLIENT_SECRET` | unset | The client's secret. |
@@ -241,6 +259,200 @@ DELETE FROM meta WHERE meta.key = 'github_writes';
 
 Upgrading again runs the migration and starts with the switch off.
 
+## AI agents (MCP)
+
+Urutau serves a [Model Context Protocol](https://modelcontextprotocol.io/) endpoint at
+`<PUBLIC_URL>/mcp` (`http://127.0.0.1:8787/mcp` on a default local start). It speaks JSON over HTTP
+`POST` and offers four tools:
+
+| Tool | What it does |
+| --- | --- |
+| `list_boards` | Lists the boards the integration may read. Reads only Urutau. |
+| `get_board` | Returns one board as JSON: buckets and cards in the order people see them. Closed issues are left out unless asked for. |
+| `move_card` | Moves one open issue's card to a position in a bucket. |
+| `reorder_bucket` | Sets the order of the cards in one bucket in one save. |
+
+**MCP moves are Urutau-only.** `move_card` and `reorder_bucket` change card positions in Urutau's
+database and nothing on GitHub. No MCP request makes a non-`GET` request to GitHub, and the
+endpoint cannot create issues. Everyone with the board open sees an agent's move live, labelled
+*Agent*. Issue titles, labels and other text come from GitHub and are untrusted: an agent should
+treat them as data, not as instructions.
+
+### Setup
+
+1. **Set `TOKEN_ENCRYPTION_KEY`**: `openssl rand -base64 32`, in the server's environment. Without
+   it the server starts, logs a warning, and cannot store a GitHub token for an integration.
+2. **Create the integration.** As the admin, open *Users* in the user menu, then *Agent
+   integrations*, and create one. It is an account of its own: it cannot sign in, it is never the
+   admin, and its name shares the username namespace with people, so a name a person has is taken.
+3. **Add repositories.** The integration can read only the boards of the repositories on its list
+   (at most 200).
+4. **Set its GitHub token.** Use a [fine-grained personal access
+   token](https://github.com/settings/personal-access-tokens/new) with access to those repositories
+   and read-only Issues and Metadata permissions. Urutau keeps it encrypted and uses it only for `GET`
+   requests to `api.github.com`.
+5. **Create an Urutau MCP token** for the integration (expiring in 30, 90 or 365 days, or never).
+   Urutau shows it once and keeps only a fingerprint. It is the credential the agent sends as
+   `Authorization: Bearer <token>`.
+
+The *Connect an agent* box on the same page shows the configurations below with your server's URL.
+Put the token in the environment variable `URUTAU_MCP_TOKEN`, or type it when the client asks.
+**Never write the token itself into an MCP client's configuration file.**
+
+### Client configuration
+
+`<url>` is the endpoint address above.
+
+**Claude Code**, from the command line (the single quotes keep your shell from expanding the
+variable; Claude Code expands it when it connects):
+
+```bash
+claude mcp add --transport http urutau <url> --header 'Authorization: Bearer ${URUTAU_MCP_TOKEN}'
+```
+
+or in `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "urutau": {
+      "type": "http",
+      "url": "<url>",
+      "headers": { "Authorization": "Bearer ${URUTAU_MCP_TOKEN}" }
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "urutau": {
+      "url": "<url>",
+      "headers": { "Authorization": "Bearer ${env:URUTAU_MCP_TOKEN}" }
+    }
+  }
+}
+```
+
+**VS Code** (`.vscode/mcp.json`) asks for the token in a password prompt:
+
+```json
+{
+  "inputs": [
+    { "type": "promptString", "id": "urutau-token", "description": "Urutau MCP token", "password": true }
+  ],
+  "servers": {
+    "urutau": {
+      "type": "http",
+      "url": "<url>",
+      "headers": { "Authorization": "Bearer ${input:urutau-token}" }
+    }
+  }
+}
+```
+
+**Clients that only start local programs** can use [mcp-remote](https://www.npmjs.com/package/mcp-remote)
+0.12.0 or later, which reads headers from a file with `--header-file`. Write the file once, in a
+terminal where `URUTAU_MCP_TOKEN` is set (the command stops without writing if it is unset):
+
+```bash
+mkdir -p ~/.config/urutau
+(umask 077; printf 'Authorization: Bearer %s\n' "${URUTAU_MCP_TOKEN:?Set URUTAU_MCP_TOKEN first}" > ~/.config/urutau/mcp-headers)
+chmod 600 ~/.config/urutau/mcp-headers
+```
+
+The file holds the token, so it is a credential file: keep it outside any repository and readable
+only by you. The client configuration holds only its path, which must be the full path because
+mcp-remote does not expand `~` (for example `/home/you/.config/urutau/mcp-headers`):
+
+```json
+{
+  "mcpServers": {
+    "urutau": {
+      "command": "npx",
+      "args": ["mcp-remote", "<url>", "--header-file", "/home/you/.config/urutau/mcp-headers"]
+    }
+  }
+}
+```
+
+For an `http:` address add `"--allow-http"` to `args`. An older mcp-remote ignores `--header-file`,
+connects without a token and gets 401. On Windows, put the line `Authorization: Bearer` followed by
+the token in a text file in your user folder instead, and use a path without spaces. Do not use the
+`env`-block form from mcp-remote's own README: it writes the token into the client's configuration.
+
+### What the endpoint requires
+
+- `POST` only; any other method with a valid token gets 405 (without one it gets 401, as every
+  request does). A query string gets 400, so a token in the address is never
+  read.
+- Clients must send `Accept: application/json, text/event-stream`.
+- A request with an `Origin` header of another site, which a desktop client does not normally send,
+  gets 403 `origin-rejected`.
+- A missing, wrong, revoked or expired token gets 401 `invalid-token`. A client may answer that with
+  an OAuth or client-registration error: it means the Urutau MCP token is missing, wrong or revoked.
+  The endpoint has no OAuth.
+- The failed-token limiter answers 429 `too-many-attempts` to failed attempts from one address
+  after 50 in 15 minutes. It limits answers to failures; it is not brute-force protection. A token
+  guess is still looked up, and what makes guessing impractical is the token's 256 random bits.
+  A valid token always passes. With `TRUST_PROXY=true` the address is the last `X-Forwarded-For`
+  entry.
+- A reverse proxy must forward `/mcp` and the `Authorization` header, and must not buffer
+  `text/event-stream` answers. A proxy that does its own authentication must leave `/mcp` to
+  Urutau's tokens.
+- Urutau sends no CORS headers. A server reachable only on a LAN cannot be a claude.ai connector,
+  because the connection comes from Anthropic's servers.
+- If the client cancels a `move_card` or `reorder_bucket`, the change may still be saved: only a
+  closed connection stops a running call. Call `get_board` to see the result.
+- Send tokens over HTTPS. Over `http:` they cross the network unencrypted; the Users page warns
+  when it is opened over plain HTTP.
+
+### Limits
+
+- Each integration's reads count against its own GitHub token. A cold board read takes 2 to 21
+  GitHub requests, is cached for 60 seconds, leaves the last 10% of the token's hourly allowance
+  alone, and the integration makes at most 1,000 GitHub requests an hour.
+- 120 tool calls and 30 moves a minute per integration.
+- At most 300 cards per `get_board` answer; name one bucket and raise `offset` to page through it.
+
+### If a key or token leaks
+
+An Urutau MCP token: revoke it on the Users page. Calls it is making stop at once. After a suspected
+leak of `TOKEN_ENCRYPTION_KEY` or of the database, revoke each stored GitHub token **at GitHub**
+first, then set a new one in Urutau. Clearing a token in Urutau only deletes the stored copy; it does
+not revoke the token at GitHub. Changing the key makes stored GitHub tokens unreadable until they
+are set again.
+
+Use one integration per trust domain. Do not give one integration private repositories and an agent
+that reads untrusted public content and can write elsewhere: text in an issue is untrusted input
+to the agent.
+
+### Downgrading past the integrations
+
+Migration `0003_integrations` adds the integration tables. An older server build refuses to start
+on a database that has run it:
+`urutau: corrupted migrations: previously executed migration 0003_integrations is missing`. To go
+back, stop the server and run these statements against the database in this order, then start the
+older build. On SQLite, run `PRAGMA foreign_keys = ON;` first: the `sqlite3` command-line tool
+starts with foreign keys off, and then the first statement would delete the integration accounts
+without clearing `boards.updated_by`, leaving boards that point at deleted users.
+
+```sql
+DELETE FROM users WHERE id IN (SELECT user_id FROM integrations);
+DROP TABLE integration_repos;
+DROP TABLE api_tokens;
+DROP TABLE github_tokens;
+DROP TABLE integrations;
+DELETE FROM kysely_migration WHERE name = '0003_integrations';
+```
+
+The first statement is optional: without it the integration accounts stay as `users` rows with no
+password that an older build lists as Keycloak users who cannot sign in. If you also go back past the
+issue switch, run the `0002_github_writes` statements from *Creating issues* afterwards.
+
 ## How issues are placed
 
 Each issue's bucket is worked out every time the board renders (`resolveBuckets` in
@@ -257,6 +469,9 @@ Within a bucket, cards you have arranged keep their order. New issues appear bel
 first; closed issues are sorted by most recently closed. Deleting a bucket sends its issues back
 through rules 3 and 4.
 
+The MCP endpoint applies the same rules but keeps the hand order of issues it has not loaded: a
+new issue, or one past the 1,000-item cap. The browser does not keep those.
+
 ## Scripts
 
 | Command             | What it does                                   |
@@ -266,7 +481,7 @@ through rules 3 and 4.
 | `npm run dev:server`| Start only the API server, restarted on change |
 | `npm start`         | Run the server, which also serves `dist/`      |
 | `npm run build`     | Type-check and build the app to `dist/`        |
-| `npm run preview`   | Serve the production build with Vite (proxies `/api`) |
+| `npm run preview`   | Serve the production build with Vite (proxies `/api` and `/mcp`) |
 | `npm test`          | Run the unit, component and server tests (Vitest, no network, no Docker) |
 | `npm run test:watch`| Run the tests in watch mode                    |
 | `npm run typecheck` | Type-check the app, the tooling and the server |
@@ -304,15 +519,23 @@ For headless, scripted checks (screenshots, drag and drop, fake GitHub data inst
 API) there is a Playwright harness. It is mostly used by AI coding agents; see
 [.claude/skills/run-urutau/SKILL.md](.claude/skills/run-urutau/SKILL.md). Its server mode runs the
 real API server on an in-memory SQLite database, creates the admin through the first-run form and
-can open a second signed-in browser for two-user checks such as live updates.
+can open a second signed-in browser for two-user checks such as live updates. For agent
+integrations, `mcp-launcher.mjs` in the same directory starts the server with an in-memory
+database, a development encryption key (it protects nothing) and GitHub answered from the
+fixtures, and logs every request the server makes to GitHub (method, path, and whether an
+`Authorization` header was present, never its value):
+
+```bash
+PORT=8788 node .claude/skills/run-urutau/mcp-launcher.mjs
+```
 
 ## Project structure
 
 ```
 src/
 ├── domain/        Model and pure logic shared with the server (placement, filters, label colors, API types)
-├── github/        GitHub REST client: pagination, error mapping, mapping to domain types, issue creation (createIssue.ts)
-├── api/           Client for the server's /api
+├── github/        GitHub REST client: pagination (paging.ts), error mapping, mapping to domain types, issue creation (createIssue.ts)
+├── api/           Client for the server's /api, including the agent integration admin calls
 ├── state/         Zustand stores: session, settings (token, theme) and the open board
 ├── hooks/         Data fetching (TanStack Query), live updates, theme and URL helpers
 ├── board/         Board UI: buckets, cards, drag and drop, dialogs (including CreateIssueModal.tsx)
@@ -321,13 +544,14 @@ src/
 server/
 ├── main.ts        Starts the server (config, database, shutdown)
 ├── app.ts         The Hono app: middleware and routes
-├── routes/        /api endpoints: auth, invites, users, boards, settings (the switch), events, GitHub reads and issue creation
+├── routes/        /api endpoints: auth, invites, users, agent integrations, boards, settings (the switch), events, GitHub reads and issue creation
 ├── db/            Kysely schema, migrations and one repository module per table
-├── auth/          Passwords, sessions, CSRF and sign-in rate limits
+├── auth/          Passwords, sessions, CSRF, sign-in rate limits, MCP bearer tokens, the secret box for stored GitHub tokens
 ├── oidc/          Keycloak sign-in and GitHub token brokering
 ├── boards/        Validation of board configs
 ├── events/        In-memory publisher for live updates
-├── github/        Allow-list for the GitHub proxy, the rebuilt create-issue request
+├── github/        Allow-list for the GitHub proxy, the rebuilt create-issue request, reader.ts (the MCP endpoint's GitHub reads)
+├── mcp/           The /mcp endpoint, its four tools, board JSON, snapshot cache, move and reorder, locks and call limits
 └── http/          Host allow-list, errors, request helpers
 scripts/           dev.mjs
 compose*.yaml      The app (compose.yaml) and the opt-in test containers
@@ -350,7 +574,8 @@ the UI only uses those types. Adding another provider (GitLab, Gitea, …) means
   on window focus, to stay within the anonymous rate limit. Use **Refresh** to reload. Board
   changes by other people arrive over a server-sent events stream and are not cached that way.
 - **Limits.** At most 1,000 open and 1,000 recently closed issues are loaded per board; a warning
-  is shown when a repository has more. Pull requests are filtered out.
+  is shown when a repository has more. Pull requests are filtered out. The MCP endpoint has its own limits (see
+  [AI agents (MCP)](#ai-agents-mcp)).
 
 ## Roadmap ideas
 

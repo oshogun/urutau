@@ -78,7 +78,7 @@ Read. Browser state (localStorage) persists between requests until the driver st
 | `buckets()` | `[{ title, count, issues: [numbers in display order] }]` |
 | `drag(issue, bucketTitle, { steps = 20 })` | mouse-drag a card to the top of a bucket; returns `buckets()` |
 | `keyboardMove(issue, keys)` | Space on the card's handle, press `keys` (e.g. `['ArrowRight']`), Space |
-| `shot(name, options?)` | screenshot (Playwright options: `fullPage`, `clip`, …); returns the path |
+| `shot(name, options?)` | screenshot (Playwright options: `fullPage`, `clip`, …; `page: other` shoots another page of the context); returns the path |
 | `goto(path)` | open a path of the app, e.g. `goto('/')` for the start page |
 | `createAdmin(username, password, page?)` | server mode, empty database: fill the first-run form, wait until the app leaves it |
 | `signIn(username, password, page?)` | server mode: fill the sign-in form; throws with the form's error text if it stays |
@@ -86,6 +86,8 @@ Read. Browser state (localStorage) persists between requests until the driver st
 | `inviteUser(username, password)` | the admin creates an invite, a new context opens it and creates the second account; returns `newUserContext()`'s value, signed in |
 | `liveMove(issue, bucketTitle, other, { limitMs = 2000 })` | main page drags the card; returns `{ elapsedMs }` until `other.page` shows it in that bucket without reload; throws over the limit or on a page error in `other` |
 | `resetStorage()` | clear the main page's localStorage (theme, v1 data), then reload; boards live on the server, so it neither deletes them nor signs out |
+| `mcp(method, params, token)` | server mode with the launcher: sends one JSON-RPC request to `<appUrl>/mcp` with Playwright's request context (full `Accept` header, bearer `token`) and returns `{ status, ...answer }`, reading the `data:` line of an event-stream answer. Keep the token in a variable inside the script; never return, log or write it |
+| `fixtureGitHubToken` | the fake GitHub token (`github_pat_urutau_fixture_not_a_real_token`) to type into an integration's GitHub-token modal |
 | `page`, `context`, `browser` | raw Playwright objects; `mode` and `appUrl` describe the setup |
 
 The following role-based selectors are verified:
@@ -106,6 +108,11 @@ The following role-based selectors are verified:
 | `acme/readonly` | two open issues; creating an issue answers 403 `Resource not accessible by personal access token` |
 | `acme/limited` | 403 rate-limit error |
 | anything else | 404 (looks like a private repo without a token) |
+
+On a known repository, `PATCH`, `PUT` and `DELETE` answer 405 with `Allow: GET, POST, OPTIONS`. `fixtureFetch` (the fetch-shaped
+export the launcher uses) rejects any URL that does not start with `https://api.github.com/` with
+`TypeError('fixture fetch answers only https://api.github.com')`; a log line from the launcher
+that is not a `GET` (or the issue-create `POST`), or a `TypeError` with that text, means something tried to leave the fixtures.
 
 Creating an issue (`POST /repos/{owner}/{repo}/issues`) works on `acme/widgets` and `acme/empty` with any
 non-empty `Authorization` header (paste `fixture-token` in Settings), answers 401 without one, and keeps the new
@@ -192,6 +199,48 @@ EOS
 ```
 
 Do not write real passwords, session cookies or invite tokens into scripts or screenshot names.
+
+### Server mode with agent integrations (the launcher)
+
+Agent integrations make the server itself read GitHub, so the browser's fixture routing is not
+enough. `.claude/skills/run-urutau/mcp-launcher.mjs` starts the server through `start()` from
+`server/main.ts` with `DATABASE_URL=sqlite::memory:`, `HOST=127.0.0.1`, a development
+`TOKEN_ENCRYPTION_KEY` (`Buffer.alloc(32, 0x75)` in base64, which protects nothing) and a `fetch`
+that answers from `fixtures.mjs`. It writes one stdout line per outbound request,
+`fixture-github <METHOD> <path><query> auth=<present|absent>` (never a header value). With
+`URUTAU_LAUNCHER_NO_KEY=1` it starts without a key, to see the "GitHub tokens cannot be stored" state.
+Use it instead of `node server/main.ts` in the commands above; Vite proxies `/mcp` as well as `/api`.
+
+```bash
+source ~/.nvm/nvm.sh && nvm use >/dev/null
+mkdir -p .claude/scratch/run-urutau .claude/scratch/tmp && export TMPDIR="$PWD/.claude/scratch/tmp"
+PORT=8788 nohup node .claude/skills/run-urutau/mcp-launcher.mjs > .claude/scratch/run-urutau/api.log 2>&1 &
+URUTAU_API_PORT=8788 nohup npx vite --host 127.0.0.1 --port 5174 --strictPort > .claude/scratch/run-urutau/dev.log 2>&1 &
+timeout 60 bash -c 'until curl -sf http://127.0.0.1:5174/api/session >/dev/null; do sleep 1; done'
+APP_URL=http://127.0.0.1:5174 DRIVER_PORT=9334 nohup node .claude/skills/run-urutau/driver.mjs > .claude/scratch/run-urutau/driver.log 2>&1 &
+timeout 60 bash -c 'until curl -sf http://127.0.0.1:9334/health >/dev/null; do sleep 1; done' && echo up
+```
+
+A two-actor check, in one script so the token stays in a variable (the Users page is `?view=users`):
+
+```js
+await goto('/'); await createAdmin('admin', 'correct horse battery')
+await page.goto(appUrl + '/?view=users')
+await page.getByLabel('Integration name').fill('planner-bot')
+await page.getByRole('button', { name: 'Create integration' }).click()
+await page.getByLabel('Token name').fill('agent')
+await page.getByRole('button', { name: 'Create token' }).click()
+await page.waitForFunction(() => document.querySelector('.users__link code, .users__link pre')?.textContent?.startsWith('urutau_mcp_'))
+const token = (await page.locator('.users__link code, .users__link pre').first().innerText()).trim()
+// ... set the GitHub token (fixtureGitHubToken) and the repositories, open the board in
+// context.newPage(), then:
+const moved = await mcp('tools/call', { name: 'move_card', arguments: { repo: 'acme/widgets', issue: 12, bucket: 'todo', position: 'top' } }, token)
+```
+
+`grep -c 'fixture-github \(POST\|PATCH\|PUT\|DELETE\)' api.log` must print 0, and `grep -c api.github.com api.log` too.
+Mask the token tile's `CodeSnippet` text in the page before any screenshot. A full-page screenshot draws
+the fixed header in the middle of the image; use a tall viewport (`page.setViewportSize`) instead.
+Stop with `for port in 9334 5174 8788; do lsof -ti:$port -sTCP:LISTEN | xargs -r kill; done`.
 
 ## Direct invocation (domain logic)
 

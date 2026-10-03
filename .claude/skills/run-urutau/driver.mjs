@@ -19,7 +19,7 @@ import { createServer } from 'node:http'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
-import { routeGitHubFixtures } from './fixtures.mjs'
+import { FIXTURE_GITHUB_TOKEN, routeGitHubFixtures } from './fixtures.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const APP_URL = (process.env.APP_URL ?? 'http://127.0.0.1:5173').replace(/\/+$/, '')
@@ -67,6 +67,8 @@ page.on('response', (response) => {
     github.rateLimitRemaining = Number(remaining)
   }
 })
+
+let mcpId = 0
 
 const cardFor = (issueNumber) =>
   page.locator('.bucket__card').filter({
@@ -130,11 +132,14 @@ const helpers = {
   browser,
   mode: MODE,
   appUrl: APP_URL,
+  /** The fake GitHub token to enter for an agent integration; it is not a real token. */
+  fixtureGitHubToken: FIXTURE_GITHUB_TOKEN,
 
-  /** Screenshot of the viewport (or `{ fullPage: true }`, `{ clip }`, ...); returns the file path. */
+  /** Screenshot of the viewport (or `{ fullPage: true }`, `{ clip }`, ...); returns the file path. `{ page: other }` shoots another page of the context. */
   async shot(name, options = {}) {
+    const { page: target = page, ...rest } = options
     const path = join(SHOTS, `${name}.png`)
-    await page.screenshot({ path, ...options })
+    await target.screenshot({ path, ...rest })
     return path
   },
 
@@ -295,6 +300,31 @@ const helpers = {
     if (other.pageErrors.length > 0) throw new Error(`Second context page errors: ${other.pageErrors.join(' | ')}`)
     if (elapsedMs > limitMs) throw new Error(`Live update took ${elapsedMs} ms, limit ${limitMs} ms`)
     return { elapsedMs }
+  },
+
+  /**
+   * Sends one JSON-RPC request to the MCP endpoint (`<appUrl>/mcp`) through Playwright's
+   * request context, so the bearer token never appears on a command line. Returns the parsed
+   * answer: the `data:` line of an event-stream answer, or the JSON body. `params` may be omitted.
+   * Keep `token` in a variable inside the script; do not return or log it.
+   */
+  async mcp(method, params, token) {
+    const response = await context.request.post(`${APP_URL}/mcp`, {
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        authorization: `Bearer ${token}`,
+      },
+      data: { jsonrpc: '2.0', id: ++mcpId, method, ...(params === undefined ? {} : { params }) },
+    })
+    const text = await response.text()
+    const data = text.split('\n').find((line) => line.startsWith('data:'))
+    const body = data === undefined ? text : data.slice('data:'.length).trim()
+    try {
+      return { status: response.status(), ...JSON.parse(body) }
+    } catch {
+      return { status: response.status(), raw: body.slice(0, 300) }
+    }
   },
 
   /** Clears the main page's localStorage (theme and any v1 data) and reloads. Boards live on the server, so this does not delete them or sign out. */
