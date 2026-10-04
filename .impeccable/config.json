@@ -5,5 +5,20 @@
       "maxFindings": 5,
       "maxChars": 8000
     }
+  },
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "**/src/markdown/issueBody.ts"
+        ],
+        "createdAt": "2026-10-04T07:01:12.376Z",
+        "reason": "Parser for untrusted issue bodies: line 366 is the regular expression /^<img[\\s/>]/i that recognises an img tag in body text so it can become a link; no img element is ever rendered"
+      }
+    ]
   }
 }
