@@ -232,11 +232,28 @@ function ConnectAgent() {
 }
 
 type Dialog =
-  | { kind: 'revoke'; integration: IntegrationSummary; token: ApiTokenSummary }
+  | { kind: 'revoke'; integration: IntegrationSummary; token: ApiTokenSummary; name: string }
   | { kind: 'clear'; integration: IntegrationSummary }
   | { kind: 'remove'; integration: IntegrationSummary }
   | { kind: 'github'; integration: IntegrationSummary }
   | { kind: 'repos'; integration: IntegrationSummary }
+
+/**
+ * A name for each of an integration's tokens that tells them apart: the label and the creation
+ * time as the table shows it. Two tokens with the same label and the same displayed time also get
+ * their position in the list, which is the table's row order.
+ */
+function describeTokens(tokens: ApiTokenSummary[]): Map<string, string> {
+  const described = tokens.map((token) => `${token.label}, created ${formatDateTime(token.createdAt)}`)
+  return new Map(
+    tokens.map((token, index) => [
+      token.id,
+      described.filter((text) => text === described[index]).length > 1
+        ? `${described[index]}, number ${index + 1} of ${tokens.length}`
+        : described[index],
+    ]),
+  )
+}
 
 interface DetailsProps {
   integration: IntegrationSummary
@@ -256,13 +273,22 @@ function IntegrationDetails({ integration, githubTokenStorage, onDialog, onChang
   const [label, setLabel] = useState('')
   const [expiry, setExpiry] = useState('90')
   const [labelError, setLabelError] = useState<string | null>(null)
+  const [labelErrorFocus, setLabelErrorFocus] = useState(0)
   const [creating, setCreating] = useState(false)
   const [issued, setIssued] = useState<{ label: string; secret: string } | null>(null)
   const tile = useRef<HTMLDivElement>(null)
+  const labelInput = useRef<HTMLInputElement>(null)
+  const tokenNames = describeTokens(integration.tokens)
 
   useEffect(() => {
     if (issued) tile.current?.focus()
   }, [issued])
+
+  // The create button is disabled while the request runs, so focus has left it. After a failure it
+  // goes to the name field, once the field has rendered as invalid.
+  useEffect(() => {
+    if (labelErrorFocus > 0) labelInput.current?.focus()
+  }, [labelErrorFocus])
 
   async function createToken() {
     const choice = TOKEN_EXPIRY_CHOICES.find((item) => item.value === expiry)
@@ -279,6 +305,7 @@ function IntegrationDetails({ integration, githubTokenStorage, onDialog, onChang
       onChanged()
     } catch (error) {
       setLabelError(errorText(error))
+      setLabelErrorFocus((n) => n + 1)
     } finally {
       setCreating(false)
     }
@@ -307,24 +334,29 @@ function IntegrationDetails({ integration, githubTokenStorage, onDialog, onChang
               </TableRow>
             </TableHead>
             <TableBody>
-              {integration.tokens.map((token) => (
-                <TableRow key={token.id}>
-                  <TableCell>{token.label}</TableCell>
-                  <TableCell>{formatDateTime(token.createdAt)}</TableCell>
-                  <TableCell>{token.expiresAt ? formatDateTime(token.expiresAt) : 'Never'}</TableCell>
-                  <TableCell>{token.lastUsedAt ? formatDateTime(token.lastUsedAt) : 'Never'}</TableCell>
-                  <TableCell>
-                    <Button
-                      kind="danger--ghost"
-                      size="sm"
-                      aria-label={`Revoke token ${token.label}`}
-                      onClick={(event) => onDialog({ kind: 'revoke', integration, token }, event.currentTarget)}
-                    >
-                      Revoke
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {integration.tokens.map((token) => {
+                const tokenName = tokenNames.get(token.id) ?? token.label
+                return (
+                  <TableRow key={token.id}>
+                    <TableCell>{token.label}</TableCell>
+                    <TableCell>{formatDateTime(token.createdAt)}</TableCell>
+                    <TableCell>{token.expiresAt ? formatDateTime(token.expiresAt) : 'Never'}</TableCell>
+                    <TableCell>{token.lastUsedAt ? formatDateTime(token.lastUsedAt) : 'Never'}</TableCell>
+                    <TableCell>
+                      <Button
+                        kind="danger--ghost"
+                        size="sm"
+                        aria-label={`Revoke token ${tokenName}`}
+                        onClick={(event) =>
+                          onDialog({ kind: 'revoke', integration, token, name: tokenName }, event.currentTarget)
+                        }
+                      >
+                        Revoke
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                  )
+              })}
             </TableBody>
           </Table>
         )}
@@ -337,6 +369,7 @@ function IntegrationDetails({ integration, githubTokenStorage, onDialog, onChang
         >
           <TextInput
             id={`${idPrefix}-token-name`}
+            ref={labelInput}
             labelText="Token name"
             placeholder="laptop"
             required
@@ -460,6 +493,17 @@ function GitHubTokenModal({ integration, launcher, onClose, onSaved }: FormModal
   const [busy, setBusy] = useState(false)
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [generalError, setGeneralError] = useState<string | null>(null)
+  const [errorFocus, setErrorFocus] = useState(0)
+  const field = useRef<HTMLInputElement>(null)
+  const notice = useRef<HTMLDivElement>(null)
+
+  // The save button is disabled while the request runs, so focus has left it. After a failure it
+  // goes to whatever shows the error, once that has rendered.
+  useEffect(() => {
+    if (errorFocus === 0) return
+    if (notice.current) notice.current.focus()
+    else field.current?.focus()
+  }, [errorFocus])
 
   async function save() {
     setBusy(true)
@@ -473,6 +517,7 @@ function GitHubTokenModal({ integration, launcher, onClose, onSaved }: FormModal
       if (code === 'not-a-github-token' || code === 'unsupported-token-format') setFieldError(errorText(error))
       else setGeneralError(errorText(error))
       setBusy(false)
+      setErrorFocus((n) => n + 1)
     }
   }
 
@@ -492,13 +537,15 @@ function GitHubTokenModal({ integration, launcher, onClose, onSaved }: FormModal
       <div className="integrations__modal">
         {isPlainHttp() && <PlainHttpWarning />}
         {generalError && (
-          <InlineNotification
-            role="alert"
-            kind="error"
-            lowContrast
-            hideCloseButton
-            title={generalError}
-          />
+          <div ref={notice} tabIndex={-1}>
+            <InlineNotification
+              role="alert"
+              kind="error"
+              lowContrast
+              hideCloseButton
+              title={generalError}
+            />
+          </div>
         )}
         <p>
           Urutau keeps this token, encrypted, on its server, and uses it only to read issues from
@@ -508,6 +555,7 @@ function GitHubTokenModal({ integration, launcher, onClose, onSaved }: FormModal
         </p>
         <PasswordInput
           id="integration-github-token"
+          ref={field}
           labelText="GitHub token (Urutau keeps this)"
           helperText="Starts with github_pat_ or ghp_."
           autoComplete="new-password"
@@ -523,6 +571,7 @@ function GitHubTokenModal({ integration, launcher, onClose, onSaved }: FormModal
 
 function ReposModal({ integration, launcher, onClose, onSaved }: FormModalProps) {
   const [text, setText] = useState(integration.repos.join('\n'))
+  const field = useRef<HTMLTextAreaElement>(null)
   const save = useMutation({
     mutationFn: () =>
       setIntegrationRepos(integration.id, {
@@ -532,6 +581,8 @@ function ReposModal({ integration, launcher, onClose, onSaved }: FormModalProps)
           .filter((line) => line !== ''),
       }),
     onSuccess: onSaved,
+    // The save button is disabled while the request runs, so focus has left it.
+    onError: () => field.current?.focus(),
   })
 
   return (
@@ -548,6 +599,7 @@ function ReposModal({ integration, launcher, onClose, onSaved }: FormModalProps)
     >
       <TextArea
         id="integration-repos"
+        ref={field}
         labelText="One repository per line, as owner/name"
         rows={8}
         value={text}
@@ -574,15 +626,26 @@ export function IntegrationsSection() {
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [headingFocus, setHeadingFocus] = useState(0)
+  const [nameErrorFocus, setNameErrorFocus] = useState(0)
   const [launcherFocus, setLauncherFocus] = useState(0)
   const launcher = useRef<HTMLElement | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
+  const nameInput = useRef<HTMLInputElement>(null)
+  const loadError = useRef<HTMLDivElement>(null)
+  // Set when this page asked for the refetch itself, so a failure of it takes focus.
+  const focusLoadError = useRef(false)
   // Name of the integration just created, until its row has rendered and taken focus.
   const focusNewRow = useRef<string | null>(null)
 
   useEffect(() => {
     if (headingFocus > 0) heading.current?.focus()
   }, [headingFocus])
+
+  // The create button is disabled while the request runs, so focus has left it. After a failure it
+  // goes to the name field, once the field has rendered as invalid.
+  useEffect(() => {
+    if (nameErrorFocus > 0) nameInput.current?.focus()
+  }, [nameErrorFocus])
 
   // Focus moves in an effect, after the commit that removes the dialog. Moving it
   // while the dialog is still mounted lets Carbon's focus wrap pull it back inside.
@@ -606,9 +669,13 @@ export function IntegrationsSection() {
       setNameError(null)
       setActionError(null)
       setExpanded(integration.id)
+      focusLoadError.current = true
       void refresh()
     },
-    onError: (error) => setNameError(errorText(error)),
+    onError: (error) => {
+      setNameError(errorText(error))
+      setNameErrorFocus((n) => n + 1)
+    },
   })
 
   // The dialogs unmount when closed, so Carbon does not return focus itself.
@@ -660,6 +727,28 @@ export function IntegrationsSection() {
     const names = integrations.data?.integrations.map((item) => item.username) ?? []
     if (!names.includes(focusNewRow.current)) focusNewRow.current = null
   }, [integrations.isFetching, integrations.data])
+  // A failed refetch replaces the table, and the element that had focus with it, so the notice takes
+  // focus when this page asked for the refetch or when focus has fallen to the page. A failed first
+  // load had no table, so focus stays where it is and the alert announces the error. The request
+  // flag is dropped once a fetch ends, so a later failed refetch does not inherit it.
+  useEffect(() => {
+    if (integrations.isFetching) return
+    if (!integrations.isError) {
+      focusLoadError.current = false
+      return
+    }
+    const active = document.activeElement
+    if (focusLoadError.current || (integrations.isRefetchError && (!active || active === document.body))) {
+      loadError.current?.focus()
+    }
+    focusLoadError.current = false
+  }, [
+    integrations.isFetching,
+    integrations.isError,
+    integrations.isRefetchError,
+    integrations.errorUpdatedAt,
+    integrations.dataUpdatedAt,
+  ])
   const githubTokenStorage = integrations.data?.githubTokenStorage ?? true
   const rows = list.map((integration) => ({
     id: integration.id,
@@ -712,6 +801,7 @@ export function IntegrationsSection() {
       >
         <TextInput
           id="integration-name"
+          ref={nameInput}
           labelText="Integration name"
           helperText="3 to 32 letters, digits, dots, dashes or underscores. People and integrations share names."
           value={name}
@@ -730,14 +820,16 @@ export function IntegrationsSection() {
       {integrations.isPending ? (
         <DataTableSkeleton columnCount={5} rowCount={2} showHeader={false} showToolbar={false} />
       ) : integrations.isError ? (
-        <InlineNotification
-          role="alert"
-          kind="error"
-          lowContrast
-          hideCloseButton
-          title="Could not load the integrations."
-          subtitle={integrations.error.message}
-        />
+        <div ref={loadError} tabIndex={-1}>
+          <InlineNotification
+            role="alert"
+            kind="error"
+            lowContrast
+            hideCloseButton
+            title="Could not load the integrations."
+            subtitle={integrations.error.message}
+          />
+        </div>
       ) : list.length === 0 ? (
         <p className="users__empty">No agent integrations yet.</p>
       ) : (
@@ -828,7 +920,7 @@ export function IntegrationsSection() {
           launcherButtonRef={launcher}
           modalHeading={
             dialog.kind === 'revoke'
-              ? `Revoke ${dialog.token.label}?`
+              ? `Revoke ${dialog.name}?`
               : dialog.kind === 'clear'
                 ? `Clear the GitHub token of ${dialog.integration.username}?`
                 : `Remove ${dialog.integration.username}?`

@@ -4,10 +4,12 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import v1Export from './board/fixtures/v1-board-export.json'
+import { formatDateTime } from './components/auth/format'
 import { createDefaultBoard } from './domain/board'
 import type { StoredBoard } from './domain/api'
 import type { BoardConfig } from './domain/types'
 import { bindQueryClient } from './hooks/useBoardList'
+import { INTEGRATIONS_QUERY_KEY } from './api/admin'
 import { useSession } from './state/session'
 import { useSettings } from './state/settings'
 import { installApiStub, stubCreatedIssue } from './test/apiStub'
@@ -622,7 +624,8 @@ describe('App', () => {
       expect(screen.queryByText(text)).not.toBeInTheDocument()
       expect(cached(text)).toEqual([])
       await user.click(screen.getByRole('button', { name: 'Show details of planner-bot' }))
-      expect(await screen.findByRole('button', { name: 'Revoke token laptop' })).toBeInTheDocument()
+      const created = formatDateTime(stub.integrations[0].tokens[0].createdAt)
+      expect(await screen.findByRole('button', { name: `Revoke token laptop, created ${created}` })).toBeInTheDocument()
       expect(screen.queryByText(text)).not.toBeInTheDocument()
     })
 
@@ -653,13 +656,181 @@ describe('App', () => {
       renderApp('?view=users', { integrations: [planner] })
       await issueToken(user)
 
-      await user.click(screen.getByRole('button', { name: 'Revoke token laptop' }))
-      expect(await screen.findByText('Revoke laptop?')).toBeInTheDocument()
+      const created = formatDateTime(stub.integrations[0].tokens[0].createdAt)
+      await user.click(screen.getByRole('button', { name: `Revoke token laptop, created ${created}` }))
+      expect(await screen.findByText(`Revoke laptop, created ${created}?`)).toBeInTheDocument()
       expect(document.querySelector('.cds--modal--danger')).not.toBeNull()
       expect(screen.getByText(/Agents using this token stop working at once/)).toBeInTheDocument()
       await user.click(screen.getByRole('button', { name: 'Revoke token' }))
 
       await waitFor(() => expect(stub.integrations[0].tokens).toEqual([]))
+      await waitFor(() => expect(screen.getByRole('heading', { name: 'Agent integrations' })).toHaveFocus())
+    })
+
+    it('names each token by its creation time so same-label tokens differ, in the buttons and the dialog', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await screen.findByRole('button', { name: 'Show details of planner-bot' })
+      const first = '2026-09-30T08:15:00.000Z'
+      const second = '2026-10-02T17:40:00.000Z'
+      stub.integrations[0].tokens.push(
+        { id: 'token-a', label: 'desk', createdAt: first, expiresAt: null, lastUsedAt: null },
+        { id: 'token-b', label: 'desk', createdAt: second, expiresAt: null, lastUsedAt: null },
+      )
+      await queryClient.invalidateQueries({ queryKey: INTEGRATIONS_QUERY_KEY })
+      await expand(user)
+
+      const buttons = await screen.findAllByRole('button', { name: /^Revoke token desk/ })
+      const names = buttons.map((button) => button.getAttribute('aria-label'))
+      expect(names).toEqual([
+        `Revoke token desk, created ${formatDateTime(first)}`,
+        `Revoke token desk, created ${formatDateTime(second)}`,
+      ])
+      expect(new Set(names).size).toBe(2)
+      const table = screen.getByRole('table', { name: 'Tokens of planner-bot' })
+      expect(within(table).getByText(formatDateTime(first))).toBeInTheDocument()
+      expect(within(table).getByText(formatDateTime(second))).toBeInTheDocument()
+
+      for (const [button, at] of [[buttons[1], second], [buttons[0], first]] as const) {
+        await user.click(button)
+        expect(await screen.findByText(`Revoke desk, created ${formatDateTime(at)}?`)).toBeInTheDocument()
+        await user.click(screen.getByRole('button', { name: 'Cancel' }))
+        await waitFor(() => expect(screen.queryByText(/^Revoke desk, created/)).not.toBeInTheDocument())
+      }
+    })
+
+    it('adds the position when two same-label tokens show the same creation time', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await screen.findByRole('button', { name: 'Show details of planner-bot' })
+      const at = '2026-10-02T17:40:05.000Z'
+      stub.integrations[0].tokens.push(
+        { id: 'token-a', label: 'desk', createdAt: at, expiresAt: null, lastUsedAt: null },
+        { id: 'token-b', label: 'desk', createdAt: '2026-10-02T17:40:35.000Z', expiresAt: null, lastUsedAt: null },
+        { id: 'token-c', label: 'other', createdAt: at, expiresAt: null, lastUsedAt: null },
+      )
+      await queryClient.invalidateQueries({ queryKey: INTEGRATIONS_QUERY_KEY })
+      await expand(user)
+
+      const when = formatDateTime(at)
+      const buttons = await screen.findAllByRole('button', { name: /^Revoke token / })
+      const names = buttons.map((button) => button.getAttribute('aria-label'))
+      expect(names).toEqual([
+        `Revoke token desk, created ${when}, number 1 of 3`,
+        `Revoke token desk, created ${when}, number 2 of 3`,
+        `Revoke token other, created ${when}`,
+      ])
+      await user.click(buttons[1])
+      expect(await screen.findByText(`Revoke desk, created ${when}, number 2 of 3?`)).toBeInTheDocument()
+    })
+
+    it('moves focus to the name field when creating an integration fails with a 409', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await screen.findByRole('button', { name: 'Show details of planner-bot' })
+
+      stub.failNext('POST integrations', { status: 409, error: 'username-taken', message: 'That username is already taken.' })
+      await user.type(screen.getByLabelText('Integration name'), 'second-bot')
+      await user.click(screen.getByRole('button', { name: 'Create integration' }))
+
+      const field = await screen.findByLabelText('Integration name')
+      await waitFor(() => expect(field).toHaveAttribute('aria-invalid', 'true'))
+      expect(screen.getByText('That username is already taken.')).toBeInTheDocument()
+      await waitFor(() => expect(document.activeElement).toBe(field))
+    })
+
+    it('moves focus into the dialog field when the GitHub token is rejected', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+
+      await user.click(await screen.findByRole('button', { name: 'Replace GitHub token for planner-bot' }))
+      const field = await screen.findByLabelText('GitHub token (Urutau keeps this)')
+      await user.click(field)
+      await user.paste('urutau_mcp_' + 'A'.repeat(43))
+      const save = screen.getByRole('button', { name: 'Save GitHub token' })
+      await user.click(save)
+
+      expect(await screen.findByText('This is an Urutau MCP token, not a GitHub token.')).toBeInTheDocument()
+      expect(field).toHaveAttribute('aria-invalid', 'true')
+      await waitFor(() => expect(document.activeElement).toBe(field))
+      expect(field.closest('[role="dialog"]')).not.toBeNull()
+    })
+
+    it('moves focus to the notice when a failed GitHub token save shows a general error', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+
+      await user.click(await screen.findByRole('button', { name: 'Replace GitHub token for planner-bot' }))
+      const field = await screen.findByLabelText('GitHub token (Urutau keeps this)')
+      await user.click(field)
+      await user.paste(GITHUB_TOKEN)
+      stub.failNext(`PUT integrations/${stub.integrations[0].id}/github-token`, { status: 500, error: 'server-error', message: 'The database is down.' })
+      await user.click(screen.getByRole('button', { name: 'Save GitHub token' }))
+
+      const alert = (await screen.findByText('The database is down.')).closest('[role="alert"]') as HTMLElement
+      await waitFor(() => expect(alert.parentElement).toHaveFocus())
+      expect(alert.closest('[role="dialog"]')).not.toBeNull()
+    })
+
+    it('moves focus to the error notice when the list refetch after a create fails', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await screen.findByRole('button', { name: 'Show details of planner-bot' })
+
+      stub.failNext('GET integrations', { status: 500, error: 'server-error', message: 'The database is down.' })
+      await user.type(screen.getByLabelText('Integration name'), 'second-bot')
+      await user.click(screen.getByRole('button', { name: 'Create integration' }))
+
+      const notice = (await screen.findByText('Could not load the integrations.')).closest('[role="alert"]')
+      expect(notice).not.toBeNull()
+      expect(screen.queryByRole('table', { name: 'Agent integrations' })).not.toBeInTheDocument()
+      await waitFor(() => expect(document.activeElement).toBe(notice?.parentElement))
+      expect(document.activeElement).not.toBe(document.body)
+    })
+
+    it('leaves focus alone when the first load of the integrations list fails', async () => {
+      renderApp('?view=users', { integrations: [planner] })
+      stub.failNext('GET integrations', { status: 500, error: 'server-error', message: 'The database is down.' })
+
+      const notice = (await screen.findByText('Could not load the integrations.')).closest('[role="alert"]')
+      expect(notice).not.toBeNull()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(notice?.parentElement).not.toHaveFocus()
+    })
+
+    it('moves focus to the error notice when a create succeeds after a failed first load and its refetch fails', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      stub.failNext('GET integrations', { status: 500, error: 'server-error', message: 'The database is down.' }, 2)
+      await screen.findByText('Could not load the integrations.')
+
+      await user.type(screen.getByLabelText('Integration name'), 'third-bot')
+      await user.click(screen.getByRole('button', { name: 'Create integration' }))
+
+      await waitFor(() => expect(stub.requests('POST integrations')).toHaveLength(1))
+      const notice = (await screen.findByText('Could not load the integrations.')).closest('[role="alert"]')
+      expect(notice).not.toBeNull()
+      await waitFor(() => expect(document.activeElement).toBe(notice?.parentElement))
+    })
+
+    it('leaves focus on the heading when a revoke refetch fails after an earlier successful create', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await screen.findByRole('button', { name: 'Show details of planner-bot' })
+      await user.type(screen.getByLabelText('Integration name'), 'second-bot')
+      await user.click(screen.getByRole('button', { name: 'Create integration' }))
+      await screen.findByRole('button', { name: 'Show details of second-bot' })
+
+      stub.integrations[0].tokens.push({ id: 'token-a', label: 'desk', createdAt: '2026-10-02T17:40:05.000Z', expiresAt: null, lastUsedAt: null })
+      await queryClient.invalidateQueries({ queryKey: INTEGRATIONS_QUERY_KEY })
+      await expand(user)
+      await user.click(await screen.findByRole('button', { name: /^Revoke token desk/ }))
+      stub.failNext('GET integrations', { status: 500, error: 'server-error', message: 'The database is down.' })
+      await user.click(await screen.findByRole('button', { name: 'Revoke token' }))
+
+      await screen.findByText('Could not load the integrations.')
       await waitFor(() => expect(screen.getByRole('heading', { name: 'Agent integrations' })).toHaveFocus())
     })
 
