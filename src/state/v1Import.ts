@@ -82,7 +82,9 @@ export function isV1ImportPending(): boolean {
 
 /** This browser's v1 board for `key`, whatever the marker says; null when absent or invalid. */
 export function readStoredV1Board(key: string): BoardConfig | null {
-  const board = readBoards()[key.toLowerCase()] ?? readBoards()[key]
+  const boards = readBoards()
+  const stored = [key.toLowerCase(), key].find((candidate) => Object.hasOwn(boards, candidate))
+  const board = stored === undefined ? undefined : boards[stored]
   return isBoardConfig(board) ? board : null
 }
 

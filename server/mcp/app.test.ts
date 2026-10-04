@@ -346,3 +346,63 @@ describe('changing the repository list during a call', () => {
     expect(published[0].data).toMatchObject({ repoKey: REPO, version: before + 1 })
   })
 })
+
+describe('bucket ids that are Object.prototype keys', () => {
+  const IDS = [...new Set([...Object.getOwnPropertyNames(Object.prototype), '__proto__'])]
+
+  function prototypeBoard(): BoardConfig {
+    return {
+      version: 1,
+      buckets: [
+        ...IDS.map((id) => ({ id, title: id, wipLimit: null, labelRules: [], collectsClosed: false })),
+        { id: 'done', title: 'Done', wipLimit: null, labelRules: [], collectsClosed: true },
+      ],
+      placements: { 1: '__proto__', 2: '__proto__', 3: 'constructor' },
+      order: Object.fromEntries([['__proto__', [2, 1]], ['constructor', [3]], ['toString', [1]]]),
+      closedWindowDays: 14,
+    }
+  }
+
+  const cardNumbers = (board: GetBoardJson, id: string) => board.buckets.find((bucket) => bucket.id === id)?.cards.map((card) => card.number)
+
+  test('the boards route saves and returns the same buckets, order and placements', async () => {
+    await setUp({ board: prototypeBoard() })
+    const stored = parse<StoredBoard>(await (await h.get(`/api/boards/${REPO}`)).text())
+    expect(stored.board.buckets).toEqual(prototypeBoard().buckets)
+    expect(Object.entries(stored.board.order)).toEqual(Object.entries(prototypeBoard().order))
+    expect(stored.board.placements).toEqual(prototypeBoard().placements)
+    expect(Object.hasOwn(stored.board.order, '__proto__')).toBe(true)
+    expect(Object.getPrototypeOf(stored.board.order)).toBe(Object.prototype)
+
+    const saved = await h.put(`/api/boards/${REPO}`, { baseVersion: 1, fullName: REPO, board: stored.board })
+    expect(saved.status).toBe(200)
+  })
+
+  test('get_board, move_card and reorder_bucket work for every such id', async () => {
+    const { agent } = await setUp({ board: prototypeBoard() })
+    const read = await agent.bearer.tool('get_board', { repo: REPO })
+    expect(read.isError).toBe(false)
+    const board = read.structured as unknown as GetBoardJson
+    expect(board.buckets.map((bucket) => bucket.id)).toEqual([...IDS, 'done'])
+    expect(cardNumbers(board, '__proto__')).toEqual([2, 1])
+    expect(cardNumbers(board, 'constructor')).toEqual([3])
+    expect(cardNumbers(board, 'toString')).toEqual([])
+
+    const reordered = await agent.bearer.tool('reorder_bucket', { repo: REPO, bucket: '__proto__', order: [1, 2] })
+    expect(reordered.isError).toBe(false)
+    expect(reordered.structured).toMatchObject({ bucket: '__proto__', order: [1, 2] })
+
+    for (const id of IDS) {
+      const moved = await agent.bearer.tool('move_card', { repo: REPO, issue: 1, bucket: id, position: 'top' })
+      expect(moved.isError, id).toBe(false)
+      expect(moved.structured as unknown as MoveCardJson).toMatchObject({ issue: 1, to: id, index: 0 })
+    }
+
+    const stored = (await getBoard(h.database.db, REPO))!
+    expect(Object.getPrototypeOf(stored.board.order)).toBe(Object.prototype)
+    expect(Object.getPrototypeOf(stored.board.placements)).toBe(Object.prototype)
+    expect(stored.board.placements[1]).toBe(IDS[IDS.length - 1])
+    const after = (await agent.bearer.tool('get_board', { repo: REPO })).structured as unknown as GetBoardJson
+    expect(cardNumbers(after, IDS[IDS.length - 1])?.[0]).toBe(1)
+  })
+})

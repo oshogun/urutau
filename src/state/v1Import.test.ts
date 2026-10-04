@@ -126,4 +126,27 @@ describe('v1 import', () => {
     localStorage.setItem('urutau:boards', JSON.stringify({ state: { boards: [1] }, version: 1 }))
     expect(isV1ImportPending()).toBe(false)
   })
+
+  it('reads and imports v1 boards whose bucket ids are Object.prototype keys', async () => {
+    const ids = [...new Set([...Object.getOwnPropertyNames(Object.prototype), '__proto__'])]
+    const buckets = ids.map((id) => makeBucket(id))
+    const config = {
+      ...makeBoard(buckets),
+      placements: { 1: '__proto__' },
+      order: Object.fromEntries(ids.map((id) => [id, [1, 2]])),
+    }
+    const stub = await signedIn()
+    storeV1({ 'acme/widgets': config })
+
+    const read = readV1Board('acme/widgets')
+    expect(read?.buckets.map((bucket) => bucket.id)).toEqual(ids)
+    expect(Object.keys(read?.order ?? {})).toEqual(ids)
+    expect(Object.getPrototypeOf(read?.order)).toBe(Object.prototype)
+    expect(readV1Board('constructor')).toBeNull()
+    expect(readV1Board('hasOwnProperty')).toBeNull()
+
+    await importV1Boards()
+    const posted = stub.requests('POST boards/import')[0].body as { boards: Record<string, typeof config> }
+    expect(Object.keys(posted.boards['acme/widgets'].order)).toEqual(ids)
+  })
 })

@@ -305,6 +305,16 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     },
   })
 
+  /** Usernames are unique across people and agent integrations, ignoring case, as on the server. */
+  const usernameTaken = (username: string): boolean => {
+    const lower = username.toLowerCase()
+    return (
+      accounts.some((a) => a.user.username.toLowerCase() === lower) ||
+      integrations.some((i) => i.username.toLowerCase() === lower)
+    )
+  }
+  const takenUsername = () => error(409, 'username-taken', 'That username is already taken.')
+
   const mode = options.session ?? 'signed-in'
   if (mode !== 'first-run') {
     const base = makeAccount(options.user?.username ?? 'ada', DEFAULT_PASSWORD, options.user?.isAdmin ?? true)
@@ -415,10 +425,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/.test(username)) {
           return error(400, 'invalid-request', 'The username must be 3 to 32 characters: letters, digits, dots, dashes and underscores, starting with a letter or digit.')
         }
-        const lower = username.toLowerCase()
-        if (accounts.some((a) => a.user.username.toLowerCase() === lower) || integrations.some((i) => i.username.toLowerCase() === lower)) {
-          return error(409, 'username-taken', 'That username is already taken.')
-        }
+        if (usernameTaken(username)) return takenUsername()
         const integration: IntegrationSummary = {
           id: `integration-${nextId++}`,
           username,
@@ -528,6 +535,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
       if (!credentials?.username || !credentials.password) {
         return error(400, 'invalid-request', 'Username and password are required.')
       }
+      if (usernameTaken(credentials.username)) return takenUsername()
       const account = makeAccount(credentials.username, credentials.password, true)
       accounts.push(account)
       return toResponse(201, startSession(account))
@@ -556,9 +564,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
       if (!accept.username || !accept.password) {
         return error(400, 'invalid-request', 'Username and password are required.')
       }
-      if (accounts.some((a) => a.user.username.toLowerCase() === accept.username.toLowerCase())) {
-        return error(409, 'username-taken', 'That username is taken.')
-      }
+      if (usernameTaken(accept.username)) return takenUsername()
       invites.splice(invites.indexOf(invite), 1)
       const account = makeAccount(accept.username, accept.password, false)
       accounts.push(account)

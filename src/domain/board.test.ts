@@ -508,3 +508,148 @@ describe('keepUnseenOrder', () => {
     expect(final.order.todo).toEqual([3, 7, 500])
   })
 })
+
+const PROTOTYPE_IDS = [...new Set([...Object.getOwnPropertyNames(Object.prototype), '__proto__'])]
+
+/** A board whose bucket ids are `ids`, with cards 1 and 2 placed by hand in the second one. */
+function prototypeBoard(ids: [string, string, string]): BoardConfig {
+  const [first, second, third] = ids
+  const config = makeBoard([makeBucket(first), makeBucket(second), makeBucket(third, { collectsClosed: true })])
+  return {
+    ...config,
+    placements: { 1: second, 2: second },
+    order: Object.fromEntries([
+      [second, [2, 1]],
+      [first, [4, 3]],
+    ]),
+  }
+}
+
+const prototypeIssues = () => [makeIssue(1), makeIssue(2), makeIssue(3), makeIssue(4), makeIssue(5, { state: 'closed' })]
+
+function expectPlainMaps(config: BoardConfig) {
+  expect(Object.getPrototypeOf(config.order)).toBe(Object.prototype)
+  expect(Object.getPrototypeOf(config.placements)).toBe(Object.prototype)
+}
+
+describe.each(PROTOTYPE_IDS)('a bucket id of %s', (name) => {
+  const ordinary = prototypeBoard(['ids-a', 'ids-b', 'ids-c'])
+  const special = prototypeBoard([name, `${name}-2`, 'ids-c'])
+  const renamed = prototypeBoard(['ids-a', name, 'ids-c'])
+  const numbers = (config: BoardConfig, issues: Issue[]) =>
+    [...resolveBuckets(issues, config).values()].map((list) => list.map((issue) => issue.number))
+
+  it('resolves to the same cards and order as an ordinary id', () => {
+    const issues = prototypeIssues()
+    expect(numbers(special, issues)).toEqual(numbers(ordinary, issues))
+    expect(numbers(renamed, issues)).toEqual(numbers(ordinary, issues))
+    expect(numbersIn(renamed, issues, name)).toEqual([2, 1])
+    expect(numbersIn(special, issues, name)).toEqual([4, 3])
+  })
+
+  it('sorts a bucket without hand order by activity when only the prototype has the key', () => {
+    const config = makeBoard([makeBucket(name), makeBucket('other', { collectsClosed: true })])
+    expect(numbersIn(config, [makeIssue(1), makeIssue(2)], name)).toEqual([2, 1])
+  })
+
+  it('moves a card into the bucket, within it and out of it, keeping plain maps', () => {
+    const issues = prototypeIssues()
+    let config = moveIssue(renamed, issues, 3, name, 2)
+    expect(numbersIn(config, issues, name)).toEqual([3, 2, 1])
+    expect(Object.hasOwn(config.order, name)).toBe(true)
+    expect(config.placements[3]).toBe(name)
+    expectPlainMaps(config)
+
+    config = moveIssue(config, issues, 1, name, 3)
+    expect(numbersIn(config, issues, name)).toEqual([1, 3, 2])
+
+    config = moveIssue(config, issues, 1, 'ids-a', null)
+    expect(numbersIn(config, issues, name)).toEqual([3, 2])
+    expect(numbersIn(config, issues, 'ids-a')).toEqual([4, 1])
+    expectPlainMaps(config)
+  })
+
+  it('moves with moveIssueTo and reorders with reorderBucket and keepUnseenOrder', () => {
+    const issues = prototypeIssues()
+    const moved = moveIssueTo(renamed, issues, 4, name, 'top', null)
+    expect(moved.expected).toEqual([4, 2, 1])
+    expectPlainMaps(moved.config)
+
+    const reordered = reorderBucket(renamed, issues, name, [1])
+    expect(reordered.expected).toEqual([1, 2])
+    expect(Object.hasOwn(reordered.config.order, name)).toBe(true)
+    expectPlainMaps(reordered.config)
+
+    const kept = keepUnseenOrder(renamed, reordered.config, name, new Set([1, 2]), {
+      truncated: true,
+      highestNumber: 2,
+      moved: new Set([1]),
+      unseenBeforeMoved: false,
+    })
+    expectPlainMaps(kept)
+    expect(kept.order[name]).toEqual([1, 2])
+
+    const putBack = keepUnseenOrder(
+      { ...renamed, order: Object.fromEntries([[name, [20, 2, 1]]]) },
+      reordered.config,
+      name,
+      new Set([1, 2]),
+      { truncated: false, highestNumber: 5, moved: new Set([1]), unseenBeforeMoved: false },
+    )
+    expect(putBack).not.toBe(reordered.config)
+    expect(putBack.order[name]).toEqual([1, 20, 2])
+    expect(Object.hasOwn(putBack.order, name)).toBe(true)
+    expectPlainMaps(putBack)
+  })
+
+  it('places a new issue at the top and deletes the bucket', () => {
+    const issues = prototypeIssues()
+    const placed = placeNewIssue(renamed, 9, name)
+    expect(placed.order[name]).toEqual([9, 2, 1])
+    expect(placed.placements[9]).toBe(name)
+    expectPlainMaps(placed)
+
+    const fresh = placeNewIssue(ordinary, 9, 'ids-b')
+    expect(placeNewIssue(makeBoard([makeBucket(name)]), 9, name).order[name]).toEqual([9])
+    expect(fresh.order['ids-b']).toEqual([9, ...(ordinary.order['ids-b'] ?? [])])
+
+    const deleted = deleteBucket(renamed, name)
+    expect(Object.hasOwn(deleted.order, name)).toBe(false)
+    expect(Object.values(deleted.placements)).not.toContain(name)
+    expect(deleted.buckets.map((bucket) => bucket.id)).toEqual(['ids-a', 'ids-c'])
+    expectPlainMaps(deleted)
+    expect(numbersIn(deleted, issues, 'ids-a')).toEqual([4, 3, 2, 1])
+  })
+
+  it('survives a JSON round trip, the import check and an export file', () => {
+    const parsed: unknown = JSON.parse(JSON.stringify(renamed))
+    expect(isBoardConfig(parsed)).toBe(true)
+    const config = parsed as BoardConfig
+    expect(config.buckets).toEqual(renamed.buckets)
+    expect(Object.entries(config.order)).toEqual(Object.entries(renamed.order))
+    expect(config.placements).toEqual(renamed.placements)
+    expect(Object.hasOwn(config.order, name)).toBe(true)
+    expectPlainMaps(config)
+
+    const file: unknown = JSON.parse(JSON.stringify(toBoardExport(renamed, 'acme/widgets')))
+    expect(boardFromExport(file, 'Acme/Widgets')).toEqual(renamed)
+    const elsewhere = boardFromExport(file, 'other/repo')
+    expect(elsewhere?.buckets).toEqual(renamed.buckets)
+    expect(elsewhere?.order).toEqual({})
+  })
+})
+
+describe('a bucket id that names an array property', () => {
+  const config = {
+    ...makeBoard([makeBucket('length'), makeBucket('other', { collectsClosed: true })]),
+    order: [],
+  } as unknown as BoardConfig
+  const issues = [makeIssue(1), makeIssue(2)]
+
+  it('does not throw when order is an array', () => {
+    expect(isBoardConfig(JSON.parse(JSON.stringify(config)))).toBe(true)
+    expect(() => resolveBuckets(issues, config)).not.toThrow()
+    expect(() => moveIssue(config, issues, 1, 'length', null)).not.toThrow()
+    expect(() => placeNewIssue(config, 9, 'length')).not.toThrow()
+  })
+})

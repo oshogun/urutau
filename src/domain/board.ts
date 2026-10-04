@@ -61,6 +61,28 @@ export function newBucketId(): string {
   return `bucket-${crypto.randomUUID().slice(0, 8)}`
 }
 
+/**
+ * The hand order stored for a bucket, or undefined when there is none. Bucket ids are free text
+ * (`constructor` and `__proto__` are valid), so only the map's own keys count.
+ */
+function storedOrderOf(order: BoardConfig['order'], bucketId: string): number[] | undefined {
+  const value = Object.hasOwn(order, bucketId) ? order[bucketId] : undefined
+  return Array.isArray(value) ? value : undefined
+}
+
+/**
+ * `order` without `issueNumber` in any list. Keys become own properties, so a bucket id of
+ * `__proto__` does not change the prototype of the result.
+ */
+function orderWithout(order: BoardConfig['order'], issueNumber: number): BoardConfig['order'] {
+  return Object.fromEntries(
+    Object.entries(order).map(([bucketId, numbers]) => [
+      bucketId,
+      numbers.filter((number) => number !== issueNumber),
+    ]),
+  )
+}
+
 /** Issues in each bucket (keyed by bucket id), in display order. */
 export type BucketContents = Map<string, Issue[]>
 
@@ -85,7 +107,7 @@ export function resolveBuckets(issues: Issue[], config: BoardConfig): BucketCont
     if (bucketId) contents.get(bucketId)?.push(issue)
   }
   for (const [bucketId, list] of contents) {
-    sortBucket(list, config.order[bucketId])
+    sortBucket(list, storedOrderOf(config.order, bucketId))
   }
   return contents
 }
@@ -150,11 +172,7 @@ export function moveIssue(
   const beforeIndex = beforeIssueNumber === null ? -1 : target.indexOf(beforeIssueNumber)
   target.splice(beforeIndex === -1 ? target.length : beforeIndex, 0, issueNumber)
 
-  const order: Record<string, number[]> = {}
-  for (const [bucketId, numbers] of Object.entries(config.order)) {
-    order[bucketId] = numbers.filter((number) => number !== issueNumber)
-  }
-  order[toBucketId] = target
+  const order = { ...orderWithout(config.order, issueNumber), [toBucketId]: target }
 
   const placements =
     fromBucketId === toBucketId
@@ -287,8 +305,8 @@ export function keepUnseenOrder(
   seen: ReadonlySet<number>,
   options: UnseenOrderOptions,
 ): BoardConfig {
-  const storedOrder = stored.order[bucketId] ?? []
-  const result = [...(next.order[bucketId] ?? [])]
+  const storedOrder = storedOrderOf(stored.order, bucketId) ?? []
+  const result = [...(storedOrderOf(next.order, bucketId) ?? [])]
   let kept = false
 
   for (let i = storedOrder.length - 1; i >= 0; i--) {
@@ -325,11 +343,8 @@ export function keepUnseenOrder(
 export function placeNewIssue(config: BoardConfig, issueNumber: number, bucketId: string): BoardConfig {
   if (!config.buckets.some((bucket) => bucket.id === bucketId)) return config
 
-  const order: Record<string, number[]> = {}
-  for (const [id, numbers] of Object.entries(config.order)) {
-    order[id] = numbers.filter((number) => number !== issueNumber)
-  }
-  order[bucketId] = [issueNumber, ...(order[bucketId] ?? [])]
+  const others = orderWithout(config.order, issueNumber)
+  const order = { ...others, [bucketId]: [issueNumber, ...(storedOrderOf(others, bucketId) ?? [])] }
 
   return { ...config, placements: { ...config.placements, [issueNumber]: bucketId }, order }
 }
