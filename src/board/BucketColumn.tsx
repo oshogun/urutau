@@ -24,6 +24,7 @@ interface BucketColumnProps {
   onEdit: () => void
   onMoveBucket: (offset: -1 | 1) => void
   onDelete: () => void
+  onOpenIssue: (issue: Issue, launcher: HTMLButtonElement) => void
   /** Given only to buckets that can take a new issue; gets the button, so focus can return to it. */
   onCreateIssue?: (launcher: HTMLButtonElement | null) => void
 }
@@ -40,6 +41,7 @@ export function BucketColumn({
   onEdit,
   onMoveBucket,
   onDelete,
+  onOpenIssue,
   onCreateIssue,
 }: BucketColumnProps) {
   const createButton = useRef<HTMLButtonElement>(null)
@@ -150,6 +152,7 @@ export function BucketColumn({
                   labelsByName={labelsByName}
                   moveTargets={moveTargets}
                   onMoveTo={(bucketId) => onMoveIssue(issue.number, bucketId)}
+                  onOpenDetails={(launcher) => onOpenIssue(issue, launcher)}
                 />
               ) : null
             })}
@@ -170,9 +173,10 @@ interface SortableIssueCardProps {
   labelsByName: ReadonlyMap<string, Label>
   moveTargets: Bucket[]
   onMoveTo: (bucketId: string) => void
+  onOpenDetails: (launcher: HTMLButtonElement) => void
 }
 
-function SortableIssueCard({ issue, labelsByName, moveTargets, onMoveTo }: SortableIssueCardProps) {
+function SortableIssueCard({ issue, labelsByName, moveTargets, onMoveTo, onOpenDetails }: SortableIssueCardProps) {
   const closed = issue.state === 'closed'
   const {
     attributes,
@@ -200,6 +204,7 @@ function SortableIssueCard({ issue, labelsByName, moveTargets, onMoveTo }: Sorta
         onMoveTo={onMoveTo}
         handleAttributes={closed ? undefined : attributes}
         handleRef={setActivatorNodeRef}
+        onOpenDetails={onOpenDetails}
       />
     </li>
   )

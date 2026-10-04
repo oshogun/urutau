@@ -1,8 +1,9 @@
-import { Chat, Draggable, Milestone } from '@carbon/icons-react'
-import { OverflowMenu, OverflowMenuItem, Tag, Tile } from '@carbon/react'
+import { Chat, Draggable, Maximize, Milestone } from '@carbon/icons-react'
+import { Button, OverflowMenu, OverflowMenuItem, Tag, Tile } from '@carbon/react'
 import type { HTMLAttributes } from 'react'
 import { labelFor } from '../domain/labels'
 import type { Bucket, Issue, Label } from '../domain/types'
+import { avatarSrc, issueStateTag } from './issueDisplay'
 import { LabelTag } from './LabelTag'
 
 interface IssueCardProps {
@@ -15,6 +16,8 @@ interface IssueCardProps {
   handleAttributes?: HTMLAttributes<HTMLButtonElement>
   handleRef?: (element: HTMLElement | null) => void
   isOverlay?: boolean
+  /** When given and `isOverlay` is false, the card shows the details button. */
+  onOpenDetails?: (launcher: HTMLButtonElement) => void
 }
 
 const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
@@ -27,10 +30,6 @@ function timeAgo(iso: string): string {
   return relativeTime.format(Math.round(days / 365), 'year')
 }
 
-function avatarSrc(url: string): string {
-  return `${url}${url.includes('?') ? '&' : '?'}s=40`
-}
-
 export function IssueCard({
   issue,
   labelsByName,
@@ -39,8 +38,10 @@ export function IssueCard({
   handleAttributes,
   handleRef,
   isOverlay = false,
+  onOpenDetails,
 }: IssueCardProps) {
   const closed = issue.state === 'closed'
+  const tag = issueStateTag(issue.state, issue.stateReason)
   const className = ['issue-card', closed && 'issue-card--closed', isOverlay && 'issue-card--overlay']
     .filter(Boolean)
     .join(' ')
@@ -69,9 +70,22 @@ export function IssueCard({
           </span>
         </span>
         {closed && (
-          <Tag size="sm" type={issue.stateReason === 'not_planned' ? 'gray' : 'purple'}>
-            {issue.stateReason === 'not_planned' ? 'Not planned' : 'Closed'}
+          <Tag size="sm" type={tag.type}>
+            {tag.short}
           </Tag>
+        )}
+        {onOpenDetails && !isOverlay && (
+          <Button
+            className="issue-card__details"
+            data-issue-details={issue.number}
+            kind="ghost"
+            size="sm"
+            hasIconOnly
+            renderIcon={Maximize}
+            iconDescription={`Show details of issue #${issue.number}`}
+            tooltipPosition="bottom"
+            onClick={(event) => onOpenDetails(event.currentTarget)}
+          />
         )}
         {!closed && onMoveTo && moveTargets.length > 0 && !isOverlay && (
           <OverflowMenu

@@ -14,6 +14,10 @@ import { useSession } from './state/session'
 import { useSettings } from './state/settings'
 import { installApiStub, stubCreatedIssue } from './test/apiStub'
 import type { ApiStub, ApiStubOptions } from './test/apiStub'
+import { parseIssueBody } from './markdown/issueBody'
+import { parseBodyInWorker } from './markdown/parseBodyInWorker'
+
+vi.mock('./markdown/parseBodyInWorker', () => ({ parseBodyInWorker: vi.fn() }))
 
 const ghIssue = (number: number, title: string, labels: string[], extra: Record<string, unknown> = {}) => ({
   number,
@@ -44,12 +48,21 @@ const ROUTES: Record<string, unknown> = {
     { name: 'in progress', color: '0e8a16', description: null },
   ],
   'open:/repos/acme/widgets/issues': [
-    ghIssue(1, 'Crash on save', ['bug']),
+    ghIssue(1, 'Crash on save', ['bug'], {
+      body: '## Steps\n\nPress *save* twice.',
+      assignees: [{ login: 'octo', avatar_url: 'https://avatars/octo', html_url: 'https://github.com/octo' }],
+      milestone: { title: 'v1' },
+      comments: 2,
+    }),
     ghIssue(2, 'Dark mode', ['in progress']),
     ghIssue(3, 'A pull request', [], { pull_request: {} }),
   ],
   'closed:/repos/acme/widgets/issues': [
-    ghIssue(4, 'Old bug', ['bug'], { state: 'closed', closed_at: new Date().toISOString() }),
+    ghIssue(4, 'Old bug', ['bug'], {
+      state: 'closed',
+      state_reason: 'duplicate',
+      closed_at: new Date().toISOString(),
+    }),
   ],
 }
 
@@ -94,6 +107,10 @@ afterEach(() => {
 })
 
 beforeEach(() => {
+  vi.mocked(parseBodyInWorker).mockImplementation(async (body, issueUrl) => ({
+    status: 'parsed',
+    parsed: parseIssueBody(body, issueUrl),
+  }))
   useSession.setState({ status: 'loading', firstRun: false, session: null, config: null, loadError: null })
   vi.stubGlobal(
     'fetch',
@@ -342,6 +359,120 @@ describe('App', () => {
     renderApp('?repo=acme/missing')
     expect(await screen.findByText(/Repository not found/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open settings' })).toBeInTheDocument()
+  })
+
+  describe('issue details', () => {
+    const detailsButton = (number: number) =>
+      screen.getByRole('button', { name: `Show details of issue #${number}` })
+
+    it('opens by click, shows the issue, and returns focus to the button on Escape', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      await screen.findByText('Crash on save')
+      expect(detailsButton(1)).toHaveAttribute('data-issue-details', '1')
+
+      await user.click(detailsButton(1))
+      const dialog = await screen.findByRole('dialog', { name: 'acme/widgets #1' })
+      expect(within(dialog).getByRole('heading', { name: 'Crash on save' })).toBeInTheDocument()
+      expect(await within(dialog).findByRole('heading', { level: 4, name: 'Steps' })).toBeInTheDocument()
+      expect(within(dialog).getByText('save').tagName).toBe('EM')
+      expect(within(dialog).getByText('Open')).toBeInTheDocument()
+      expect(within(dialog).getByText('2 comments')).toBeInTheDocument()
+      expect(within(dialog).getByText('octo')).toBeInTheDocument()
+      expect(within(dialog).getByText('v1')).toBeInTheDocument()
+      expect(within(dialog).getByText('hubot')).toBeInTheDocument()
+      expect(within(dialog).getByRole('link', { name: 'Open on GitHub' })).toHaveAttribute(
+        'href',
+        'https://github.com/acme/widgets/issues/1',
+      )
+      expect(screen.getByRole('region', { name: 'acme/widgets #1' })).toBeInTheDocument()
+
+      await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement))
+      await user.keyboard('{Escape}')
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'acme/widgets #1' })).not.toBeInTheDocument())
+      expect(detailsButton(1)).toHaveFocus()
+    })
+
+    it('opens with Enter from the keyboard and closes with the close button', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      await screen.findByText('Crash on save')
+      detailsButton(1).focus()
+      await user.keyboard('{Enter}')
+      const dialog = await screen.findByRole('dialog', { name: 'acme/widgets #1' })
+
+      await user.click(within(dialog).getByRole('button', { name: 'Close' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      expect(detailsButton(1)).toHaveFocus()
+    })
+
+    it('says so when the issue has no description, and starts no worker for it', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      await screen.findByText('Dark mode')
+      await user.click(detailsButton(2))
+      expect(await screen.findByText('No description provided.')).toBeInTheDocument()
+      expect(parseBodyInWorker).not.toHaveBeenCalled()
+    })
+
+    it('tags a duplicate close purple Closed on the card and Closed as duplicate in the modal', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      await screen.findByText('Old bug')
+      const closed = within(bucket('Done')).getByText('Closed')
+      expect(closed.closest('.cds--tag')).toHaveClass('cds--tag--purple')
+
+      await user.click(detailsButton(4))
+      const dialog = await screen.findByRole('dialog', { name: 'acme/widgets #4' })
+      expect(within(dialog).getByText('Closed as duplicate').closest('.cds--tag')).toHaveClass('cds--tag--purple')
+    })
+
+    it('keeps the Move to menu and the title link working next to the button', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      await screen.findByText('Crash on save')
+      const title = screen.getByRole('link', { name: 'Crash on save' })
+      expect(title).toHaveAttribute('href', 'https://github.com/acme/widgets/issues/1')
+      expect(title).toHaveAttribute('target', '_blank')
+      expect(title).toHaveAttribute('rel', 'noreferrer')
+
+      await user.click(screen.getByRole('button', { name: 'Actions for issue #1' }))
+      expect(await screen.findByText('Move to To do')).toBeInTheDocument()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('makes no request when it opens, with a browser session or a server session', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      await screen.findByText('Crash on save')
+      const browserCalls = vi.mocked(fetch).mock.calls.length
+      await user.click(detailsButton(1))
+      await screen.findByRole('dialog', { name: 'acme/widgets #1' })
+      await screen.findByRole('heading', { level: 4, name: 'Steps' })
+      expect(vi.mocked(fetch).mock.calls.length).toBe(browserCalls)
+    })
+
+    it('makes no request when it opens for a Keycloak user whose GitHub is read by the server', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', {
+        githubAccess: { mode: 'server' },
+        boards: [stubBoard('acme/widgets', 1)],
+        github: ({ path, query }) => {
+          const state = new URLSearchParams(query).get('state')
+          const body = ROUTES[state ? `${state}:/${path}` : `/${path}`]
+          return body === undefined
+            ? new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 })
+            : new Response(JSON.stringify(body), { status: 200 })
+        },
+      })
+      await screen.findByText('Crash on save')
+      const before = vi.mocked(fetch).mock.calls.length
+      expect(before).toBeGreaterThan(0)
+      await user.click(detailsButton(1))
+      await screen.findByRole('dialog', { name: 'acme/widgets #1' })
+      await screen.findByRole('heading', { level: 4, name: 'Steps' })
+      expect(vi.mocked(fetch).mock.calls.length).toBe(before)
+    })
   })
 
   describe('signing in', () => {

@@ -28,6 +28,7 @@ import { BoardSettingsModal } from './BoardSettingsModal'
 import { BoardToolbar } from './BoardToolbar'
 import { BucketEditorModal } from './BucketEditorModal'
 import { CreateIssueModal, type IssueDraft } from './CreateIssueModal'
+import { IssueDetailModal } from './IssueDetailModal'
 import './board.scss'
 
 interface BoardProps {
@@ -53,6 +54,7 @@ type Dialog =
   | { kind: 'edit-bucket'; bucket: Bucket | null }
   | { kind: 'delete-bucket'; bucket: Bucket }
   | { kind: 'board-settings' }
+  | { kind: 'issue-detail'; issue: Issue }
   // `create` is kept here so the dialog survives the switch being turned off while it is open.
   | { kind: 'create-issue'; bucket: Bucket; create: (input: CreateIssueInput) => Promise<Issue> }
 
@@ -80,6 +82,7 @@ export function Board({
     null,
   )
   const createLauncher = useRef<HTMLButtonElement | null>(null)
+  const detailLauncher = useRef<HTMLButtonElement | null>(null)
   useEffect(() => {
     if (!createdToast) return
     const timer = window.setTimeout(() => setCreatedToast(null), 6000)
@@ -231,6 +234,10 @@ export function Board({
           updateConfig((current) => moveBucket(current, bucketId, offset))
         }
         onDeleteBucket={(bucket) => setDialog({ kind: 'delete-bucket', bucket })}
+        onOpenIssue={(issue, launcher) => {
+          detailLauncher.current = launcher
+          setDialog({ kind: 'issue-detail', issue })
+        }}
         onCreateIssue={
           onCreateIssue
             ? (bucket, launcher) => {
@@ -310,6 +317,22 @@ export function Board({
             onOpenSettings()
           }}
           onRefresh={onRefresh}
+        />
+      )}
+      {dialog?.kind === 'issue-detail' && (
+        <IssueDetailModal
+          issue={issues.find((candidate) => candidate.number === dialog.issue.number) ?? dialog.issue}
+          repoFullName={repository.fullName}
+          labelsByName={labelsByName}
+          fetchedAt={snapshot.fetchedAt}
+          launcherButtonRef={detailLauncher}
+          onClose={() => {
+            const number = dialog.issue.number
+            closeDialog()
+            const launcher = detailLauncher.current
+            if (launcher?.isConnected) launcher.focus()
+            else document.querySelector<HTMLElement>(`[data-issue-details="${number}"]`)?.focus()
+          }}
         />
       )}
       {dialog?.kind === 'edit-bucket' && (

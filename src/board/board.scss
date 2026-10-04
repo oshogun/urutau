@@ -531,3 +531,236 @@ $page-gutter: $spacing-07;
   flex-direction: column;
   gap: $spacing-03;
 }
+
+// ---------------------------------------------------------------------------
+// Issue details
+
+.issue-card__details {
+  flex: none;
+  min-block-size: 1.5rem;
+  min-inline-size: 1.5rem;
+  padding-block: 0;
+  padding-inline: $spacing-02;
+}
+
+.issue-detail__facts {
+  @include type.type-style('label-01');
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-03 $spacing-05;
+  color: $text-secondary;
+
+  .cds--tag {
+    margin: 0;
+  }
+}
+
+.issue-detail__comments,
+.issue-detail__milestone,
+.issue-detail__person {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-02;
+  vertical-align: middle;
+
+  svg {
+    flex: none;
+    fill: currentcolor;
+  }
+
+  img {
+    border-radius: 50%;
+    background-color: $layer-accent;
+  }
+}
+
+.issue-detail__fields {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+  margin-top: $spacing-05;
+}
+
+.issue-detail__field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: $spacing-02 $spacing-05;
+
+  dt {
+    @include type.type-style('label-01');
+
+    min-inline-size: 5rem;
+    color: $text-secondary;
+  }
+
+  dd {
+    @include type.type-style('body-compact-01');
+
+    margin: 0;
+    color: $text-primary;
+  }
+}
+
+.issue-detail__labels,
+.issue-detail__people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-02 $spacing-04;
+  list-style: none;
+
+  .cds--tag {
+    margin: 0;
+  }
+}
+
+.issue-detail__body {
+  margin-top: $spacing-05;
+  padding-top: $spacing-05;
+  border-top: 1px solid $border-subtle;
+}
+
+.issue-detail__synced {
+  @include type.type-style('label-01');
+
+  margin-top: $spacing-05;
+  color: $text-secondary;
+}
+
+// ---------------------------------------------------------------------------
+// The issue's description, rendered from the parsed tree
+
+.issue-body {
+  @include type.type-style('body-01');
+
+  color: $text-primary;
+  overflow-wrap: anywhere;
+
+  p {
+    @include type.type-style('body-01');
+  }
+
+  > * + *,
+  li > * + * {
+    margin-top: $spacing-05;
+  }
+
+  h3 {
+    @include type.type-style('heading-03');
+  }
+
+  h4 {
+    @include type.type-style('heading-02');
+  }
+
+  h5 {
+    @include type.type-style('heading-01');
+  }
+
+  h6 {
+    @include type.type-style('heading-compact-01');
+  }
+
+  ul,
+  ol {
+    padding-inline-start: $spacing-06;
+  }
+
+  ul {
+    list-style: disc;
+  }
+
+  ol {
+    list-style: decimal;
+  }
+
+  li > .issue-body__tight + .issue-body__tight,
+  li + li {
+    margin-top: 0;
+  }
+
+  .issue-body__task {
+    list-style: none;
+    margin-inline-start: -$spacing-06;
+
+    svg {
+      margin-inline-end: $spacing-02;
+      vertical-align: text-bottom;
+      fill: currentcolor;
+    }
+  }
+
+  blockquote {
+    padding-inline-start: $spacing-05;
+    border-inline-start: 1px solid $border-strong;
+    color: $text-secondary;
+  }
+
+  code {
+    @include type.type-style('code-01');
+  }
+
+  .issue-body__code {
+    @include type.type-style('code-02');
+
+    padding: $spacing-04;
+    border: 1px solid $border-subtle;
+    background-color: $layer;
+    overflow-x: auto;
+
+    code {
+      @include type.type-style('code-02');
+
+      display: block;
+    }
+  }
+
+  hr {
+    border: 0;
+    border-top: 1px solid $border-subtle;
+  }
+
+  .issue-body__table {
+    overflow-x: auto;
+  }
+
+  table {
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    padding: $spacing-03;
+    border: 1px solid $border-subtle;
+    text-align: start;
+  }
+
+  .issue-body__run {
+    display: block;
+  }
+
+  .issue-body__notice {
+    max-inline-size: none;
+  }
+}
+
+.issue-body__plain {
+  @include type.type-style('body-01');
+
+  color: $text-primary;
+  white-space: pre-wrap;
+}
+
+.issue-body__empty {
+  @include type.type-style('body-01');
+
+  color: $text-secondary;
+}
+
+.issue-body__code:focus-visible,
+.issue-body__table:focus-visible {
+  outline: 2px solid $focus;
+  outline-offset: -2px;
+}
