@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fetchRepoSnapshot, fetchRepoSnapshotDetailed } from './api'
+import { fetchRepoSnapshot, fetchRepoSnapshotDetailed, toIssue, type GhIssue } from './api'
 import { browserTransport } from './client'
 import type { GitHubTransport } from './paging'
 
@@ -172,6 +172,72 @@ describe('fetchRepoSnapshotDetailed over a fake transport', () => {
     expect(result.openTruncated).toBe(true)
     expect(result.closedTruncated).toBe(false)
     expect(result.snapshot.truncated).toBe(true)
+  })
+})
+
+describe('toIssue and the issue body', () => {
+  const item = ghIssue(5) as unknown as GhIssue
+  const WITHOUT_BODY = {
+    number: 5,
+    title: 'Issue 5',
+    state: 'open',
+    stateReason: null,
+    url: 'https://github.com/acme/widgets/issues/5',
+    labels: ['bug'],
+    assignees: [{ login: 'octocat', avatarUrl: 'https://avatars/octocat', url: 'https://github.com/octocat' }],
+    author: { login: 'hubot', avatarUrl: 'https://avatars/hubot', url: 'https://github.com/hubot' },
+    milestone: 'v1.0',
+    comments: 2,
+    createdAt: '2026-09-01T00:00:00Z',
+    updatedAt: '2026-09-30T00:00:00Z',
+    closedAt: null,
+  }
+
+  it('maps a null body to an empty string', () => {
+    expect(toIssue({ ...item, body: null }).body).toBe('')
+  })
+
+  it('maps a missing or non-string body to an empty string', () => {
+    expect(toIssue(item).body).toBe('')
+    expect(toIssue({ ...item, body: 42 as unknown as string }).body).toBe('')
+  })
+
+  it('keeps an empty body as an empty string', () => {
+    expect(toIssue({ ...item, body: '' }).body).toBe('')
+  })
+
+  it('keeps a body exactly, without trimming or cutting, even at 100,000 characters', () => {
+    const body = `  # Title \r\n${'x'.repeat(100_000)}\n\n`
+    expect(toIssue({ ...item, body }).body).toBe(body)
+  })
+
+  it('leaves the body key off when asked for no body', () => {
+    const mapped = toIssue({ ...item, body: 'text' }, false)
+    expect('body' in mapped).toBe(false)
+    expect(mapped).toEqual(WITHOUT_BODY)
+  })
+
+  it('leaves every other field as before when a body is kept', () => {
+    expect(toIssue({ ...item, body: 'text' })).toEqual({ ...WITHOUT_BODY, body: 'text' })
+  })
+
+  it('puts the body on snapshot issues by default and leaves it off with bodies: false', async () => {
+    const routes = {
+      '/repos/acme/widgets': {
+        full_name: 'acme/widgets',
+        description: null,
+        html_url: 'https://github.com/acme/widgets',
+        private: false,
+      },
+      '/repos/acme/widgets/issues?state=open': [ghIssue(1, { body: 'one' }), ghIssue(2, { body: null }), ghIssue(3)],
+    }
+    routeFetch(routes)
+    const repo = { owner: 'acme', name: 'widgets' }
+    const base = { closedWindowDays: 0, transport: browserTransport({}), labels: false, now: () => NOW }
+    const withBodies = await fetchRepoSnapshot(repo, base)
+    expect(withBodies.issues.map((issue) => issue.body)).toEqual(['one', '', ''])
+    const withoutBodies = await fetchRepoSnapshot(repo, { ...base, bodies: false })
+    expect(withoutBodies.issues.map((issue) => 'body' in issue)).toEqual([false, false, false])
   })
 })
 

@@ -45,6 +45,12 @@ export interface Issue {
   createdAt: string
   updatedAt: string
   closedAt: string | null
+  /**
+   * The issue's Markdown description as GitHub returned it with the issue list (or the create
+   * response); '' when GitHub's `body` is null. Absent on issues read without bodies: the server's
+   * reader for agent integrations, and test data that does not set it.
+   */
+  body?: string
 }
 
 export interface RepoSnapshot {

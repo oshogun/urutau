@@ -9,6 +9,10 @@ export default defineConfig({
   // Relative asset paths, so the built app works under a PUBLIC_URL path prefix.
   base: './',
   plugins: [react()],
+  // markdown-it is imported only by the issue-body Web Worker, and the dev server's start-up scan does
+  // not follow workers. Without this entry Vite pre-bundles it when the first modal opens and then
+  // reloads the page. The setting does not change the production build.
+  optimizeDeps: { include: ['markdown-it'] },
   build: {
     rolldownOptions: {
       output: {

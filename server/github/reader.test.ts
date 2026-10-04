@@ -85,6 +85,13 @@ describe('requests', () => {
     expect(stub.calls[0].url).toBe(`${GITHUB_API_ORIGIN}/repos/acme/widgets`)
   })
 
+  it('reads issues without a body key even when GitHub sends bodies', async () => {
+    const stub = stubWithWidgets([stubIssue(1, { body: 'Some **description**' }), stubIssue(2, { body: null })])
+    const result = await snapshotOf(makeReader(stub.fetch))
+    expect(result.snapshot.issues).toHaveLength(2)
+    for (const issue of result.snapshot.issues) expect('body' in issue).toBe(false)
+  })
+
   it('skips the closed list when the window is 0', async () => {
     const stub = stubWithWidgets()
     await snapshotOf(makeReader(stub.fetch), 0)

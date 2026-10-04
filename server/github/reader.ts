@@ -266,6 +266,7 @@ export function createGitHubReader(deps: GitHubReaderDeps): GitHubReader {
           signal: snapshotAbort.signal,
           now: nowMs,
           labels: false,
+          bodies: false,
         })
       } catch {
         if (state.first) throw state.first.failure

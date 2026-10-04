@@ -46,7 +46,7 @@ const LABELS = [
 ].map(([name, color, description]) => ({ name, color, description }))
 
 function issue(number, title, labels, extra = {}) {
-  const { assignees = [], milestone = null, age = number, ...rest } = extra
+  const { assignees = [], milestone = null, age = number, body = null, ...rest } = extra
   return {
     number,
     title,
@@ -61,17 +61,131 @@ function issue(number, title, labels, extra = {}) {
     created_at: daysAgo(age),
     updated_at: daysAgo(1),
     closed_at: null,
+    body,
     ...rest,
   }
 }
 
-const closed = (number, title, labels, closedDaysAgo, reason = 'completed') =>
+const closed = (number, title, labels, closedDaysAgo, reason = 'completed', extra = {}) =>
   issue(number, title, labels, {
     state: 'closed',
     state_reason: reason,
     closed_at: daysAgo(closedDaysAgo),
     age: closedDaysAgo + 20,
+    ...extra,
   })
+
+// Issue bodies. #3 has none (GitHub sends null) and #6 has an empty string; the other open issues of
+// acme/widgets and the closed ones not named here have a null body.
+/** #1 "Crash when saving an empty widget": Markdown, raw HTML, refused links, images. */
+const BODY_1 = `<!-- Thanks for reporting a bug. Describe what happened below. -->
+
+## What happened
+
+Saving a widget with an empty name crashes the editor. The console shows:
+
+\`\`\`text
+TypeError: Cannot read properties of undefined (reading 'trim')
+    at saveWidget (editor.js:42:17)
+\`\`\`
+
+## Steps to reproduce
+
+1. Open **Widgets** and press *New widget*.
+2. Leave the name empty.
+3. Press \`Save\`.
+
+## Checklist
+
+- [x] I searched the existing issues
+- [ ] I tried the latest release
+
+| Browser | Version | Crashes |
+| :------ | ------: | :-----: |
+| Firefox | 131 | yes |
+| Safari | 18.1 | no |
+
+<details><summary>Screenshot</summary>
+
+<img width="640" alt="Editor after the crash" src="https://github.com/user-attachments/assets/00000000-0000-4000-8000-000000000001" />
+
+</details>
+
+![Diagram of the save flow](https://example.com/save-flow.png)
+
+Related: https://github.com/acme/widgets/issues/4 and the [design notes](../wiki/Saving).
+
+These must never become active: [run this](javascript:alert(1)), [open this](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==), <a href="javascript:alert(2)">raw link</a>, <img src=x onerror=alert(3)>.
+
+<script>alert(4)</script>
+
+> Reported from the **Firefox** extension.
+`
+
+/** #2 "Add dark mode to the settings page": a short, ordinary body. */
+const BODY_2 = `The settings page ignores the theme switch and stays light.
+
+- Follow the theme chosen in Settings
+- Keep the contrast of labels readable
+
+See [Carbon themes](https://carbondesignsystem.com/elements/themes/overview/).`
+
+/** #3 "Document the REST endpoints": GitHub's null body. */
+const BODY_3 = null
+
+/** #6 "Typo in the onboarding email": an empty string. */
+const BODY_6 = ''
+
+/** #4 "Widget list is slow with 10k items": longer than BODY_RENDER_LIMIT (131,072), so it is cut and the notice shows. */
+const BODY_4 =
+  '## Profile\n\n' +
+  Array.from({ length: 3000 }, (_, i) => `${i + 1}. Rendering widget ${i + 1} took ${(i % 97) + 3} ms in the list view.`).join('\n')
+
+/** #10 "Rate limit the public API": long (23,629 characters) but under the limit, so it scrolls and is not cut. */
+const BODY_10 = Array.from(
+  { length: 60 },
+  (_, i) =>
+    `### Limit ${i + 1}\n\nRequests from one address are counted per hour. When the count passes the limit, the API answers 429 with a Retry-After header, and the widget list shows the time the limit resets. Counting starts again on the hour; requests with a token use the token's own count instead of the address. This paragraph repeats so that the description is long enough to scroll inside the dialog.`,
+).join('\n\n')
+
+/**
+ * #14 "Explain how widget quotas work": a table of 121 columns whose rows give only 2 cells. GitHub
+ * pads every row to 121 cells; the table-cell estimate is 121 x 91 = 11,011,
+ * more than TABLE_CELLS_MAX (10,000), so the body is parsed with tables turned off: the table shows
+ * as its Markdown text and the "Tables in this description are shown as plain text." notice appears.
+ */
+const BODY_14 =
+  'How are quotas counted? The export below lists the quota of every plan for every widget type.\n\n' +
+  '| Plan |' + Array.from({ length: 120 }, (_, i) => ` Type ${i + 1} |`).join('') + '\n' +
+  '|' + ' --- |'.repeat(121) + '\n' +
+  Array.from({ length: 90 }, (_, i) => `| Plan ${i + 1} | 10 |`).join('\n')
+
+/**
+ * #8 "Dropdown closes when scrolling on Safari": a short paragraph, then one paragraph of 131,000
+ * code units made of 'a<!--' repeated. markdown-it 15.0.2's inline HTML rule scans to the end of the
+ * paragraph from every '<!--' that has no '-->', so parsing it takes about 6 s in headless Chromium,
+ * six times the body worker's 1,000 ms limit. The modal shows the loading placeholder, then
+ * the body as plain text with the "This description is shown as plain text." notice. Its length,
+ * 131,050, is under BODY_RENDER_LIMIT, so it is not cut.
+ */
+const BODY_8 =
+  'The dropdown closes as soon as the list scrolls.\n\n' + 'a<!--'.repeat(26_200)
+
+/**
+ * #12 "Add keyboard shortcuts for common actions": one paragraph of 55,500 code units (55,570 in all) that
+ * alternates Latin and Hebrew text. Laid out as one block it would take hundreds of milliseconds in
+ * Chromium; the converter splits it into runs of at most RUN_TEXT_MAX (2,048) code units, each its
+ * own block box.
+ */
+const BODY_12 =
+  'Proposed shortcuts, with the labels the Hebrew interface would show:\n\n' +
+  'Ctrl+K \u05e4\u05ea\u05d7 \u05d7\u05d9\u05e4\u05d5\u05e9, Ctrl+B \u05d4\u05d5\u05e1\u05e3 \u05db\u05e8\u05d8\u05d9\u05e1, '.repeat(1_500)
+
+/** #15 (closed, completed). */
+const BODY_15 = 'Widgets created offline were not saved. Fixed by saving the queue before the page unloads.'
+
+/** #17 (closed, not planned). */
+const BODY_17 = 'Internet Explorer 11 is out of support, so this will not be done.'
 
 const OPEN = [
   issue(1, 'Crash when saving an empty widget', ['bug', 'priority: high'], {
@@ -79,49 +193,54 @@ const OPEN = [
     milestone: 'v1.0',
     comments: 4,
     age: 40,
+    body: BODY_1,
   }),
   issue(2, 'Add dark mode to the settings page', ['enhancement', 'area: ui', 'status: in progress'], {
     assignees: ['monalisa'],
     milestone: 'v1.0',
     comments: 2,
     age: 35,
+    body: BODY_2,
   }),
-  issue(3, 'Document the REST endpoints', ['documentation', 'good first issue'], { age: 33 }),
+  issue(3, 'Document the REST endpoints', ['documentation', 'good first issue'], { age: 33, body: BODY_3 }),
   issue(4, 'Widget list is slow with 10k items', ['bug', 'area: api', 'needs review'], {
     assignees: ['hubot'],
     comments: 7,
     age: 30,
+    body: BODY_4,
   }),
   issue(5, 'Support CSV export', ['enhancement', 'help wanted'], { milestone: 'v1.1', age: 28 }),
-  issue(6, 'Typo in the onboarding email', ['documentation'], { comments: 1, age: 25 }),
+  issue(6, 'Typo in the onboarding email', ['documentation'], { comments: 1, age: 25, body: BODY_6 }),
   issue(7, 'Use a stable sort for widget names', ['enhancement', 'area: api', 'status: in progress'], {
     assignees: ['octocat', 'hubot'],
     age: 22,
   }),
-  issue(8, 'Dropdown closes when scrolling on Safari', ['bug', 'area: ui', 'question'], { age: 20 }),
+  issue(8, 'Dropdown closes when scrolling on Safari', ['bug', 'area: ui', 'question'], { age: 20, body: BODY_8 }),
   // Page break: the first page ends here and links to page 2.
   issue(9, "Rename 'gizmo' to 'widget' everywhere", ['good first issue'], { age: 18 }),
   issue(10, 'Rate limit the public API', ['enhancement', 'area: api'], {
     milestone: 'v1.1',
     comments: 3,
     age: 15,
+    body: BODY_10,
   }),
   issue(11, 'Bump vite from 8.2.0 to 8.3.2', [], { pull_request: { url: 'https://api.github.com/x' }, age: 2 }),
   issue(12, 'Add keyboard shortcuts for common actions', ['enhancement', 'area: ui', 'help wanted'], {
     age: 12,
+    body: BODY_12,
   }),
   issue(13, 'Login redirects to a 404 after a password reset', ['bug', 'needs review'], {
     assignees: ['monalisa'],
     comments: 5,
     age: 9,
   }),
-  issue(14, 'Explain how widget quotas work', ['question'], { age: 6 }),
+  issue(14, 'Explain how widget quotas work', ['question'], { age: 6, body: BODY_14 }),
 ]
 
 const CLOSED = [
-  closed(15, 'Widgets vanish after a refresh', ['bug'], 1),
+  closed(15, 'Widgets vanish after a refresh', ['bug'], 1, 'completed', { body: BODY_15 }),
   closed(16, 'Add a favicon', ['enhancement', 'good first issue'], 3),
-  closed(17, 'Support Internet Explorer 11', ['wontfix'], 5, 'not_planned'),
+  closed(17, 'Support Internet Explorer 11', ['wontfix'], 5, 'not_planned', { body: BODY_17 }),
   // Updated recently (so GitHub's `since` returns it) but closed long ago: the app drops it.
   { ...closed(18, 'Closed long ago', ['bug'], 200), updated_at: daysAgo(1) },
 ]

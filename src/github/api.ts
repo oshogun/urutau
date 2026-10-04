@@ -33,6 +33,8 @@ export interface GhIssue {
   closed_at: string | null
   /** Present when the item is a pull request; the issues API returns both. */
   pull_request?: unknown
+  /** GitHub's Markdown body; null when the issue has none. */
+  body?: string | null
 }
 
 interface GhRepository {
@@ -51,6 +53,8 @@ export interface SnapshotOptions {
   now?: () => number
   /** `false` skips the label pages and returns `labels: []`. Default `true`. */
   labels?: boolean
+  /** `false` leaves `body` off every issue. Default `true`. */
+  bodies?: boolean
 }
 
 export interface DetailedSnapshot {
@@ -65,7 +69,7 @@ export interface DetailedSnapshot {
 
 export async function fetchRepoSnapshotDetailed(
   repo: RepoRef,
-  { closedWindowDays, transport, signal, now = Date.now, labels: withLabels = true }: SnapshotOptions,
+  { closedWindowDays, transport, signal, now = Date.now, labels: withLabels = true, bodies: withBodies = true }: SnapshotOptions,
 ): Promise<DetailedSnapshot> {
   const base = `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`
 
@@ -101,7 +105,7 @@ export async function fetchRepoSnapshotDetailed(
     snapshot: {
       repository: toRepository(repository),
       labels: labels.items.map(toLabel).sort((a, b) => a.name.localeCompare(b.name)),
-      issues: [...open.items, ...recentlyClosed].filter(isIssue).map(toIssue),
+      issues: [...open.items, ...recentlyClosed].filter(isIssue).map((item) => toIssue(item, withBodies)),
       truncated: open.truncated || closed.truncated,
       fetchedAt: now(),
     },
@@ -137,8 +141,9 @@ function toUser(user: GhUser): User {
   return { login: user.login, avatarUrl: user.avatar_url, url: user.html_url }
 }
 
-export function toIssue(issue: GhIssue): Issue {
-  return {
+/** `withBody` false leaves the `body` key off the result; true maps GitHub's null (or missing) body to ''. */
+export function toIssue(issue: GhIssue, withBody = true): Issue {
+  const mapped: Issue = {
     number: issue.number,
     title: issue.title,
     state: issue.state,
@@ -155,4 +160,6 @@ export function toIssue(issue: GhIssue): Issue {
     updatedAt: issue.updated_at,
     closedAt: issue.closed_at,
   }
+  if (withBody) mapped.body = typeof issue.body === 'string' ? issue.body : ''
+  return mapped
 }

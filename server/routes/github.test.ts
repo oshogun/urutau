@@ -226,6 +226,18 @@ describe('the response', () => {
     }
   })
 
+  test('a proxied issue list keeps the body of every item unchanged', async () => {
+    await signedIn()
+    const items = [
+      { number: 1, body: '## Steps\n\n1. Open **Widgets**\n\n<!-- comment -->' },
+      { number: 2, body: null },
+      { number: 3, body: '' },
+    ]
+    t.kc.github = () => new Response(JSON.stringify(items), { headers: { 'content-type': 'application/json; charset=utf-8' } })
+    const response = await t.h.get(ISSUES)
+    expect(await response.json()).toEqual(items)
+  })
+
   test('relays GitHub error statuses and bodies as they are', async () => {
     await signedIn()
     for (const status of [403, 404, 422]) {

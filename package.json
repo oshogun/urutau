@@ -29,6 +29,7 @@
     "bcryptjs": "^3.0.3",
     "hono": "^4.13.12",
     "kysely": "~0.29.6",
+    "markdown-it": "^15.0.2",
     "openid-client": "^6.8.8",
     "zod": "^4.6.5"
   },
