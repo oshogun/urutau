@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
@@ -1534,6 +1534,35 @@ describe('App', () => {
       expect(screen.getByLabelText('Title')).toHaveValue('Fix the build')
       expect(screen.getByLabelText('Description (optional)')).toHaveValue('Steps to reproduce')
       expect(screen.getByRole('button', { name: 'Create issue' })).toBeEnabled()
+    })
+
+    it.each([
+      ['isComposing', { key: 'Enter', isComposing: true }],
+      ['keyCode 229', { key: 'Enter', keyCode: 229 }],
+    ])('does not send on the Enter that accepts an IME conversion (%s)', async (_name, init) => {
+      const user = userEvent.setup()
+      open()
+      await openDialog(user)
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('Fix the build')
+      fireEvent.keyDown(screen.getByLabelText('Title'), init)
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      })
+      expect(posts).toHaveLength(0)
+      expect(screen.getByRole('dialog', { name: /^acme\/widgets · / })).toBeInTheDocument()
+      expect(screen.getByLabelText('Title')).toHaveValue('Fix the build')
+    })
+
+    it('still sends on a plain Enter in the title', async () => {
+      const user = userEvent.setup()
+      stubGitHubPost(() => created(11, 'Fix the build'))
+      open()
+      await openDialog(user)
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('Fix the build')
+      await user.keyboard('{Enter}')
+      await waitFor(() => expect(posts).toHaveLength(1))
     })
 
     it('disables the button while sending and ignores a second Enter', async () => {

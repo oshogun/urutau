@@ -7,6 +7,7 @@ import { CreateIssueError } from '../github/createIssue'
 import type { CreateIssueInput } from '../hooks/useCreateIssue'
 import { useSession } from '../state/session'
 import { useSettings } from '../state/settings'
+import { isImeEnter } from './imeEnter'
 
 export interface IssueDraft {
   title: string
@@ -177,7 +178,7 @@ export function CreateIssueModal({
           invalidText={`Use at most ${NEW_ISSUE_TITLE_MAX} characters.`}
           onChange={(event) => onDraftChange({ ...draft, title: event.target.value })}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') {
+            if (event.key === 'Enter' && !isImeEnter(event)) {
               event.preventDefault()
               void submit()
             }

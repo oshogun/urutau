@@ -36,6 +36,7 @@ import { UpdateIssueError, updateIssueFailures } from '../github/updateIssue'
 import type { IssueUpdater } from '../hooks/useUpdateIssue'
 import { useSession } from '../state/session'
 import { useSettings } from '../state/settings'
+import { isImeEnter } from './imeEnter'
 import { IssueBody } from './IssueBody'
 import { avatarSrc, issueStateTag } from './issueDisplay'
 import { LabelTag } from './LabelTag'
@@ -645,7 +646,7 @@ export function IssueDetailModal({
                 })
               }
               onKeyDown={(event) => {
-                if (event.key === 'Enter') {
+                if (event.key === 'Enter' && !isImeEnter(event)) {
                   event.preventDefault()
                   void save()
                 }

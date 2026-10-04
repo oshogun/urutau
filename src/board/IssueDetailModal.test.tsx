@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createRef, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -245,6 +245,31 @@ describe('IssueDetailModal changes', () => {
     expect(await screen.findByText('Title changed.')).toBeInTheDocument()
     await waitFor(() => expect(focused).toContain('issue-edit-button'))
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  describe('Enter in the edit title', () => {
+    const imeKeys = [
+      ['isComposing', { key: 'Enter', isComposing: true }],
+      ['keyCode 229', { key: 'Enter', keyCode: 229 }],
+    ] as const
+
+    it.each(imeKeys)('does not save on an IME Enter (%s)', async (_name, init) => {
+      const update = vi.fn(async (_input: UpdateIssueInput, current: Issue) => saved(current, { title: 'Crash!' }))
+      const user = renderModal(update)
+      await user.click(screen.getByRole('button', { name: 'Edit' }))
+      await user.type(screen.getByRole('textbox', { name: 'Title' }), '!')
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Title' }), init)
+      expect(update).not.toHaveBeenCalled()
+      expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Crash!')
+    })
+
+    it('saves on a plain Enter', async () => {
+      const update = vi.fn(async (_input: UpdateIssueInput, current: Issue) => saved(current, { title: 'Crash!' }))
+      const user = renderModal(update)
+      await user.click(screen.getByRole('button', { name: 'Edit' }))
+      await user.type(screen.getByRole('textbox', { name: 'Title' }), '!{Enter}')
+      await waitFor(() => expect(update).toHaveBeenCalledTimes(1))
+    })
   })
 
   it('says both fields changed after saving the title and the description', async () => {
