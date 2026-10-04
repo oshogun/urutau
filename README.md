@@ -25,33 +25,41 @@ for the app, and Hono, Kysely and a SQL database for the server.
   modal: state, who opened it and when, last update, comment count, labels, assignees, milestone,
   a link to the issue on GitHub, and the description formatted from its Markdown (headings,
   lists, task lists, tables, code, quotes, links; images are never loaded: each shows as a link,
-  or as its alt text when its address is refused). The modal is read only and writes nothing to
-  GitHub. The description comes from the issue list the board already loads, so opening the modal
-  makes no request to the GitHub API. The description is formatted in a Web Worker; one that
-  takes more than a second to format is shown as plain text, with a notice.
+  or as its alt text when its address is refused). The modal is read only unless the admin has
+  turned on *Create and edit issues on GitHub* (see *Edit, close and reopen issues* below). The
+  description comes from the issue list the board already loads, so opening the modal makes no
+  request to the GitHub API. The description is formatted in a Web Worker; one that takes more
+  than a second to format is shown as plain text, with a notice.
 - **Filters.** Search by title, number or author, and filter by label, assignee and milestone.
 - **Light and dark themes** (Carbon White and Gray 100), following the system setting by default.
 - **Shared boards and live updates.** Boards, buckets and card positions are stored on the server,
-  and everyone signed in sees them. A change by a teammate appears in an open board without a
-  reload, with a *Live* indicator and a *Board updated by …* notice.
+  and everyone signed in sees them. A board change by a teammate (buckets, card positions) appears
+  in an open board without a reload, with a *Live* indicator and a *Board updated by …* notice.
 - **Accounts.** Local username and password accounts, created from invite links by the admin, or
   sign-in with Keycloak.
-- **Create issues.** When the admin turns on *Create issues on GitHub* on the Server settings page
-  (user menu, *Server settings*), each bucket header gets a **+** button. It opens a dialog for a
-  title and an optional description, creates the issue on GitHub as the person who clicked, and
-  puts the new card in that bucket. The closed-issues bucket has no **+**. The switch is off by
+- **Create issues.** When the admin turns on *Create and edit issues on GitHub* on the Server
+  settings page (user menu, *Server settings*), each bucket header gets a **+** button. It opens a
+  dialog for a title and an optional description, creates the issue on GitHub as the person who
+  clicked, and puts the new card in that bucket. The closed-issues bucket has no **+**. The switch is off by
   default and is server-wide.
+- **Edit, close and reopen issues.** With the same switch on, the issue details modal can edit the
+  issue's title and description, close it as completed or as not planned, and reopen a closed one,
+  on GitHub, as the person who clicked. It works with a token pasted in the browser and with a
+  token held by Keycloak. A change (edit, close or reopen) is refused, with nothing sent, when the
+  issue changed on GitHub since the edit started; see [Editing issues](#editing-issues). Labels, assignees, milestones and
+  comments are not changed.
 - **AI agents (MCP).** An admin can create agent integrations: accounts of their own that an AI
   agent uses to list boards, read them and move cards through Urutau's MCP server, with no
   access to GitHub beyond reading. See [AI agents (MCP)](#ai-agents-mcp).
 - **Export and import** of a board as JSON, to move it to another server or share it. A board
   exported from another repository brings its buckets and rules, but not card positions.
 
-Urutau reads issues and labels from GitHub and, when the admin turns on issue creation, creates
-issues. It writes nothing else to a repository: no labels, no state changes, no comments. Buckets,
-rules and card positions live in the server's database. Creating an issue adds no labels, whatever
-the bucket's rules are. The moves an AI agent makes through MCP are Urutau-only: they change card
-positions in Urutau's database and never write to GitHub.
+Urutau reads issues and labels from GitHub and, when the admin turns on *Create and edit issues on
+GitHub*, creates issues and changes an existing issue's title, description and state (open or
+closed). It writes nothing else to a repository: no labels, assignees, milestones or comments.
+Buckets, rules and card positions live in the server's database. Creating an issue adds no
+labels, whatever the bucket's rules are. The moves an AI agent makes through MCP are Urutau-only:
+they change card positions in Urutau's database and never write to GitHub.
 
 ## Getting started
 
@@ -89,8 +97,8 @@ hour and is required for private repositories. There are three ways to give Urut
    is unset, and Keycloak users without a usable GitHub link). Create a
    [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)
    with access to the repositories you want and these permissions: Issues (read-only to view a
-   board, **read and write** to create issues) and Metadata (read-only). Paste it in **Settings**
-   (the gear icon). It stays in this browser's local storage, is sent only to `api.github.com`,
+   board, **read and write** to create or edit issues) and Metadata (read-only). Paste it in
+   **Settings** (the gear icon). It stays in this browser's local storage, is sent only to `api.github.com`,
    and never reaches the Urutau server or a board export. Anyone with access to your browser
    profile can read it. A token with Issues write can create and edit issues in those
    repositories, so give it only the repositories you need, and use a token with Issues read-only
@@ -99,9 +107,11 @@ hour and is required for private repositories. There are three ways to give Urut
    signs in to Keycloak with GitHub. The server asks Keycloak for the GitHub token and keeps it in
    server memory for up to 5 minutes per session, so it does not ask on every request. It drops the
    token at once when GitHub rejects it, on sign-out and on restart. The server forwards `GET`
-   requests for issues, labels and repository data to `api.github.com`, and one `POST` that
-   creates an issue from a title and a description the server rebuilds itself; it forwards no
-   other method and no other fields. The token is never stored
+   requests for issues, labels and repository data to `api.github.com`, one `POST` that
+   creates an issue from a title and a description the server rebuilds itself, and, to change an
+   issue, a `GET` that checks it and a `PATCH` with its title, description, or state and its
+   reason (both sent once more with a fresh token after GitHub rejects an expired one); it
+   forwards no other method and no other fields. The token is never stored
    in the database or sent to the browser. The user's Keycloak tokens are held in server memory
    too, and are not stored in the database either.
 3. **A token stored for an agent integration** (only for the MCP endpoint). The admin gives an
@@ -229,24 +239,28 @@ Keycloak again.
 
 The last hop, Keycloak's GitHub provider handing over a real GitHub token, is **not proven** against
 real GitHub: the tests use a second Keycloak realm in GitHub's place. The GitHub provider's default
-scope, `user:email`, reaches public repositories only and cannot create issues. For private
+scope, `user:email`, reaches public repositories only and cannot create or edit issues. For private
 repositories use an OAuth App with the `repo` scope (OAuth Apps have no read-only private scope) or
-a GitHub App's OAuth credentials with Issues and Metadata read access. To create issues, an OAuth
-App would need `public_repo` or `repo`, and a GitHub App needs Issues write access. Which OAuth
-scope allows creating an issue is **not confirmed**: GitHub's scope page does not mention issues
-under `public_repo` or `repo`, and no real GitHub account was tried.
+a GitHub App's OAuth credentials with Issues and Metadata read access. To create or edit issues,
+an OAuth App would need `public_repo` or `repo`, and a GitHub App needs Issues write access.
+Which OAuth scope allows creating or editing an issue is **not confirmed**: GitHub's scope page
+does not mention issues under `public_repo` or `repo`, and no real GitHub account was tried.
 
-### Creating issues
+### Creating and editing issues
 
-The switch is a row in the database, off after a first start or an upgrade, and only the admin can
-change it (`PATCH /api/settings`). What it enforces depends on the path the token takes:
+The switch covers creating an issue and changing one (edit, close, reopen). It is a row in the
+database, off after a first start or an upgrade from a build without it, and only the admin can
+change it (`PATCH /api/settings`). A server where creating issues was already on keeps it on, and
+that now also allows editing, closing and reopening, with no action by the admin. What it
+enforces depends on the path the token takes:
 
 - **Token held by Keycloak:** the server checks the switch before it fetches the token, and
-  refuses the create while it is off.
+  refuses the create or the change while it is off.
 - **Token pasted in the browser:** only the interface enforces the switch. It hides the **+**
-  buttons while the switch is off and re-reads the switch before each create, but the browser
-  sends the request straight to `api.github.com`, which the server cannot refuse. Anyone holding a
-  token with Issues write can create issues with it outside Urutau. The switch is a product
+  buttons and the details modal's edit, close and reopen controls while the switch is off and
+  re-reads the switch before each create or change, but the browser sends the request straight to
+  `api.github.com`, which the server cannot refuse. Anyone holding a token with Issues write can
+  create and edit issues with it outside Urutau. The switch is a product
   setting, not a security boundary for pasted tokens: GitHub's permissions on the token decide
   what it can do.
 
@@ -267,6 +281,33 @@ DELETE FROM meta WHERE meta.key = 'github_writes';
 
 Upgrading again runs the migration and starts with the switch off.
 
+#### Editing issues
+
+The details modal has an *Edit* button for the title and description, and buttons for *Close as
+completed*, *Close as not planned* and *Reopen*. Before it sends a change, Urutau reads the issue
+from GitHub (one `GET`) and compares its last-update time with the one the modal showed when the
+edit started. If they differ, the change is refused, nothing is sent, and the modal shows what the
+issue looks like now; *Apply again* then sends the change on top of that version, unless GitHub
+already has it, which the modal then says. A change that
+goes through costs two GitHub requests (the read and the `PATCH`), and a refused one costs one;
+on the Keycloak path, an expired token adds one or two more. These requests use the acting
+person's token, never an agent integration's.
+
+The check does not cover everything:
+
+- A change someone makes on GitHub between Urutau's read and GitHub applying the `PATCH` is not
+  seen. GitHub has no conditional `PATCH` for issues. Urutau sends only the fields the person
+  changed. For a field it sends, Urutau's value wins; every other field keeps the other person's
+  value.
+- GitHub's last-update time has a one-second precision, so a change in the same second as the
+  version the board read is not noticed.
+- A change that does not move the last-update time (for example, labels added a second or two
+  after the issue was created) causes no refusal. Urutau does not send labels, so it does not
+  overwrite them.
+- A new comment moves the time, so it also causes a refusal even though the title, description and
+  state are unchanged. *Apply again* sends the same change.
+- Teammates' boards and your other tabs are not told of the change until they reload the issues.
+
 ## AI agents (MCP)
 
 Urutau serves a [Model Context Protocol](https://modelcontextprotocol.io/) endpoint at
@@ -283,9 +324,9 @@ It takes JSON-RPC requests over HTTP `POST`; a request it accepts is answered as
 
 **MCP moves are Urutau-only.** `move_card` and `reorder_bucket` change card positions in Urutau's
 database and nothing on GitHub. No MCP request makes a non-`GET` request to GitHub, and the
-endpoint cannot create issues. Everyone with the board open sees an agent's move live, labelled
-*Agent*. Issue titles, labels and other text come from GitHub and are untrusted: an agent should
-treat them as data, not as instructions.
+endpoint cannot create or edit issues. Everyone with the board open sees an agent's move
+live, labelled *Agent*. Issue titles, labels and other text come from GitHub and are untrusted:
+an agent should treat them as data, not as instructions.
 
 ### Setup
 
@@ -462,7 +503,8 @@ DELETE FROM kysely_migration WHERE name = '0003_integrations';
 
 The first statement is optional: without it the integration accounts stay as `users` rows with no
 password that an older build lists as Keycloak users who cannot sign in. If you also go back past
-the issue switch, run the `0002_github_writes` statements from *Creating issues* afterwards.
+the issue switch, run the `0002_github_writes` statements from *Creating and editing issues*
+afterwards.
 
 ## How issues are placed
 
@@ -546,8 +588,8 @@ PORT=8788 node .claude/skills/run-urutau/mcp-launcher.mjs
 
 ```
 src/
-├── domain/        Model and pure logic shared with the server (placement, filters, label colors, API types)
-├── github/        GitHub REST client: pagination (paging.ts), error mapping, mapping to domain types, issue creation (createIssue.ts)
+├── domain/        Model and pure logic shared with the server (placement, filters, label colors, issue change rules (issueUpdate.ts), API types)
+├── github/        GitHub REST client: pagination (paging.ts), error mapping, mapping to domain types, issue creation (createIssue.ts) and changes (updateIssue.ts)
 ├── api/           Client for the server's /api, including the agent integration admin calls
 ├── state/         Zustand stores: session, settings (token, theme) and the open board
 ├── hooks/         Data fetching (TanStack Query), live updates, theme and URL helpers
@@ -558,13 +600,13 @@ src/
 server/
 ├── main.ts        Starts the server (config, database, shutdown)
 ├── app.ts         The Hono app: middleware and routes
-├── routes/        /api endpoints: auth, invites, users, agent integrations, boards, settings (the switch), events, GitHub reads and issue creation
+├── routes/        /api endpoints: auth, invites, users, agent integrations, boards, settings (the switch), events, GitHub reads and issue creation and changes
 ├── db/            Kysely schema, migrations and one repository module per table
 ├── auth/          Passwords, sessions, CSRF, sign-in rate limits, MCP bearer tokens, the secret box for stored GitHub tokens
 ├── oidc/          Keycloak sign-in and GitHub token brokering
 ├── boards/        Validation of board configs
 ├── events/        In-memory publisher for live updates
-├── github/        Allow-list for the GitHub proxy, the rebuilt create-issue request, reader.ts (the MCP endpoint's GitHub reads)
+├── github/        Allow-list for the GitHub proxy, the rebuilt create-issue request, updateIssue.ts (the path and the check of GitHub's answer for the change route), reader.ts (the MCP endpoint's GitHub reads)
 ├── mcp/           The /mcp endpoint, its four tools, board JSON, snapshot cache, move and reorder, locks and call limits
 └── http/          Host allow-list, errors, request helpers
 scripts/           dev.mjs
@@ -573,7 +615,7 @@ compose*.yaml      The app (compose.yaml) and the opt-in test containers
 
 The GitHub layer maps API payloads into the types in [src/domain/types.ts](src/domain/types.ts), and
 the UI only uses those types. Adding another provider (GitLab, Gitea, …) means writing another
-`fetchRepoSnapshot`.
+`fetchRepoSnapshot` and its own `createIssue` and `updateIssue`.
 
 ## Notes on the stack
 
@@ -593,8 +635,8 @@ the UI only uses those types. Adding another provider (GitLab, Gitea, …) means
 
 ## Roadmap ideas
 
-- More writes to GitHub from the board: editing, closing and reopening, labelling, assigning and
-  commenting. Creating issues is the only write today.
+- More writes to GitHub from the board: labelling, assigning and commenting. Creating issues and
+  editing, closing and reopening them are the only writes today.
 - Boards stored in the repository itself (e.g. `.urutau.json`).
 - Sign in with GitHub (OAuth/device flow) instead of pasting a token.
 - UI copy in Portuguese as well as English.
