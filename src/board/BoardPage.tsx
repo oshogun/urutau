@@ -10,6 +10,7 @@ import { useBoardEvents } from '../hooks/useBoardEvents'
 import { useCreateIssue } from '../hooks/useCreateIssue'
 import { useServerSettings } from '../hooks/useServerSettings'
 import { useRepoSnapshot } from '../hooks/useRepoSnapshot'
+import { useUpdateIssue } from '../hooks/useUpdateIssue'
 import { useSession } from '../state/session'
 import { readV1Board } from '../state/v1Import'
 import { Board } from './Board'
@@ -71,6 +72,7 @@ function RepositoryBoard({ repo, onOpenSettings, onChangeRepo }: BoardPageProps)
   const live = useBoardEvents(repo, entry.status !== 'loading')
   const { githubWrites } = useServerSettings()
   const createIssue = useCreateIssue(repo)
+  const updateIssue = useUpdateIssue(repo)
 
   const { status, conflict, create } = entry
   const snapshot = query.data
@@ -104,6 +106,7 @@ function RepositoryBoard({ repo, onOpenSettings, onChangeRepo }: BoardPageProps)
           refreshError={query.isError ? query.error : null}
           onRefresh={() => void query.refetch()}
           onCreateIssue={githubWrites ? createIssue : null}
+          onUpdateIssue={githubWrites ? updateIssue : null}
           onOpenSettings={onOpenSettings}
         />
       </>

@@ -22,6 +22,7 @@ import {
 import { EMPTY_FILTERS, isFiltering, matchesFilters } from '../domain/filters'
 import type { BoardConfig, Bucket, Issue, RepoSnapshot } from '../domain/types'
 import type { CreateIssueInput } from '../hooks/useCreateIssue'
+import type { IssueUpdater } from '../hooks/useUpdateIssue'
 import type { ConflictNotice } from '../state/boardStore'
 import { BoardCanvas } from './BoardCanvas'
 import { BoardSettingsModal } from './BoardSettingsModal'
@@ -47,6 +48,8 @@ interface BoardProps {
   onRefresh: () => void
   /** Creates an issue and places it; null while creating issues is turned off or unavailable. */
   onCreateIssue: ((input: CreateIssueInput) => Promise<Issue>) | null
+  /** Changes an issue on GitHub; null while changing issues is turned off or unavailable. */
+  onUpdateIssue: IssueUpdater | null
   onOpenSettings: () => void
 }
 
@@ -71,6 +74,7 @@ export function Board({
   refreshError,
   onRefresh,
   onCreateIssue,
+  onUpdateIssue,
   onOpenSettings,
 }: BoardProps) {
   const { repository, issues, labels } = snapshot
@@ -326,6 +330,12 @@ export function Board({
           labelsByName={labelsByName}
           fetchedAt={snapshot.fetchedAt}
           launcherButtonRef={detailLauncher}
+          onUpdate={onUpdateIssue}
+          onOpenSettings={() => {
+            closeDialog()
+            onOpenSettings()
+          }}
+          onRefresh={onRefresh}
           onClose={() => {
             const number = dialog.issue.number
             closeDialog()

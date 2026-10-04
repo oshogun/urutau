@@ -1504,7 +1504,8 @@ describe('App', () => {
       const before = snapshotGets().length
 
       await openDialog(user)
-      await user.type(screen.getByLabelText('Title'), 'Fix the build')
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('Fix the build')
       await user.click(screen.getByRole('button', { name: 'Create issue' }))
 
       expect(await screen.findByText('Created issue #11')).toBeInTheDocument()
@@ -1522,8 +1523,10 @@ describe('App', () => {
       )
       open()
       await openDialog(user)
-      await user.type(screen.getByLabelText('Title'), 'Fix the build')
-      await user.type(screen.getByLabelText('Description (optional)'), 'Steps to reproduce')
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('Fix the build')
+      await user.click(screen.getByLabelText('Description (optional)'))
+      await user.paste('Steps to reproduce')
       await user.click(screen.getByRole('button', { name: 'Create issue' }))
 
       expect(await screen.findByText("Couldn't create the issue.")).toBeInTheDocument()
@@ -1543,7 +1546,9 @@ describe('App', () => {
       })
       open()
       await openDialog(user)
-      await user.type(screen.getByLabelText('Title'), 'Fix the build{Enter}')
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('Fix the build')
+      await user.keyboard('{Enter}')
 
       const sending = await screen.findByRole('button', { name: /Creating issue/ })
       expect(sending).toBeDisabled()
@@ -1560,7 +1565,9 @@ describe('App', () => {
       stubGitHubPost(() => new Promise<Response>(() => undefined))
       open()
       await openDialog(user)
-      await user.type(screen.getByLabelText('Title'), 'Fix the build{Enter}')
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('Fix the build')
+      await user.keyboard('{Enter}')
       await screen.findByRole('button', { name: /Creating issue/ })
 
       await user.keyboard('{Escape}')
@@ -1613,17 +1620,140 @@ describe('App', () => {
     })
   })
 
+  describe('editing issues', () => {
+    interface Call {
+      method: string
+      path: string
+      headers: Headers
+      body: unknown
+    }
+    let calls: Call[]
+
+    // Answers the single-issue read and the PATCH to GitHub the way GitHub does, keeping the
+    // title and state the PATCH sets so a later read sees them.
+    function stubGitHubIssue() {
+      const read = globalThis.fetch
+      calls = []
+      let current = ghIssue(1, 'Crash on save', ['bug'], { body: '## Steps\n\nPress *save* twice.' })
+      vi.stubGlobal(
+        'fetch',
+        vi.fn<typeof fetch>(async (input, init) => {
+          const url = new URL(String(input))
+          if (url.pathname !== '/repos/acme/widgets/issues/1') return read(input, init)
+          const method = init?.method ?? 'GET'
+          const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null
+          calls.push({ method, path: url.pathname, headers: new Headers(init?.headers), body })
+          if (method === 'PATCH') {
+            current = { ...current, ...body, updated_at: '2026-10-02T00:00:00Z' }
+          }
+          return new Response(JSON.stringify(current), { status: 200 })
+        }),
+      )
+    }
+
+    const listGets = () =>
+      vi.mocked(fetch).mock.calls.filter(
+        ([input, init]) => !init?.method && /\/repos\/acme\/widgets\/issues\?/.test(String(input)),
+      )
+
+    async function openDetails(user: ReturnType<typeof userEvent.setup>) {
+      await screen.findByText('Crash on save')
+      await user.click(screen.getByRole('button', { name: 'Show details of issue #1' }))
+      return screen.findByRole('dialog', { name: 'acme/widgets #1' })
+    }
+
+    beforeEach(() => {
+      useSettings.setState({ token: 'fixture-token' })
+      stubGitHubIssue()
+    })
+    afterEach(() => useSettings.setState({ token: '' }))
+
+    it('changes the card title without a reload, with the token and no board write', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { githubWrites: true, boards: [stubBoard('acme/widgets', 1)] })
+      const dialog = await openDetails(user)
+      const before = vi.mocked(fetch).mock.calls.length
+      const listsBefore = listGets().length
+
+      await user.click(within(dialog).getByRole('button', { name: 'Edit' }))
+      const title = within(dialog).getByRole('textbox', { name: 'Title' })
+      await user.clear(title)
+      await user.type(title, 'Crash when saving')
+      await user.click(within(dialog).getByRole('button', { name: 'Save changes' }))
+
+      expect(await within(dialog).findByText('Title changed.')).toBeInTheDocument()
+      expect(within(bucket('Backlog')).getByText('Crash when saving')).toBeInTheDocument()
+      expect(within(bucket('Backlog')).queryByText('Crash on save')).not.toBeInTheDocument()
+      expect(calls.map((call) => call.method)).toEqual(['GET', 'PATCH'])
+      expect(calls[1].body).toEqual({ title: 'Crash when saving' })
+      expect(calls[1].headers.get('authorization')).toBe('Bearer fixture-token')
+      expect(vi.mocked(fetch).mock.calls.slice(before).filter(([input]) => String(input).includes('api.github.com'))).toHaveLength(2)
+      expect(listsBefore).toBeGreaterThan(0)
+      expect(listGets()).toHaveLength(listsBefore)
+      expect(stub.requests('PUT boards/acme/widgets')).toHaveLength(0)
+    })
+
+    it('closes and reopens an issue from the details', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { githubWrites: true, boards: [stubBoard('acme/widgets', 1)] })
+      const dialog = await openDetails(user)
+
+      await user.click(within(dialog).getByRole('button', { name: 'Close as not planned' }))
+      expect(await within(dialog).findByText('Closed as not planned.')).toBeInTheDocument()
+      expect(calls[1].body).toEqual({ state: 'closed', state_reason: 'not_planned' })
+      await user.click(await within(dialog).findByRole('button', { name: 'Reopen' }))
+      expect(await within(dialog).findByText('Reopened.')).toBeInTheDocument()
+      expect(calls[3].body).toEqual({ state: 'open', state_reason: 'reopened' })
+    })
+
+    it('offers no edit while the switch is off', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      const dialog = await openDetails(user)
+      expect(within(dialog).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+      expect(within(dialog).queryByRole('button', { name: /Close as|Reopen/ })).not.toBeInTheDocument()
+    })
+
+    it('sends the change through the server for a Keycloak user and updates the card', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', {
+        githubWrites: true,
+        githubAccess: { mode: 'server' },
+        boards: [stubBoard('acme/widgets', 1)],
+        github: ({ path, query }) => {
+          const state = new URLSearchParams(query).get('state')
+          const body = ROUTES[state ? `${state}:/${path}` : `/${path}`]
+          return body === undefined
+            ? new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 })
+            : new Response(JSON.stringify(body), { status: 200 })
+        },
+      })
+      const dialog = await openDetails(user)
+      await user.click(within(dialog).getByRole('button', { name: 'Edit' }))
+      const title = within(dialog).getByRole('textbox', { name: 'Title' })
+      await user.clear(title)
+      await user.type(title, 'Crash when saving')
+      await user.click(within(dialog).getByRole('button', { name: 'Save changes' }))
+
+      expect(await within(dialog).findByText('Title changed.')).toBeInTheDocument()
+      expect(within(bucket('Backlog')).getByText('Crash when saving')).toBeInTheDocument()
+      const [patch] = stub.requests('PATCH issues/acme/widgets/1')
+      expect(patch.body).toEqual({ expectedUpdatedAt: '2026-09-30T00:00:00Z', fields: { title: 'Crash when saving' } })
+      expect(calls).toHaveLength(0)
+    })
+  })
+
   describe('server settings', () => {
     it('shows the switch to the admin and saves a change', async () => {
       const user = userEvent.setup()
       renderApp('?view=server-settings')
 
       expect(await screen.findByRole('heading', { name: 'Server settings' })).toBeInTheDocument()
-      const toggle = await screen.findByRole('switch', { name: 'Create issues on GitHub' })
+      const toggle = await screen.findByRole('switch', { name: 'Create and edit issues on GitHub' })
       expect(toggle).not.toBeChecked()
       await user.click(toggle)
 
-      await waitFor(() => expect(screen.getByRole('switch', { name: 'Create issues on GitHub' })).toBeChecked())
+      await waitFor(() => expect(screen.getByRole('switch', { name: 'Create and edit issues on GitHub' })).toBeChecked())
       expect(stub.requests('PATCH settings')[0].body).toEqual({ githubWrites: true })
       expect(stub.githubWrites).toBe(true)
     })

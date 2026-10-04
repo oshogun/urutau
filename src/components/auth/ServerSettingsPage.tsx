@@ -41,7 +41,7 @@ export function ServerSettingsPage() {
             )}
             <Toggle
               id="github-writes"
-              labelText="Create issues on GitHub"
+              labelText="Create and edit issues on GitHub"
               labelA="Off"
               labelB="On"
               toggled={settings.githubWrites}
@@ -50,14 +50,16 @@ export function ServerSettingsPage() {
             />
             <p className="users__lead">
               When this is on, everyone who can sign in to this server can create issues from their
-              boards. Each issue is created with that person's own GitHub access: the token they
-              pasted in Settings, or their Keycloak GitHub link. Urutau sends only a title and a
-              description; buckets never add labels.
+              boards, and edit, close and reopen issues from the issue details. Each change is made
+              with that person's own GitHub access: the token they pasted in Settings, or their
+              Keycloak GitHub link. Urutau sends only a title, a description and the open or closed
+              state; buckets never add labels. Before changing an issue, Urutau checks it on GitHub
+              and refuses the change if the issue changed on GitHub since it was loaded.
             </p>
             <p className="users__lead">
-              For people who paste a token, this setting only hides the create action in Urutau. Their
-              token works with GitHub directly, so GitHub's permissions on the token decide what it
-              can do.
+              For people who paste a token, this setting only hides the create and edit actions in
+              Urutau. Their token works with GitHub directly, so GitHub's permissions on the token
+              decide what it can do.
             </p>
           </>
         )}
