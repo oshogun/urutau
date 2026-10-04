@@ -1,6 +1,11 @@
 # Opt-in database containers for the backend test suites (npm run test:db:postgres,
 # npm run test:db:mariadb). Data lives on tmpfs and is gone when the container stops.
 # Not used by npm test.
+#   docker compose -p urutau-test-db -f compose.db.yaml up -d --wait
+#   docker compose -p urutau-test-db -f compose.db.yaml down -v
+# Run clones set URUTAU_PG_PORT=55433 and URUTAU_MARIADB_PORT=53307 and use
+# `-p urutau-test-db-clone`.
+name: urutau-test-db
 services:
   postgres:
     image: postgres:17-alpine

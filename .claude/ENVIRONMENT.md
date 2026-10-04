@@ -75,7 +75,9 @@ example 8789, 58082) in the envelope and they are listed in the run's artifacts.
   The driver's server mode (in-memory database, first-run admin) is in
   `.claude/skills/run-urutau/SKILL.md`; replace its ports with these.
 - Containers: name the compose project per run, for example
-  `URUTAU_PG_PORT=55433 URUTAU_MARIADB_PORT=53307 docker compose -p urutau-db-clone -f compose.db.yaml up -d --wait`.
+  `URUTAU_PG_PORT=55433 URUTAU_MARIADB_PORT=53307 docker compose -p urutau-test-db-clone -f compose.db.yaml up -d --wait`;
+  the Keycloak file uses `-p urutau-test-keycloak-clone`. The files set `name: urutau-test-db` and
+  `name: urutau-test-keycloak`, and every command passes `-p` anyway.
 - Stop only what you started, by port:
   `lsof -ti:<port> -sTCP:LISTEN | xargs -r kill`. Sessions for other projects
   on this machine run Chrome, Playwright and dev servers too, so never

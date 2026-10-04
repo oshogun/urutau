@@ -502,19 +502,21 @@ not run the Keycloak suite.
 The default `npm test` is hermetic. The database and Keycloak suites need containers (Docker):
 
 ```bash
-docker compose -f compose.db.yaml up -d --wait       # PostgreSQL on 55432, MariaDB on 53306
+docker compose -p urutau-test-db -f compose.db.yaml up -d --wait             # PostgreSQL on 55432, MariaDB on 53306
 npm run test:db:postgres
 npm run test:db:mariadb
-docker compose -f compose.db.yaml down -v
+docker compose -p urutau-test-db -f compose.db.yaml down -v
 
-docker compose -f compose.keycloak.yaml up -d --wait # Keycloak 26.8 on 58080, two realms imported
+docker compose -p urutau-test-keycloak -f compose.keycloak.yaml up -d --wait # Keycloak 26.8 on 58080, two realms imported
 npm run test:keycloak
-docker compose -f compose.keycloak.yaml down -v
+docker compose -p urutau-test-keycloak -f compose.keycloak.yaml down -v
 ```
 
 `URUTAU_PG_PORT`, `URUTAU_MARIADB_PORT` and `URUTAU_KEYCLOAK_PORT` change the host ports. All
 passwords and secrets in these files and in the realm files are development values. The Keycloak
-file starts in development mode, so never use it as a deployment.
+file starts in development mode, so never use it as a deployment. Both files set their own project name
+(`urutau-test-db`, `urutau-test-keycloak`), so the directory you run them from does not choose the
+project, and the commands pass the same name with `-p`.
 
 ### Driving the app
 

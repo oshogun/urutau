@@ -1,13 +1,13 @@
 # Opt-in Keycloak for the OIDC tests and manual checks; not part of the gate.
-#   docker compose -f compose.keycloak.yaml up -d --wait
+#   docker compose -p urutau-test-keycloak -f compose.keycloak.yaml up -d --wait
 #   npm run test:keycloak
-#   docker compose -f compose.keycloak.yaml down -v
-# Run clones set URUTAU_KEYCLOAK_PORT=58081 and add `-p urutau-keycloak-clone`.
+#   docker compose -p urutau-test-keycloak -f compose.keycloak.yaml down -v
+# Run clones set URUTAU_KEYCLOAK_PORT=58081 and use `-p urutau-test-keycloak-clone`.
 # The port is the same inside and outside the container, so the URLs Keycloak
 # builds for itself (the realm files use ${URUTAU_KEYCLOAK_PORT}) and the ones
 # the browser opens are identical. Dev-only credentials: every secret and
 # password here and in the realm files is a documented test value.
-name: urutau-keycloak
+name: urutau-test-keycloak
 services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.0

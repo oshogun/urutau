@@ -12,7 +12,7 @@ try {
   const response = await fetch(`${url}/realms/urutau/.well-known/openid-configuration`, { signal: AbortSignal.timeout(3000) })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
 } catch (error) {
-  console.log(`test:keycloak skipped: Keycloak is not reachable at ${url} (${error.message}). Start it with: docker compose -f compose.keycloak.yaml up -d --wait. In a run clone use URUTAU_KEYCLOAK_PORT=58081 and add -p <project>`)
+  console.log(`test:keycloak skipped: Keycloak is not reachable at ${url} (${error.message}). Start it with: docker compose -p urutau-test-keycloak -f compose.keycloak.yaml up -d --wait. In a run clone use URUTAU_KEYCLOAK_PORT=58081 and -p urutau-test-keycloak-clone`)
   process.exit(0)
 }
 const present = SUITES.filter((path) => existsSync(path))
