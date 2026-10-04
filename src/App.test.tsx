@@ -598,6 +598,16 @@ describe('App', () => {
       expect(window.location.search).toBe('')
     })
 
+    it.each(['__proto__', 'constructor'])(
+      'shows the generic notice and the sign-in form for ?signin-error=%s',
+      async (code) => {
+        renderApp(`?signin-error=${code}`, { session: 'signed-out', keycloak: true })
+        expect(await screen.findByText('Signing in failed. Try again.')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
+        expect(window.location.search).toBe('')
+      },
+    )
+
     it('hides the token field in server mode and explains why', async () => {
       const user = userEvent.setup()
       renderApp('', { githubAccess: { mode: 'server' } })
