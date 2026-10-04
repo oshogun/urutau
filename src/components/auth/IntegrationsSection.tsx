@@ -585,11 +585,19 @@ function ReposModal({ integration, launcher, onClose, onSaved }: FormModalProps)
     onError: () => field.current?.focus(),
   })
 
+  // Modal focuses the field first; this runs after it and moves the caret from the start of a
+  // saved list to its end, so typing adds to the list instead of writing onto the first line.
+  useEffect(() => {
+    const el = field.current
+    if (el) el.setSelectionRange(el.value.length, el.value.length)
+  }, [])
+
   return (
     <Modal
       open
       size="sm"
       launcherButtonRef={launcher}
+      selectorPrimaryFocus="#integration-repos"
       modalHeading={`Repositories ${integration.username} may read`}
       primaryButtonText="Save"
       secondaryButtonText="Cancel"

@@ -1212,6 +1212,21 @@ describe('App', () => {
       expect(document.body).not.toHaveFocus()
     })
 
+    it('starts focus in the repositories text area when Edit repositories opens', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+
+      await user.click(await screen.findByRole('button', { name: 'Edit repositories of planner-bot' }))
+      const area = await screen.findByLabelText('One repository per line, as owner/name')
+      await waitFor(() => expect(area).toHaveFocus())
+
+      await user.keyboard('{Enter}')
+      expect(stub.requests(`PUT integrations/${stub.integrations[0].id}/repos`)).toHaveLength(0)
+      const same = screen.getByLabelText('One repository per line, as owner/name')
+      expect((same as HTMLTextAreaElement).value).toContain('\n')
+    })
+
     it('returns focus to the Edit repositories button after saving the list', async () => {
       const user = userEvent.setup()
       renderApp('?view=users', { integrations: [planner] })
