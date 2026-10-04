@@ -21,6 +21,14 @@ for the app, and Hono, Kysely and a SQL database for the server.
   (Space/Enter on a card's handle, then the arrow keys). Each card also has a *Move to…* menu.
 - **Closed issues.** Issues closed in the last 14 days (configurable) land in the bucket that
   collects closed issues.
+- **Issue details.** The button at the right end of a card's title row opens the issue in a
+  modal: state, who opened it and when, last update, comment count, labels, assignees, milestone,
+  a link to the issue on GitHub, and the description formatted from its Markdown (headings,
+  lists, task lists, tables, code, quotes, links; images are never loaded: each shows as a link,
+  or as its alt text when its address is refused). The modal is read only and writes nothing to
+  GitHub. The description comes from the issue list the board already loads, so opening the modal
+  makes no request to the GitHub API. The description is formatted in a Web Worker; one that
+  takes more than a second to format is shown as plain text, with a notice.
 - **Filters.** Search by title, number or author, and filter by label, assignee and milestone.
 - **Light and dark themes** (Carbon White and Gray 100), following the system setting by default.
 - **Shared boards and live updates.** Boards, buckets and card positions are stored on the server,
@@ -543,7 +551,8 @@ src/
 ├── api/           Client for the server's /api, including the agent integration admin calls
 ├── state/         Zustand stores: session, settings (token, theme) and the open board
 ├── hooks/         Data fetching (TanStack Query), live updates, theme and URL helpers
-├── board/         Board UI: buckets, cards, drag and drop, dialogs (including CreateIssueModal.tsx)
+├── markdown/      Issue-body parser (markdown-it to a plain tree) and the Web Worker that runs it with a time limit
+├── board/         Board UI: buckets, cards, drag and drop, dialogs (including CreateIssueModal.tsx and IssueDetailModal.tsx)
 ├── components/    App shell: header, start page, settings, sign-in, users and server settings pages
 └── styles/        Global Carbon styles
 server/
@@ -589,7 +598,7 @@ the UI only uses those types. Adding another provider (GitLab, Gitea, …) means
 - Boards stored in the repository itself (e.g. `.urutau.json`).
 - Sign in with GitHub (OAuth/device flow) instead of pasting a token.
 - UI copy in Portuguese as well as English.
-- Issue detail panel with the rendered Markdown body and comments.
+- Comments in the issue details modal.
 - Conditional requests (ETags) and virtualized columns for very large repositories.
 - More providers: GitLab, Gitea/Forgejo.
 - End-to-end tests with Playwright.
