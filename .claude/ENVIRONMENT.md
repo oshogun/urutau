@@ -20,9 +20,10 @@ Urutau is a React app plus a small API server (`server/`, Hono and Kysely). Boar
 live in a SQL database: SQLite by default (`data/urutau.db`, git-ignored), PostgreSQL or MariaDB
 through `DATABASE_URL`. The browser keeps only the theme, a pasted GitHub token and v1 data it may
 import. Its external service is the GitHub REST API at `api.github.com`, which it reads and, when
-the admin turns GitHub writes on, uses to create issues. No agent, test or driver run creates an
-issue on a real repository: the server tests stub `fetch`, and the driver's fixtures answer
-`POST /repos/{owner}/{repo}/issues`. The server also reads GitHub for agent integrations (the MCP
+the admin turns GitHub writes on, uses to create issues and to edit, close and reopen them. No
+agent, test or driver run creates or changes an issue on a real repository: the server tests stub
+`fetch`, and the driver's fixtures answer `POST /repos/{owner}/{repo}/issues` and the single-issue
+`GET` and `PATCH /repos/{owner}/{repo}/issues/{number}`. The server also reads GitHub for agent integrations (the MCP
 server at `/mcp`), with the GitHub token the admin stored for each integration; in the run-urutau
 driver, `mcp-launcher.mjs` answers those reads from the same fixtures. Agents never use `data/urutau.db` of the live checkout: run the server on
 `DATABASE_URL=sqlite::memory:`, as the run-urutau driver's server mode does. What remains to protect

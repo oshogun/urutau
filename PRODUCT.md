@@ -38,20 +38,26 @@ The goal is to create and manage a repository's issues entirely from
 urutau. Writing to GitHub is off until the team's admin turns it on for the
 whole server. The first write is creating an issue, with a title and a body,
 from a bucket: the card lands in that bucket, and no labels are sent, because
-buckets are internal to urutau and never label issues on GitHub.
+buckets are internal to urutau and never label issues on GitHub. The second
+is changing an existing issue from its details modal: its title and body,
+closing it as completed or as not planned, and reopening it. A change is
+refused, with nothing sent, when the issue changed on GitHub since the edit
+started.
 
 ## Operating Context
 
 - Data comes from the GitHub REST API: issues (pull requests excluded), labels,
   assignees and milestones. When the admin has turned GitHub writes on, issues
-  are created through the same API, with the same token that reads them.
+  are created and changed through the same API, with the same token that
+  reads them.
 - Public repositories work without a token, within GitHub's anonymous limit of
   60 API requests an hour. Private repositories and heavier use need a GitHub
   token: either the user's own personal access token, kept in their browser
   and sent only to GitHub, or, for teams that sign in through Keycloak with
   GitHub as a brokered identity provider, the token Keycloak stores, which
-  urutau's server uses to read from GitHub, and to create issues, on the
-  user's behalf. Creating issues needs a token with Issues write permission.
+  urutau's server uses to read from GitHub, and to create and change issues,
+  on the user's behalf. Creating and changing issues needs a token with
+  Issues write permission.
   A third token belongs to agents: an agent integration's token, which the
   admin stores on the server, encrypted, and which the server uses only to
   read issues for that integration.
@@ -64,8 +70,10 @@ buckets are internal to urutau and never label issues on GitHub.
 
 ## Capabilities and Constraints
 
-- Today: reads from GitHub, and creates issues from a bucket once the admin
-  turns GitHub writes on; boards stored on the team's server and
+- Today: reads from GitHub; shows an issue's details, with its description
+  formatted from Markdown, in a modal; creates issues from a bucket, and
+  edits, closes and reopens them from that modal, once the admin turns GitHub
+  writes on; boards stored on the team's server and
   shared by every signed-in user, with live updates and a refusal (and notice)
   when two people save the same board at once; local accounts, where the first
   account is the admin and invites the others by link, and Keycloak sign-in;

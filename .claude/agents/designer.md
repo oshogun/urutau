@@ -50,7 +50,8 @@ expensive kind of wrong.
 3. **API surface**: every GitHub REST call the app makes or will make: method,
    path, query parameters, headers, pagination, how each error status maps to
    a `GitHubError` kind, and the request cost against the anonymous limit of 60
-   an hour. Urutau is read-only toward GitHub; a write (labels, issue state,
+   an hour. Urutau writes to GitHub only to create an issue and to change an existing
+   issue's title, body and state, behind the admin's switch; any other write (labels, assignees,
    comments) is designed only when `frozen_decisions` say the user asked for
    it, and then covers token scopes and what happens when a write fails half
    way.

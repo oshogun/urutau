@@ -8,7 +8,8 @@ a local account or through Keycloak; every signed-in user shares every board,
 and changes reach open boards live over Server-Sent Events. Issues and labels
 are read from the GitHub REST API, by the browser or, for Keycloak users whose
 realm brokers GitHub, by the server. When the admin turns GitHub writes on,
-users also create issues from the board, through the same two paths. AI
+users also create issues from the board and edit, close and reopen them
+from an issue's details modal, through the same two paths. AI
 agents connect to its MCP server at `/mcp` as agent integration accounts the
 admin creates; they read boards and move cards on them, and the server reads
 GitHub for them with a token the admin stores for each integration.
@@ -145,17 +146,19 @@ narrow the contract further.
   clone), `df -h /` checked before any clone or install, everything cleaned up
   per task. Rules in `.claude/ENVIRONMENT.md` § Scratch space; repeat them in
   every envelope.
-- **Creating an issue is the only write to GitHub, and it is off until the
-  admin turns it on.** The switch is server-wide (`GET`/`PATCH /api/settings`,
+- **Creating an issue and changing an existing issue's title, body and state
+  are the only writes to GitHub, and they are off until the admin turns them
+  on.** The switch is server-wide (`GET`/`PATCH /api/settings`,
   the `meta` row `github_writes`). Managing issues entirely from Urutau is the
   product's goal (`PRODUCT.md`), but no other code path writes to a
-  repository (labels, issue state, comments, edits) unless the run's frozen
+  repository (labels, assignees, milestones, comments) unless the run's frozen
   decisions include it. Such a write goes through Design first and stays off
   until the admin turns it on. On the browser path only the interface enforces the
   switch, because the browser calls `api.github.com` itself. Agents, tests and
-  the driver never create an issue on a real repository; the fixtures answer
-  the create request. The MCP tools never write to GitHub: a move or reorder
-  changes only the board in urutau's database.
+  the driver never create or change an issue on a real repository; the
+  fixtures answer the create request and the check and change requests. The
+  MCP tools never write to GitHub: a move or reorder changes only the board in
+  urutau's database.
 - **GitHub tokens go only to `api.github.com`.** There are three:
   - the personal access token a user pastes in Settings stays in that browser
     and is sent only from the browser to `api.github.com`, never to urutau's
