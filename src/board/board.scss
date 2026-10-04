@@ -395,8 +395,25 @@ $page-gutter: $spacing-07;
   white-space: nowrap;
 }
 
+.issue-card__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $spacing-02;
+}
+
+.issue-card--overlay .issue-card__heading::after {
+  content: '';
+  flex: none;
+  inline-size: 2rem;
+  block-size: 2rem;
+}
+
 .issue-card__title {
   @include type.type-style('heading-compact-01');
+
+  flex: 1;
+  min-width: 0;
 
   color: $text-primary;
   overflow-wrap: anywhere;
@@ -673,6 +690,7 @@ $page-gutter: $spacing-07;
   }
 
   ol {
+    padding-inline-start: $spacing-09;
     list-style: decimal;
   }
 
@@ -690,6 +708,10 @@ $page-gutter: $spacing-07;
       vertical-align: text-bottom;
       fill: currentcolor;
     }
+  }
+
+  ol > .issue-body__task {
+    margin-inline-start: -$spacing-09;
   }
 
   blockquote {

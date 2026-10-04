@@ -365,6 +365,25 @@ describe('App', () => {
     const detailsButton = (number: number) =>
       screen.getByRole('button', { name: `Show details of issue #${number}` })
 
+    it('tabs through the handle, the Move to menu, the title link, then the details button', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      await screen.findByText('Crash on save')
+      const card = detailsButton(1).closest('.issue-card') as HTMLElement
+      const handle = within(card).getByRole('button', { name: 'Move issue #1' })
+      const menu = within(card).getByRole('button', { name: 'Actions for issue #1' })
+      const title = within(card).getByRole('link', { name: 'Crash on save' })
+      expect(detailsButton(1).closest('.issue-card__heading')).toContainElement(title)
+
+      handle.focus()
+      await user.tab()
+      expect(menu).toHaveFocus()
+      await user.tab()
+      expect(title).toHaveFocus()
+      await user.tab()
+      expect(detailsButton(1)).toHaveFocus()
+    })
+
     it('opens by click, shows the issue, and returns focus to the button on Escape', async () => {
       const user = userEvent.setup()
       renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })

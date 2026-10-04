@@ -68,11 +68,11 @@ function PlainBody({ body, reason }: { body: string; reason: keyof typeof FAILUR
   const { text, cut } = cutBody(body)
   return (
     <div className="issue-body">
+      <Notice title="This description is shown as plain text." subtitle={FAILURE_SUBTITLE[reason]} />
+      {cut && <TruncatedNotice />}
       <p className="issue-body__plain">
         <TextRuns text={text} />
       </p>
-      <Notice title="This description is shown as plain text." subtitle={FAILURE_SUBTITLE[reason]} />
-      {cut && <TruncatedNotice />}
     </div>
   )
 }
@@ -204,7 +204,7 @@ function renderBlock(block: BodyBlock, key: number, tight = false, lead?: ReactN
     }
     case 'code':
       return (
-        <pre key={key} className="issue-body__code" tabIndex={0}>
+        <pre key={key} className="issue-body__code" tabIndex={0} role="region" aria-label="Code block">
           <code>
             <TextRuns text={block.text} />
           </code>
@@ -214,7 +214,7 @@ function renderBlock(block: BodyBlock, key: number, tight = false, lead?: ReactN
       return <hr key={key} />
     case 'table':
       return (
-        <div key={key} className="issue-body__table" tabIndex={0}>
+        <div key={key} className="issue-body__table" tabIndex={0} role="region" aria-label="Table">
           <table>
             {block.head.length > 0 && (
               <thead>{block.head.map((row, index) => renderRow(row, index, true))}</thead>
@@ -234,7 +234,6 @@ function ParsedView({ parsed }: { parsed: ParsedBody }) {
   }
   return (
     <div className="issue-body">
-      {parsed.blocks.map((block, index) => renderBlock(block, index))}
       {parsed.truncated && <TruncatedNotice />}
       {parsed.omittedHtml && (
         <Notice
@@ -248,6 +247,7 @@ function ParsedView({ parsed }: { parsed: ParsedBody }) {
           subtitle="They have more cells than Urutau displays. Open the issue on GitHub to see them as tables."
         />
       )}
+      {parsed.blocks.map((block, index) => renderBlock(block, index))}
     </div>
   )
 }

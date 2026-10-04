@@ -25,6 +25,12 @@ function renderBody(body: string) {
 
 const plain = (container: HTMLElement) => container.querySelector('.issue-body__plain')
 
+/** True when `first` comes before `second` in document order. */
+const precedes = (first: Element | null, second: Element | null) =>
+  Boolean(first && second && first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING)
+
+const notices = (container: HTMLElement) => [...container.querySelectorAll('.issue-body__notice')]
+
 beforeEach(parsesForReal)
 afterEach(() => mocked.mockReset())
 
@@ -229,6 +235,65 @@ describe('IssueBody', () => {
   })
 
   describe('notices', () => {
+    it('puts the truncation, omitted-HTML and tables notices before the formatted body', async () => {
+      const parsed: ParsedBody = {
+        blocks: [{ type: 'paragraph', children: [{ type: 'text', text: 'start' }] }],
+        omittedHtml: true,
+        truncated: true,
+        tablesAsText: true,
+      }
+      mocked.mockResolvedValue({ status: 'parsed', parsed })
+      const { container } = renderBody('start')
+      const text = await screen.findByText('start')
+      expect(notices(container)).toHaveLength(3)
+      for (const notice of notices(container)) expect(precedes(notice, text)).toBe(true)
+    })
+
+    it('puts the tables-as-text notice before the text', async () => {
+      const table = ['|' + 'a|'.repeat(300), '|' + '-|'.repeat(300), ...Array(230).fill('|b')].join('\n')
+      const { container } = renderBody(table)
+      await screen.findByText('Tables in this description are shown as plain text.')
+      const text = container.querySelector('.issue-body > :not(.issue-body__notice)')
+      expect(text).not.toBeNull()
+      expect(precedes(notices(container)[0], text)).toBe(true)
+    })
+
+    it.each(['timed-out', 'failed'] as const)(
+      'puts the notices before the plain text when the outcome is %s',
+      async (status) => {
+        mocked.mockResolvedValue({ status })
+        const { container } = renderBody('x'.repeat(BODY_RENDER_LIMIT + 5))
+        await screen.findByText('This description is shown as plain text.')
+        expect(notices(container)).toHaveLength(2)
+        for (const notice of notices(container)) expect(precedes(notice, plain(container))).toBe(true)
+      },
+    )
+
+    it('puts the notice before the plain text when rendering throws', async () => {
+      const broken = {
+        blocks: [{ type: 'mystery' }],
+        omittedHtml: false,
+        truncated: false,
+        tablesAsText: false,
+      } as unknown as ParsedBody
+      mocked.mockResolvedValue({ status: 'parsed', parsed: broken })
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const { container } = renderBody('the body text')
+      await screen.findByText(/Urutau could not format it\./)
+      expect(precedes(notices(container)[0], plain(container))).toBe(true)
+      error.mockRestore()
+    })
+
+    it('gives every focusable scroll container a region role and a name', async () => {
+      const { container } = renderBody('```\ncode\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |')
+      await screen.findByText('code')
+      const focusable = [...container.querySelectorAll('.issue-body [tabindex="0"]')]
+      expect(focusable.map((element) => element.getAttribute('aria-label'))).toEqual(['Code block', 'Table'])
+      for (const element of focusable) expect(element).toHaveAttribute('role', 'region')
+      expect(screen.getByRole('region', { name: 'Code block' })).toBe(focusable[0])
+      expect(screen.getByRole('region', { name: 'Table' })).toBe(focusable[1])
+    })
+
     it('says only the start is shown when the tree is truncated', async () => {
       const parsed: ParsedBody = {
         blocks: [{ type: 'paragraph', children: [{ type: 'text', text: 'start' }] }],

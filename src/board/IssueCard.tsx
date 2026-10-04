@@ -74,19 +74,6 @@ export function IssueCard({
             {tag.short}
           </Tag>
         )}
-        {onOpenDetails && !isOverlay && (
-          <Button
-            className="issue-card__details"
-            data-issue-details={issue.number}
-            kind="ghost"
-            size="sm"
-            hasIconOnly
-            renderIcon={Maximize}
-            iconDescription={`Show details of issue #${issue.number}`}
-            tooltipPosition="bottom"
-            onClick={(event) => onOpenDetails(event.currentTarget)}
-          />
-        )}
         {!closed && onMoveTo && moveTargets.length > 0 && !isOverlay && (
           <OverflowMenu
             size="sm"
@@ -105,15 +92,30 @@ export function IssueCard({
         )}
       </div>
 
-      <a
-        className="issue-card__title"
-        href={issue.url}
-        target="_blank"
-        rel="noreferrer"
-        draggable={false}
-      >
-        {issue.title}
-      </a>
+      <div className="issue-card__heading">
+        <a
+          className="issue-card__title"
+          href={issue.url}
+          target="_blank"
+          rel="noreferrer"
+          draggable={false}
+        >
+          {issue.title}
+        </a>
+        {onOpenDetails && !isOverlay && (
+          <Button
+            className="issue-card__details"
+            data-issue-details={issue.number}
+            kind="ghost"
+            size="sm"
+            hasIconOnly
+            renderIcon={Maximize}
+            iconDescription={`Show details of issue #${issue.number}`}
+            tooltipPosition="bottom"
+            onClick={(event) => onOpenDetails(event.currentTarget)}
+          />
+        )}
+      </div>
 
       {issue.labels.length > 0 && (
         <ul className="issue-card__labels" aria-label="Labels">
