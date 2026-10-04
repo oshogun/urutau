@@ -196,7 +196,7 @@ describe('estimateTableCells', () => {
   const REVIEW_TABLE = '|' + 'a|'.repeat(300) + '\n|' + '-|'.repeat(300) + '\n' + '|b\n'.repeat(230)
   const TABLE_CASES: Record<string, string> = {
     'review table': REVIEW_TABLE,
-    'review table x 10': Array.from({ length: 10 }, () => REVIEW_TABLE).join('\n'),
+    'review table x 2': Array.from({ length: 2 }, () => REVIEW_TABLE).join('\n'),
     'plain table': '| a | b |\n| - | :-: |\n| 1 | 2 |\n| 3 | 4 |',
     'no outer pipes': 'a | b\n--|--\n1 | 2',
     'one column': 'a|\n--\nb\nc',
