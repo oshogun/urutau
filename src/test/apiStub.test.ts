@@ -44,3 +44,45 @@ describe('the api stub refuses a username an agent integration has', () => {
     expect(stub.users.map((user) => user.username)).toEqual(['admin'])
   })
 })
+
+describe('the api stub answers PATCH api/issues like the server', () => {
+  const fields = { title: 'Renamed' }
+  const body = { expectedUpdatedAt: '2026-01-01T00:00:00Z', fields }
+
+  it('answers 200 with an updated issue for a Keycloak-style session when the switch is on', async () => {
+    const stub = installApiStub({ githubAccess: { mode: 'server' }, githubWrites: true })
+    await useSession.getState().load()
+    const answer = await apiRequest<{ issue: Record<string, unknown> }>('issues/acme/widgets/7', { method: 'PATCH', body })
+    expect(answer.issue).toMatchObject({ number: 7, title: 'Renamed', state: 'open' })
+    expect(stub.requests('PATCH issues/acme/widgets/7')).toHaveLength(1)
+  })
+
+  it('refuses in the server order: browser mode, switch off, bad path, bad body', async () => {
+    installApiStub({ githubWrites: true })
+    await useSession.getState().load()
+    expect((await failure(apiRequest('issues/acme/widgets/7', { method: 'PATCH', body }))).code).toBe('forbidden')
+
+    const off = installApiStub({ githubAccess: { mode: 'server' } })
+    await useSession.getState().load()
+    expect((await failure(apiRequest('issues/acme/widgets/7', { method: 'PATCH', body }))).code).toBe('github-writes-off')
+    off.setGithubWrites(true)
+    expect((await failure(apiRequest('issues/acme/widgets/0', { method: 'PATCH', body }))).status).toBe(400)
+    expect((await failure(apiRequest('issues/acme/widgets/7', { method: 'PATCH', body: { fields } }))).status).toBe(400)
+  })
+
+  it('lets a handler answer, and a signed-out session gets 401', async () => {
+    installApiStub({
+      githubAccess: { mode: 'server' },
+      githubWrites: true,
+      updateIssue: ({ number }) => new Response(JSON.stringify({ error: 'stale-issue', message: String(number) }), { status: 409 }),
+    })
+    await useSession.getState().load()
+    const error = await failure(apiRequest('issues/acme/widgets/7', { method: 'PATCH', body }))
+    expect(error.status).toBe(409)
+    expect(error.code).toBe('stale-issue')
+
+    installApiStub({ session: 'signed-out' })
+    await useSession.getState().load()
+    expect((await failure(apiRequest('issues/acme/widgets/7', { method: 'PATCH', body }))).code).toBe('signed-out')
+  })
+})

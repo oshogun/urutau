@@ -66,7 +66,7 @@ EOF
 ```
 
 The reply looks like `{ ok, result, githubRequests, rateLimitRemaining, logs }`. `logs` lists
-console errors, page errors, failed requests and every GitHub `GET` and `POST` made during that request
+console errors, page errors, failed requests and every GitHub `GET`, `POST` and `PATCH` made during that request
 (method and URL only, never a body or header; CORS preflight `OPTIONS` calls are not listed). If
 your code throws, the reply is HTTP 500 with `{ ok: false, error, logs }`.
 Screenshots go to `.claude/skills/run-urutau/shots/<name>.png` (git-ignored); open them with
@@ -105,11 +105,11 @@ The following role-based selectors are verified:
 |---|---|
 | `acme/widgets` | 13 open issues over two pages, one PR (the app hides it), 3 recently closed issues plus 1 closed long ago (outside the window), labels that auto-link to *In progress* and *In review* |
 | `acme/empty` | no labels, no issues |
-| `acme/readonly` | two open issues; creating an issue answers 403 `Resource not accessible by personal access token` |
+| `acme/readonly` | two open issues; creating or changing an issue answers 403 `Resource not accessible by personal access token` |
 | `acme/limited` | 403 rate-limit error. Through an agent integration, this also records the token's rate as spent: that integration's other repositories answer `github-rate-limited` with `reserve: true` for about 45 minutes. Use a separate integration for `acme/limited`, or read it last. |
 | anything else | 404 (looks like a private repo without a token) |
 
-On `acme/widgets`, `acme/empty` and `acme/readonly`, any method other than `GET`, `HEAD`, `POST` and `OPTIONS` answers 405 with `Allow: GET, POST, OPTIONS`; `acme/limited` answers 403 to every method. `fixtureFetch` (the fetch-shaped
+On `acme/widgets`, `acme/empty` and `acme/readonly`, any method other than `GET`, `HEAD`, `POST`, `PATCH` and `OPTIONS` answers 405 with `Allow: GET, POST, PATCH, OPTIONS`; `acme/limited` answers 403 to every method. `fixtureFetch` (the fetch-shaped
 export the launcher uses) rejects any URL that does not start with `https://api.github.com/` with
 `TypeError('fixture fetch answers only https://api.github.com')`; a log line from the launcher
 that is not a `GET`, or a `TypeError` with that text, means something tried to leave the fixtures.
@@ -117,6 +117,21 @@ that is not a `GET`, or a `TypeError` with that text, means something tried to l
 Creating an issue (`POST /repos/{owner}/{repo}/issues`) works on `acme/widgets` and `acme/empty` with any
 non-empty `Authorization` header (paste `fixture-token` in Settings), answers 401 without one, and keeps the new
 issue until the driver stops. No create reaches real GitHub in fixtures mode.
+
+`GET /repos/{owner}/{repo}/issues/{number}` answers the issue from the open or closed list (the pull
+request #11 on `acme/widgets` carries its `pull_request` key), or 404. Changing an issue
+(`PATCH` of the same URL) answers 401 without an `Authorization` header, 403 on `acme/readonly`, 404
+for an unknown number, 422 for a body that is not a JSON object, a key other than `title`, `body`,
+`state` and `state_reason`, a blank or non-text `title`, a `state` other than `open` or `closed`, or a
+`state_reason` other than `completed`, `not_planned`, `reopened` or null. Otherwise it applies the
+fields, moves the issue between the open and closed lists when `state` changes (closing sets
+`state_reason`, default `completed`, and `closed_at`; reopening sets `reopened` and clears
+`closed_at`), sets `updated_at` to now in whole seconds, and answers 200 with the issue. Any other
+`PATCH` path answers 404. Changes are kept until the driver stops. The stale case is `acme/widgets`
+#2: its single-issue answer is a newer version than the list holds (title "Add dark mode to the
+settings page and the editor", one more line in the description, `updated_at` an hour before the
+driver started), so the first change to it is refused as stale; "Apply again" then succeeds, and the
+list and the single-issue answer serve the changed issue from then on.
 
 **Real GitHub.** Restart the driver with `URUTAU_GITHUB=live`. Anonymous use allows 60 requests
 an hour; `expressjs/express` costs about 6 per load. The first line checks the budget, and that

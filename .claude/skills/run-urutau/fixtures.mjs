@@ -6,17 +6,34 @@
 //   acme/widgets  labeled open issues (two pages), one PR (filtered out by the app),
 //                 recently closed issues, and one closed long ago (outside the window)
 //   acme/empty    no labels, no issues
-//   acme/readonly two open issues; creating an issue answers 403, like a token without write access
+//   acme/readonly two open issues; creating or changing an issue answers 403, like a token without write access
 //   acme/limited  403 with an exhausted rate limit
 //   anything else 404, like a private repository without a token
 //
 // Creating an issue (POST /repos/{owner}/{repo}/issues) works on acme/widgets and acme/empty with any
 // non-empty Authorization header; the new issue is kept in memory until the driver stops.
 //
+// GET /repos/{owner}/{repo}/issues/{number} answers the issue from the open or closed list (the pull
+// request #11 with its pull_request key), or 404. acme/widgets #2 is the stale case: its single-issue
+// answer is a newer version than the list holds (another title, one more line in the description,
+// updated an hour before the driver started), so the first change to it is refused as stale. After
+// the first PATCH to it, the list and the single-issue answer both serve the changed issue.
+//
+// Changing an issue (PATCH /repos/{owner}/{repo}/issues/{number}) answers, in order: 401 without an
+// Authorization header; 403 on acme/readonly; 404 for an unknown number; 422 for a body that is not
+// a JSON object, a key other than title, body, state and state_reason, a title that is not
+// non-blank text, a state other than open or closed, or a state_reason other than completed,
+// not_planned, reopened or null. Otherwise it applies the fields to GitHub's current version of the
+// issue and answers 200 with it. A state change moves the issue between the open and closed lists
+// (closing sets state_reason, default completed, and closed_at; reopening sets state_reason
+// reopened and clears closed_at); the same state leaves state_reason alone. updated_at is the time
+// of the change, in whole seconds. Changes are kept in memory until the driver stops. Any other
+// PATCH path answers 404.
+//
 // answerGitHub (Request to Response) and fixtureFetch (fetch-shaped, rejects any URL outside
 // https://api.github.com/) answer the same data for a server-side caller such as the MCP launcher;
-// routeGitHubFixtures wraps answerGitHub for Playwright. Any method other than GET, HEAD, POST and
-// OPTIONS on acme/widgets, acme/empty or acme/readonly answers 405; acme/limited answers 403 to
+// routeGitHubFixtures wraps answerGitHub for Playwright. Any method other than GET, HEAD, POST, PATCH
+// and OPTIONS on acme/widgets, acme/empty or acme/readonly answers 405; acme/limited answers 403 to
 // every method.
 
 const DAY = 86_400_000
@@ -282,6 +299,97 @@ REPOS['acme/readonly'] = {
   closed: [],
 }
 
+const STARTED_AT = Date.now()
+
+/**
+ * Versions GitHub holds that are newer than the list's: the single-issue answer and the base of
+ * the next PATCH use them, until a PATCH replaces the issue in the list.
+ */
+const NEWER = new Map([
+  [
+    'acme/widgets#2',
+    {
+      ...OPEN.find((item) => item.number === 2),
+      title: 'Add dark mode to the settings page and the editor',
+      body: `${BODY_2}\n- Also follow the theme in the widget editor`,
+      updated_at: new Date(STARTED_AT - 60 * 60 * 1000).toISOString(),
+    },
+  ],
+])
+
+const wholeSeconds = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+
+/** The issue with `number` as GitHub holds it now, and the list it sits in. */
+function findIssue(key, fixture, number) {
+  const newer = NEWER.get(`${key}#${number}`)
+  const inOpen = fixture.open.find((item) => item.number === number)
+  const inClosed = fixture.closed.find((item) => item.number === number)
+  const listed = inOpen ?? inClosed
+  return listed ? { issue: newer ?? listed, listed, list: inOpen ? fixture.open : fixture.closed } : null
+}
+
+const invalid = (field, code) =>
+  json(422, { message: 'Validation Failed', errors: [{ resource: 'Issue', code, field }] })
+
+/** Answers PATCH .../issues/{number} the way GitHub does for the cases the app handles. */
+async function updateIssue(request, key, fixture, number) {
+  const authorization = request.headers.get('authorization') ?? ''
+  if (authorization.replace(/^Bearer\s*/i, '').trim() === '') {
+    return json(401, { message: 'Requires authentication' })
+  }
+  if (key === 'acme/readonly') {
+    return json(403, {
+      message: 'Resource not accessible by personal access token',
+      documentation_url: 'https://docs.github.com/rest/issues/issues#update-an-issue',
+      status: '403',
+    })
+  }
+  const found = findIssue(key, fixture, number)
+  if (!found) return json(404, { message: 'Not Found' })
+  let fields
+  try {
+    fields = JSON.parse((await request.text()) || '')
+  } catch {
+    fields = null
+  }
+  if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) return invalid('body', 'invalid')
+  const unknownKey = Object.keys(fields).find((field) => !['title', 'body', 'state', 'state_reason'].includes(field))
+  if (unknownKey !== undefined) return invalid(unknownKey, 'invalid')
+  if ('title' in fields && (typeof fields.title !== 'string' || fields.title.trim() === '')) {
+    return invalid('title', 'missing_field')
+  }
+  if ('body' in fields && fields.body !== null && typeof fields.body !== 'string') return invalid('body', 'invalid')
+  if ('state' in fields && fields.state !== 'open' && fields.state !== 'closed') return invalid('state', 'invalid')
+  if ('state_reason' in fields && ![null, 'completed', 'not_planned', 'reopened'].includes(fields.state_reason)) {
+    return invalid('state_reason', 'invalid')
+  }
+
+  const updated = { ...found.issue, updated_at: wholeSeconds() }
+  if ('title' in fields) updated.title = fields.title
+  if ('body' in fields) updated.body = fields.body
+  if ('state' in fields && fields.state !== updated.state) {
+    if (fields.state === 'closed') {
+      updated.state = 'closed'
+      updated.state_reason = fields.state_reason ?? 'completed'
+      updated.closed_at = new Date().toISOString()
+    } else {
+      updated.state = 'open'
+      updated.state_reason = 'reopened'
+      updated.closed_at = null
+    }
+  }
+  NEWER.delete(`${key}#${number}`)
+  found.list.splice(found.list.indexOf(found.listed), 1)
+  const target = updated.state === 'open' ? fixture.open : fixture.closed
+  if (updated.state === 'open') {
+    const after = target.findIndex((item) => item.number > number)
+    target.splice(after === -1 ? target.length : after, 0, updated)
+  } else {
+    target.push(updated)
+  }
+  return json(200, updated)
+}
+
 /** Answers POST .../issues the way GitHub does for the cases the app handles. */
 async function createIssue(request, key, fixture) {
   const authorization = request.headers.get('authorization') ?? ''
@@ -348,13 +456,15 @@ export async function answerGitHub(request) {
       status: 204,
       headers: {
         'access-control-allow-origin': '*',
-        'access-control-allow-methods': 'GET, POST, OPTIONS',
+        'access-control-allow-methods': 'GET, POST, PATCH, OPTIONS',
         'access-control-allow-headers': request.headers.get('access-control-request-headers') ?? '*',
       },
     })
   }
   const url = new URL(request.url)
-  const [, repos, owner, name, resource] = url.pathname.split('/')
+  const parts = url.pathname.split('/')
+  const [, repos, owner, name, resource, number] = parts
+  const singleIssuePath = parts.length === 6
   const key = `${owner}/${name}`.toLowerCase()
   if (repos !== 'repos') return json(404, { message: 'Not Found' })
 
@@ -371,12 +481,22 @@ export async function answerGitHub(request) {
   if (request.method === 'POST') {
     return resource === 'issues' ? createIssue(request, key, fixture) : json(404, { message: 'Not Found' })
   }
+  if (request.method === 'PATCH') {
+    return singleIssuePath && resource === 'issues' && /^[1-9][0-9]*$/.test(number ?? '')
+      ? updateIssue(request, key, fixture, Number(number))
+      : json(404, { message: 'Not Found' })
+  }
   if (request.method !== 'GET' && request.method !== 'HEAD') {
-    return json(405, { message: 'Method Not Allowed' }, { allow: 'GET, POST, OPTIONS' })
+    return json(405, { message: 'Method Not Allowed' }, { allow: 'GET, POST, PATCH, OPTIONS' })
   }
   if (!resource) return json(200, fixture.repo)
   if (resource === 'labels') return json(200, fixture.labels)
   if (resource !== 'issues') return json(404, { message: 'Not Found' })
+  if (number !== undefined) {
+    if (!singleIssuePath) return json(404, { message: 'Not Found' })
+    const found = /^[1-9][0-9]*$/.test(number) ? findIssue(key, fixture, Number(number)) : null
+    return found ? json(200, found.issue) : json(404, { message: 'Not Found' })
+  }
 
   if (url.searchParams.get('state') === 'closed') return json(200, fixture.closed)
 

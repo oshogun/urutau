@@ -25,10 +25,11 @@ export type ApiErrorCode =
   | 'invite-invalid' // 404: invite token unknown, already used, revoked or expired
   | 'keycloak-disabled' // 404: a Keycloak route while Keycloak is not configured
   | 'github-path-not-allowed' // 404: GitHub proxy path or query outside the allow-list
-  | 'github-writes-off' // 403: the admin has not turned on GitHub writes for this server
+  | 'github-writes-off' // 403: the admin has not turned on GitHub writes (creating and changing issues) for this server
   | 'already-set-up' // 409: first-run after the first account exists
   | 'username-taken' // 409
   | 'stale-board' // 409: the save's baseVersion is not the stored version (body: StaleBoardResponse)
+  | 'stale-issue' // 409: the issue's updated_at on GitHub differs from expectedUpdatedAt; nothing was sent (body: StaleIssueResponse)
   | 'cannot-remove-admin' // 409: removing the admin account
   | 'encryption-key-missing' // 409: TOKEN_ENCRYPTION_KEY is not set, so the server stores no GitHub token
   | 'not-a-github-token' // 400: the value is an Urutau MCP token (urutau_mcp_…), not a GitHub token
@@ -261,7 +262,7 @@ export interface GitHubAccessError extends ApiErrorBody {
 
 /** GET /api/settings (any signed-in user) and the 200 body of PATCH /api/settings. */
 export interface ServerSettings {
-  /** True when the admin has turned on creating issues on GitHub from Urutau. False on new and upgraded servers. */
+  /** True when the admin has turned on creating and changing issues on GitHub from Urutau. False on new and upgraded servers. */
   githubWrites: boolean
 }
 
@@ -319,6 +320,52 @@ export interface GitHubFailureDetail {
 export interface GitHubRejectedError extends ApiErrorBody {
   error: 'github-rejected'
   github: GitHubFailureDetail
+}
+
+// ---------------------------------------------------------------- changing issues
+
+/** The reasons Urutau sends with a state change. GitHub's `duplicate` is never sent. */
+export type IssueStateReason = 'completed' | 'not_planned' | 'reopened'
+
+/**
+ * The fields Urutau may change on an issue, with GitHub's own names: the JSON body of GitHub's
+ * PATCH /repos/{owner}/{repo}/issues/{issue_number} on either path. Only the fields the person
+ * changed are present. `title` is trimmed (1 to NEW_ISSUE_TITLE_MAX code points); `body` is sent as
+ * typed (0 to NEW_ISSUE_BODY_MAX code points, '' clears it); `state` and `state_reason` are present
+ * together or not at all: 'closed' with 'completed' or 'not_planned', 'open' with 'reopened'.
+ */
+export interface IssueUpdateFields {
+  title?: string
+  body?: string
+  state?: 'open' | 'closed'
+  state_reason?: IssueStateReason
+}
+
+/** PATCH /api/issues/:owner/:name/:number (Keycloak users whose realm brokers GitHub). */
+export interface UpdateIssueRequest {
+  /** The issue's updated_at, as GitHub sent it, when the change started. The server refuses with 409 stale-issue when GitHub's differs. */
+  expectedUpdatedAt: string
+  /** At least one field. */
+  fields: IssueUpdateFields
+}
+
+/** 200 from PATCH /api/issues/:owner/:name/:number. */
+export interface UpdateIssueResponse {
+  /** GitHub's PATCH 200 body, unchanged; null when it was not JSON. The browser validates and maps it. */
+  issue: unknown
+}
+
+/** Body of a 409 `stale-issue`. */
+export interface StaleIssueResponse extends ApiErrorBody {
+  error: 'stale-issue'
+  /** GitHub's answer to the check request for the issue now, unchanged. */
+  current: unknown
+}
+
+/** Body of a 502 `github-rejected` from the change route: which of the two GitHub requests was refused. */
+export interface IssueUpdateRejectedError extends GitHubRejectedError {
+  /** 'check': GitHub refused the GET, so nothing was sent. 'write': GitHub refused the PATCH. */
+  step: 'check' | 'write'
 }
 
 // ---------------------------------------------------------------- agent integrations (admin)

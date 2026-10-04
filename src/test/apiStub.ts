@@ -14,6 +14,7 @@ import type {
   CreateIntegrationResponse,
   CreateInviteRequest,
   CreateIssueResponse,
+  IssueUpdateFields,
   CreateInviteResponse,
   CredentialsRequest,
   GitHubAccess,
@@ -32,9 +33,11 @@ import type {
   SetIntegrationReposResponse,
   StaleBoardResponse,
   StoredBoard,
+  UpdateIssueResponse,
   UserSummary,
 } from '../domain/api'
 import { isBoardConfig } from '../domain/board'
+import { parseUpdateIssueRequest } from '../domain/issueUpdate'
 import { parseRepoInput, repoKey } from '../domain/repoRef'
 import type { BoardConfig } from '../domain/types'
 
@@ -80,6 +83,22 @@ export interface ApiStubOptions {
   createIssue?: (request: {
     owner: string
     name: string
+    body: unknown
+    headers: Record<string, string>
+  }) => Response | undefined
+  /**
+   * Answers PATCH api/issues/<owner>/<name>/<number> once the stub's own checks pass, in the
+   * server's order: session (401 signed-out), session mode 'server' (else 403 forbidden), switch on
+   * (else 403 github-writes-off), owner, name and number by the server's patterns (else 400
+   * invalid-request), body by the server's rules (else 400 invalid-request). The stale check,
+   * the host guard, body limit, 424, 502, 503 and 504 are not modelled; return them from this
+   * handler or inject them with failNext. Return undefined for the default answer: 200 with
+   * `{ issue: stubUpdatedIssue(`${owner}/${name}`, number, fields) }`.
+   */
+  updateIssue?: (request: {
+    owner: string
+    name: string
+    number: number
     body: unknown
     headers: Record<string, string>
   }) => Response | undefined
@@ -185,6 +204,23 @@ export function stubCreatedIssue(fullName: string, number: number, title: string
     created_at: now,
     updated_at: now,
     closed_at: null,
+  }
+}
+
+/**
+ * A GitHub issue JSON object as GitHub's update-issue 200 returns it: the created-issue shape with
+ * the title and description from `fields` when present, the state and reason from `fields`
+ * (closed: closed_at now; open: null), and updated_at now.
+ */
+export function stubUpdatedIssue(fullName: string, number: number, fields: IssueUpdateFields): Record<string, unknown> {
+  const issue = stubCreatedIssue(fullName, number, fields.title ?? `Issue ${number}`, fields.body)
+  const now = new Date().toISOString()
+  return {
+    ...issue,
+    state: fields.state ?? 'open',
+    state_reason: fields.state_reason ?? null,
+    closed_at: fields.state === 'closed' ? now : null,
+    updated_at: now,
   }
 }
 
@@ -605,6 +641,32 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
       createdIssues += 1
       const issue = stubCreatedIssue(`${owner}/${name}`, 1000 + createdIssues, fields.title.trim(), fields.body?.trim() === '' ? undefined : fields.body)
       return toResponse(201, { issue } satisfies CreateIssueResponse)
+    }
+
+    if (head === 'issues' && method === 'PATCH') {
+      const [owner = '', name = '', digits = '', ...more] = tail.split('/').map(decodeURIComponent)
+      if (more.length > 0) return error(404, 'not-found', 'No such route.')
+      if (current.githubAccess.mode !== 'server') {
+        return error(403, 'forbidden', 'This account changes issues from the browser.')
+      }
+      if (!githubWrites) return error(403, 'github-writes-off', 'The admin has not turned on changing issues on GitHub.')
+      const number = Number(digits)
+      if (
+        !OWNER_PATTERN.test(owner) ||
+        !NAME_PATTERN.test(name) ||
+        name === '.' ||
+        name === '..' ||
+        !/^[1-9][0-9]{0,9}$/.test(digits) ||
+        number > 2147483647
+      ) {
+        return error(400, 'invalid-request', 'The path must be a repository as owner/name and an issue number.')
+      }
+      const parsed = parseUpdateIssueRequest(body)
+      if (!parsed.ok) return error(400, 'invalid-request', parsed.message)
+      const answer = options.updateIssue?.({ owner, name, number, body, headers: call.headers })
+      if (answer) return answer
+      const issue = stubUpdatedIssue(`${owner}/${name}`, number, parsed.value.fields)
+      return toResponse(200, { issue } satisfies UpdateIssueResponse)
     }
 
     if (head === 'github' && method === 'GET') {
