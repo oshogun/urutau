@@ -1,5 +1,5 @@
 /** Structured logging: one JSON object per line on stdout, with known secrets removed. */
-import { redactPatterns } from './github/tokenFormats.ts'
+import { SECRET_PATTERNS } from './github/tokenFormats.ts'
 
 export type LogFields = Record<string, string | number | boolean | null>
 
@@ -55,8 +55,37 @@ export function createLogger(options: LoggerOptions = {}): Logger {
   const now = options.now ?? (() => new Date())
   const secrets = options.secrets ?? []
   const clean = (text: string) => {
-    const literal = redact(text, secrets)
-    return options.patterns ? redactPatterns(literal) : literal
+    // Token matches and literal-secret matches are both found on the original text and
+    // overlapping ones are merged, so each merged span becomes one [redacted]. Replacing
+    // one kind first would split a span of the other kind and leave part of it printed.
+    // Each pattern is copied so a lastIndex left on the shared global regex is ignored.
+    const spans: Array<[number, number]> = []
+    if (options.patterns) {
+      for (const pattern of SECRET_PATTERNS) {
+        for (const match of text.matchAll(new RegExp(pattern.source, pattern.flags))) spans.push([match.index, match.index + match[0].length])
+      }
+    }
+    for (const secret of secrets) {
+      if (!secret) continue
+      for (let at = text.indexOf(secret); at !== -1; at = text.indexOf(secret, at + 1)) {
+        spans.push([at, at + secret.length])
+      }
+    }
+    if (spans.length === 0) return text
+    spans.sort((x, y) => x[0] - y[0] || y[1] - x[1])
+    let result = ''
+    let last = 0
+    let [start, end] = spans[0]
+    for (const [from, to] of spans.slice(1)) {
+      if (from <= end) {
+        end = Math.max(end, to)
+        continue
+      }
+      result += text.slice(last, start) + REDACTED
+      last = end
+      ;[start, end] = [from, to]
+    }
+    return result + text.slice(last, start) + REDACTED + text.slice(end)
   }
   const emit = (level: string, msg: string, fields: LogFields = {}) => {
     const cleaned: LogFields = {}
