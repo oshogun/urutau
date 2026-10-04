@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
@@ -787,6 +787,190 @@ describe('App', () => {
       const created = formatDateTime(stub.integrations[0].tokens[0].createdAt)
       expect(await screen.findByRole('button', { name: `Revoke token laptop, created ${created}` })).toBeInTheDocument()
       expect(screen.queryByText(text)).not.toBeInTheDocument()
+    })
+
+    const listDown = { status: 500, error: 'server-error', message: 'The database is down.' } as const
+
+    it('keeps the new token on the page, with focus on it, when the list fails to reload', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+      await user.type(await screen.findByLabelText('Token name'), 'laptop')
+      stub.failNext('GET integrations', listDown)
+      await user.click(screen.getByRole('button', { name: 'Create token' }))
+
+      const notice = (await screen.findByText('Could not load the integrations.')).closest('[role="alert"]')
+      expect(notice).not.toBeNull()
+      expect(screen.queryByRole('table', { name: 'Agent integrations' })).not.toBeInTheDocument()
+      const secret = await screen.findByText(/^urutau_mcp_A+\d$/)
+      const tile = secret.closest('.users__link')
+      expect(tile).not.toBeNull()
+      expect(tile?.textContent).toMatch(/Urutau MCP token for laptop of planner-bot\. It is shown only now/)
+      expect(notice?.compareDocumentPosition(tile as Node)).toBe(Node.DOCUMENT_POSITION_PRECEDING)
+      await waitFor(() => expect(tile?.contains(document.activeElement)).toBe(true))
+      expect(document.activeElement).not.toBe(document.body)
+    })
+
+    it('shows the new token once, in the details row, after the list recovers', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+      await user.type(await screen.findByLabelText('Token name'), 'laptop')
+      stub.failNext('GET integrations', listDown)
+      await user.click(screen.getByRole('button', { name: 'Create token' }))
+      const secret = (await screen.findByText(/^urutau_mcp_A+\d$/)).textContent ?? ''
+      await screen.findByText('Could not load the integrations.')
+
+      await queryClient.invalidateQueries({ queryKey: INTEGRATIONS_QUERY_KEY })
+      await screen.findByRole('table', { name: 'Agent integrations' })
+      expect(screen.queryByText('Could not load the integrations.')).not.toBeInTheDocument()
+      const shown = screen.getAllByText(secret)
+      expect(shown).toHaveLength(1)
+      expect(shown[0].closest('.integrations__details')).not.toBeNull()
+      expect(screen.getAllByText(/It is shown only now/)).toHaveLength(1)
+    })
+
+    it('replaces the shown token when another one is created', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      const first = (await issueToken(user)).textContent ?? ''
+
+      await user.type(screen.getByLabelText('Token name'), 'desk')
+      await user.click(screen.getByRole('button', { name: 'Create token' }))
+      await waitFor(() => expect(stub.integrations[0].tokens).toHaveLength(2))
+      await waitFor(() => expect(screen.queryByText(first)).not.toBeInTheDocument())
+      const second = await screen.findByText(/^urutau_mcp_A+\d$/)
+      expect(second.textContent).not.toBe(first)
+      expect(screen.getAllByText(/It is shown only now/)).toHaveLength(1)
+    })
+
+    it('drops the shown token when that token is revoked', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      const secret = (await issueToken(user)).textContent ?? ''
+
+      const created = formatDateTime(stub.integrations[0].tokens[0].createdAt)
+      await user.click(await screen.findByRole('button', { name: `Revoke token laptop, created ${created}` }))
+      await user.click(await screen.findByRole('button', { name: 'Revoke token' }))
+
+      await waitFor(() => expect(stub.integrations[0].tokens).toEqual([]))
+      await waitFor(() => expect(screen.queryByText(secret)).not.toBeInTheDocument())
+      expect(screen.queryByText(/It is shown only now/)).not.toBeInTheDocument()
+    })
+
+    const second = { username: 'second-bot', repos: ['acme/widgets'], githubToken: false }
+
+    it('does not bring the shown token back when its row is re-opened after another row', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner, second] })
+      const secret = (await issueToken(user)).textContent ?? ''
+
+      await expand(user, 'second-bot')
+      await waitFor(() => expect(screen.queryByText(secret)).not.toBeInTheDocument())
+      await expand(user)
+      await screen.findByLabelText('Token name')
+      expect(screen.queryByText(secret)).not.toBeInTheDocument()
+      expect(screen.queryByText(/It is shown only now/)).not.toBeInTheDocument()
+    })
+
+    it('keeps the open row\'s token when a create from a closed row resolves late', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner, second] })
+      await screen.findByRole('button', { name: 'Show details of planner-bot' })
+      const gate = stub.hold(`POST integrations/${stub.integrations[0].id}/tokens`)
+      await expand(user)
+      await user.type(await screen.findByLabelText('Token name'), 'slow')
+      await user.click(screen.getByRole('button', { name: 'Create token' }))
+
+      await expand(user, 'second-bot')
+      await user.type(await screen.findByLabelText('Token name'), 'fast')
+      await user.click(screen.getByRole('button', { name: 'Create token' }))
+      const secret = await screen.findByText(/^urutau_mcp_A+\d$/)
+      const text = secret.textContent ?? ''
+      const tile = secret.closest('.users__link')
+      await waitFor(() => expect(tile).toHaveFocus())
+
+      gate.release()
+      await waitFor(() => expect(stub.integrations[0].tokens).toHaveLength(1))
+      await act(async () => {})
+      expect(screen.getByText(text)).toBeInTheDocument()
+      expect(screen.getAllByText(/It is shown only now/)).toHaveLength(1)
+      expect(tile).toHaveFocus()
+    })
+
+    it('keeps the newest token when an older create of the same row resolves after a re-open', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await screen.findByRole('button', { name: 'Show details of planner-bot' })
+      const gate = stub.hold((call) => call.method === 'POST' && (call.body as { label?: string } | null)?.label === 'slow2')
+      await expand(user)
+      await user.type(await screen.findByLabelText('Token name'), 'slow2')
+      await user.click(screen.getByRole('button', { name: 'Create token' }))
+      await waitFor(() => expect(stub.requests(`POST integrations/${stub.integrations[0].id}/tokens`)).toHaveLength(1))
+
+      await expand(user)
+      await expand(user)
+      await user.type(await screen.findByLabelText('Token name'), 'fast2')
+      await user.click(screen.getByRole('button', { name: 'Create token' }))
+      const secret = await screen.findByText(/^urutau_mcp_A+\d$/)
+      const text = secret.textContent ?? ''
+      const tile = secret.closest('.users__link')
+      await waitFor(() => expect(tile).toHaveFocus())
+      expect(screen.getByText(/Urutau MCP token for fast2\. It is shown only now/)).toBeInTheDocument()
+
+      gate.release()
+      await waitFor(() => expect(stub.integrations[0].tokens).toHaveLength(2))
+      await act(async () => {})
+      expect(screen.getAllByText(text)).toHaveLength(1)
+      expect(screen.getAllByText(/It is shown only now/)).toHaveLength(1)
+      expect(screen.queryByText(/Urutau MCP token for slow2/)).not.toBeInTheDocument()
+      expect(tile).toHaveFocus()
+    })
+
+    it('puts focus back on the token tile when the list recovers while the tile had focus', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+      await user.type(await screen.findByLabelText('Token name'), 'laptop')
+      stub.failNext('GET integrations', listDown)
+      await user.click(screen.getByRole('button', { name: 'Create token' }))
+      await screen.findByText('Could not load the integrations.')
+      const above = (await screen.findByText(/^urutau_mcp_A+\d$/)).closest('.users__link')
+      await waitFor(() => expect(above).toHaveFocus())
+
+      await queryClient.invalidateQueries({ queryKey: INTEGRATIONS_QUERY_KEY })
+      await screen.findByRole('table', { name: 'Agent integrations' })
+      const secret = screen.getByText(/^urutau_mcp_A+\d$/)
+      const tile = secret.closest('.users__link')
+      expect(tile?.closest('.integrations__details')).not.toBeNull()
+      await waitFor(() => expect(tile?.contains(document.activeElement)).toBe(true))
+    })
+
+    it('does not show the discarded token above a later list error', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner, second] })
+      const secret = (await issueToken(user)).textContent ?? ''
+
+      await expand(user, 'second-bot')
+      stub.failNext('GET integrations', listDown)
+      await queryClient.invalidateQueries({ queryKey: INTEGRATIONS_QUERY_KEY })
+      await screen.findByText('Could not load the integrations.')
+      expect(screen.queryByText(secret)).not.toBeInTheDocument()
+      expect(screen.queryByText(/It is shown only now/)).not.toBeInTheDocument()
+    })
+
+    it('does not bring the shown token back after a new integration opens its own row', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      const secret = (await issueToken(user)).textContent ?? ''
+
+      await user.type(screen.getByLabelText('Integration name'), 'third-bot')
+      await user.click(screen.getByRole('button', { name: 'Create integration' }))
+      await screen.findByRole('button', { name: 'Show details of third-bot' })
+      await waitFor(() => expect(screen.queryByText(secret)).not.toBeInTheDocument())
+      await expand(user)
+      await screen.findAllByLabelText('Token name')
+      expect(screen.queryByText(secret)).not.toBeInTheDocument()
     })
 
     it('puts no token in any client configuration snippet', async () => {

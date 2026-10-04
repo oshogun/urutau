@@ -9,6 +9,7 @@ import {
   PasswordInput,
   Select,
   SelectItem,
+  Stack,
   Tab,
   TabList,
   TabPanel,
@@ -255,8 +256,52 @@ function describeTokens(tokens: ApiTokenSummary[]): Map<string, string> {
   )
 }
 
+/** The token a create call just returned, kept by the section so it outlives the integrations list. */
+interface IssuedToken {
+  integrationId: string
+  integrationName: string
+  tokenId: string
+  label: string
+  secret: string
+}
+
+interface IssuedTileProps {
+  issued: IssuedToken
+  /** Names the integration in the text, for when the tile is not inside its details row. */
+  withIntegration: boolean
+  tileRef: RefObject<HTMLDivElement | null>
+}
+
+/** The shown-once secret of a new Urutau MCP token, with a copy button. */
+function IssuedTile({ issued, withIntegration, tileRef }: IssuedTileProps) {
+  const labelId = useId()
+  return (
+    <Tile ref={tileRef} className="users__link" tabIndex={-1} aria-labelledby={labelId}>
+      <p className="users__link-label" id={labelId}>
+        Urutau MCP token for {issued.label}
+        {withIntegration && <> of {issued.integrationName}</>}. It is shown only now: copy it before
+        leaving this page. Give it to the agent; Urutau keeps only a fingerprint of it.
+      </p>
+      <CodeSnippet
+        type="single"
+        feedback="Copied"
+        copyButtonDescription="Copy token"
+        aria-label="Urutau MCP token"
+      >
+        {issued.secret}
+      </CodeSnippet>
+    </Tile>
+  )
+}
+
 interface DetailsProps {
   integration: IntegrationSummary
+  issued: IssuedToken | null
+  tileRef: RefObject<HTMLDivElement | null>
+  /** Called when a create starts: clears the shown secret and returns this create's request number. */
+  onCreateStart: () => number
+  /** Called with the answer to the create that was given `request`. */
+  onIssued: (request: number, issued: IssuedToken) => void
   githubTokenStorage: boolean
   onDialog: (dialog: Dialog, launcher: HTMLElement) => void
   onChanged: () => void
@@ -264,25 +309,30 @@ interface DetailsProps {
 
 /**
  * The expanded row: tokens, GitHub token and repositories. The shown-once secret lives only in
- * this component's state, so collapsing the row or leaving the page discards it. The call that
- * creates the token is made directly instead of through a mutation, because a mutation keeps its
- * response in the query client's mutation cache.
+ * the section's state (passed in as `issued`). The section discards it when its row closes, when
+ * another row or a new integration opens, when the token is revoked or its integration removed,
+ * when a newer create starts (the answer to an older create is then dropped, by request number),
+ * and when the page is left. The call that creates the token is made directly instead of through
+ * a mutation, because a mutation keeps its response in the query client's mutation cache.
  */
-function IntegrationDetails({ integration, githubTokenStorage, onDialog, onChanged }: DetailsProps) {
+function IntegrationDetails({
+  integration,
+  issued,
+  tileRef,
+  onCreateStart,
+  onIssued,
+  githubTokenStorage,
+  onDialog,
+  onChanged,
+}: DetailsProps) {
   const idPrefix = useId()
   const [label, setLabel] = useState('')
   const [expiry, setExpiry] = useState('90')
   const [labelError, setLabelError] = useState<string | null>(null)
   const [labelErrorFocus, setLabelErrorFocus] = useState(0)
   const [creating, setCreating] = useState(false)
-  const [issued, setIssued] = useState<{ label: string; secret: string } | null>(null)
-  const tile = useRef<HTMLDivElement>(null)
   const labelInput = useRef<HTMLInputElement>(null)
   const tokenNames = describeTokens(integration.tokens)
-
-  useEffect(() => {
-    if (issued) tile.current?.focus()
-  }, [issued])
 
   // The create button is disabled while the request runs, so focus has left it. After a failure it
   // goes to the name field, once the field has rendered as invalid.
@@ -294,13 +344,19 @@ function IntegrationDetails({ integration, githubTokenStorage, onDialog, onChang
     const choice = TOKEN_EXPIRY_CHOICES.find((item) => item.value === expiry)
     setCreating(true)
     setLabelError(null)
-    setIssued(null)
+    const request = onCreateStart()
     try {
       const response = await createApiToken(integration.id, {
         label,
         expiresInDays: choice ? choice.days : 90,
       })
-      setIssued({ label: response.token.label, secret: response.secret })
+      onIssued(request, {
+        integrationId: integration.id,
+        integrationName: integration.username,
+        tokenId: response.token.id,
+        label: response.token.label,
+        secret: response.secret,
+      })
       setLabel('')
       onChanged()
     } catch (error) {
@@ -393,26 +449,8 @@ function IntegrationDetails({ integration, githubTokenStorage, onDialog, onChang
             Create token
           </Button>
         </form>
-        {issued && (
-          <Tile
-            ref={tile}
-            className="users__link"
-            tabIndex={-1}
-            aria-labelledby={`${idPrefix}-issued`}
-          >
-            <p className="users__link-label" id={`${idPrefix}-issued`}>
-              Urutau MCP token for {issued.label}. It is shown only now: copy it before leaving this
-              page. Give it to the agent; Urutau keeps only a fingerprint of it.
-            </p>
-            <CodeSnippet
-              type="single"
-              feedback="Copied"
-              copyButtonDescription="Copy token"
-              aria-label="Urutau MCP token"
-            >
-              {issued.secret}
-            </CodeSnippet>
-          </Tile>
+        {issued && issued.integrationId === integration.id && (
+          <IssuedTile issued={issued} withIntegration={false} tileRef={tileRef} />
         )}
       </section>
 
@@ -633,6 +671,28 @@ export function IntegrationsSection() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [issued, setIssued] = useState<IssuedToken | null>(null)
+  // The row that is open right now, read by a token request that resolves later.
+  const openRow = useRef<string | null>(null)
+  // The shown-once secret is discarded as soon as its row stops being the open one.
+  const expandRow = (id: string | null) => {
+    if (issued && issued.integrationId !== id) setIssued(null)
+    openRow.current = id
+    setExpanded(id)
+  }
+  // Number of the latest token create started anywhere on the page.
+  const latestCreate = useRef(0)
+  const startCreate = () => {
+    latestCreate.current += 1
+    setIssued(null)
+    return latestCreate.current
+  }
+  // The answer to a create sets the tile only when no newer create has started and its row is
+  // still the open one. Otherwise a late answer would replace a newer secret that the admin has
+  // already seen, or show a secret under a row that was closed.
+  const handleIssued = (request: number, next: IssuedToken) => {
+    if (request === latestCreate.current && next.integrationId === openRow.current) setIssued(next)
+  }
   const [headingFocus, setHeadingFocus] = useState(0)
   const [nameErrorFocus, setNameErrorFocus] = useState(0)
   const [launcherFocus, setLauncherFocus] = useState(0)
@@ -640,6 +700,7 @@ export function IntegrationsSection() {
   const heading = useRef<HTMLHeadingElement>(null)
   const nameInput = useRef<HTMLInputElement>(null)
   const loadError = useRef<HTMLDivElement>(null)
+  const issuedTile = useRef<HTMLDivElement>(null)
   // Set when this page asked for the refetch itself, so a failure of it takes focus.
   const focusLoadError = useRef(false)
   // Name of the integration just created, until its row has rendered and taken focus.
@@ -648,6 +709,11 @@ export function IntegrationsSection() {
   useEffect(() => {
     if (headingFocus > 0) heading.current?.focus()
   }, [headingFocus])
+
+  // A new token takes focus, wherever its tile is rendered.
+  useEffect(() => {
+    if (issued) issuedTile.current?.focus()
+  }, [issued])
 
   // The create button is disabled while the request runs, so focus has left it. After a failure it
   // goes to the name field, once the field has rendered as invalid.
@@ -676,7 +742,7 @@ export function IntegrationsSection() {
       setName('')
       setNameError(null)
       setActionError(null)
-      setExpanded(integration.id)
+      expandRow(integration.id)
       focusLoadError.current = true
       void refresh()
     },
@@ -698,7 +764,9 @@ export function IntegrationsSection() {
     onSuccess: (_result, target) => {
       setDialog(null)
       setActionError(null)
-      if (target.kind === 'remove' && expanded === target.integration.id) setExpanded(null)
+      if (target.kind === 'remove' && expanded === target.integration.id) expandRow(null)
+      if (target.kind === 'remove' && issued?.integrationId === target.integration.id) setIssued(null)
+      if (target.kind === 'revoke' && issued?.tokenId === target.token.id) setIssued(null)
       // The launcher of these three stops rendering once the list refetches.
       setHeadingFocus((n) => n + 1)
       void refresh()
@@ -735,10 +803,12 @@ export function IntegrationsSection() {
     const names = integrations.data?.integrations.map((item) => item.username) ?? []
     if (!names.includes(focusNewRow.current)) focusNewRow.current = null
   }, [integrations.isFetching, integrations.data])
-  // A failed refetch replaces the table, and the element that had focus with it, so the notice takes
-  // focus when this page asked for the refetch or when focus has fallen to the page. A failed first
-  // load had no table, so focus stays where it is and the alert announces the error. The request
-  // flag is dropped once a fetch ends, so a later failed refetch does not inherit it.
+  // A failed refetch replaces the table, and the element that had focus with it, so the notice
+  // takes focus when this page asked for the refetch or when focus has fallen to the page. When a
+  // new token's tile is shown with the notice, the tile takes it instead: it holds the secret the
+  // admin must copy. A failed first load had no table, so focus stays where it is and the alert
+  // announces the error. The request flag is dropped once a fetch ends, so a later failed refetch
+  // does not inherit it.
   useEffect(() => {
     if (integrations.isFetching) return
     if (!integrations.isError) {
@@ -747,7 +817,8 @@ export function IntegrationsSection() {
     }
     const active = document.activeElement
     if (focusLoadError.current || (integrations.isRefetchError && (!active || active === document.body))) {
-      loadError.current?.focus()
+      if (issuedTile.current) issuedTile.current.focus()
+      else loadError.current?.focus()
     }
     focusLoadError.current = false
   }, [
@@ -757,6 +828,28 @@ export function IntegrationsSection() {
     integrations.errorUpdatedAt,
     integrations.dataUpdatedAt,
   ])
+  // Whether focus is inside the issued tile, kept from focusin events: removing the focused tile
+  // moves focus to the page without a focusin event, so the value survives the move.
+  const tileFocused = useRef(false)
+  useEffect(() => {
+    const track = (event: FocusEvent) => {
+      tileFocused.current = !!issuedTile.current?.contains(event.target as Node)
+    }
+    document.addEventListener('focusin', track)
+    return () => document.removeEventListener('focusin', track)
+  }, [])
+  // When the list recovers, the tile moves from above the error notice into its details row, a
+  // new element. If focus was in the tile, it goes to the tile in its new place.
+  const wasError = useRef(false)
+  useEffect(() => {
+    if (integrations.isError) {
+      wasError.current = true
+      return
+    }
+    if (!wasError.current) return
+    wasError.current = false
+    if (tileFocused.current) issuedTile.current?.focus()
+  }, [integrations.isError])
   const githubTokenStorage = integrations.data?.githubTokenStorage ?? true
   const rows = list.map((integration) => ({
     id: integration.id,
@@ -828,16 +921,19 @@ export function IntegrationsSection() {
       {integrations.isPending ? (
         <DataTableSkeleton columnCount={5} rowCount={2} showHeader={false} showToolbar={false} />
       ) : integrations.isError ? (
-        <div ref={loadError} tabIndex={-1}>
-          <InlineNotification
-            role="alert"
-            kind="error"
-            lowContrast
-            hideCloseButton
-            title="Could not load the integrations."
-            subtitle={integrations.error.message}
-          />
-        </div>
+        <Stack gap={5}>
+          {issued && <IssuedTile issued={issued} withIntegration tileRef={issuedTile} />}
+          <div ref={loadError} tabIndex={-1}>
+            <InlineNotification
+              role="alert"
+              kind="error"
+              lowContrast
+              hideCloseButton
+              title="Could not load the integrations."
+              subtitle={integrations.error.message}
+            />
+          </div>
+        </Stack>
       ) : list.length === 0 ? (
         <p className="users__empty">No agent integrations yet.</p>
       ) : (
@@ -876,7 +972,9 @@ export function IntegrationsSection() {
                       key={row.id}
                       aria-label={`Show details of ${integration.username}`}
                       isExpanded={isExpanded}
-                      onExpand={() => setExpanded(isExpanded ? null : integration.id)}
+                      onExpand={() => {
+                        expandRow(isExpanded ? null : integration.id)
+                      }}
                     >
                       <TableCell>
                         {focusNewRow.current === integration.username && (
@@ -904,6 +1002,10 @@ export function IntegrationsSection() {
                       <TableExpandedRow key={`${row.id}-details`} colSpan={headers.length + 1}>
                         <IntegrationDetails
                           integration={integration}
+                          issued={issued}
+                          tileRef={issuedTile}
+                          onCreateStart={startCreate}
+                          onIssued={handleIssued}
                           githubTokenStorage={githubTokenStorage}
                           onDialog={openDialog}
                           onChanged={() => void refresh()}
