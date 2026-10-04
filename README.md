@@ -141,6 +141,15 @@ in a named volume (`<project>_urutau-data`, `urutau_urutau-data` by default), pu
 inside the container and runs as the `node` user. `TOKEN_ENCRYPTION_KEY` is passed through to the
 container if it is set in the shell or in a `.env` file.
 
+Released images are published at `ghcr.io/oshogun/urutau`, tagged with the version (`X.Y.Z`):
+
+```bash
+docker run -p 127.0.0.1:8787:8080 -v urutau-data:/data ghcr.io/oshogun/urutau:X.Y.Z
+```
+
+How versions are numbered, how a release is cut and how to upgrade are in
+[docs/release.md](docs/release.md).
+
 ### Reaching the server by a name
 
 The server only answers requests addressed to `localhost`, an IP address, the hostname of

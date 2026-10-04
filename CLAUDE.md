@@ -81,6 +81,15 @@ Some kinds of work have their own skill. Load it instead of improvising:
   (no run, no sub-agents). It measures cost from notifications, reviews and git
   rather than memory, and puts each fix in the file of the agent that makes the
   decision.
+- **Releases** ("cut a release", "tag vX.Y.Z", "bump the version"): use
+  **[`/version-release`](.claude/skills/version-release/SKILL.md)**. It is tier
+  1. It bumps the version in `package.json` and `package-lock.json`, commits
+  the bump on `main` in the live checkout (the one exception to the run-clone
+  rule; it stages only those two files), and pushes an annotated tag. CI's
+  `release` job then publishes the GitHub Release from the tag's message, and
+  `publish-image` pushes the image to GHCR. The process is in
+  [`docs/release.md`](docs/release.md). Confirm the version number and the
+  notes with the user before pushing.
 
 ### The loop
 
