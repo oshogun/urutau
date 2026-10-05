@@ -40,8 +40,8 @@ $env:URUTAU_VERSION = '1.2.0-beta.1'; irm https://raw.githubusercontent.com/osho
 | macOS | Not supported by the installer. Use the Docker image `ghcr.io/oshogun/urutau`. |
 | Linux with musl, such as Alpine | Not supported by the installer: the official Node binaries need glibc. Use the Docker image. |
 
-Both installers are per user. They never use `sudo` and `install.sh` refuses to
-run under it. The one step that needs administrator rights is the Windows
+Both installers are per user. They never use `sudo`, and `install.sh` refuses to
+run under sudo. The one step that needs administrator rights is the Windows
 firewall rule (see "Where things go").
 
 ## What it does
@@ -136,7 +136,7 @@ variable, then comes the existing configuration, then the default.
 | install.sh | install.ps1 | Variable | Meaning |
 | --- | --- | --- | --- |
 | `--version X.Y.Z` | `-Version` | `URUTAU_VERSION` | Install this release instead of the latest; a leading `v` is accepted. A prerelease is installed only when named here |
-| `--bundle PATH_OR_URL` | `-Bundle` | `URUTAU_BUNDLE` | Install from this bundle; no release lookup |
+| `--bundle PATH_OR_URL` | `-Bundle` | `URUTAU_BUNDLE` | Install from this bundle; no release lookup. A relative path is taken from the current directory |
 | `--install-dir DIR` | `-InstallDir` | `URUTAU_INSTALL_DIR` | Install root |
 | `--port N` | `-Port` | `URUTAU_PORT` | `PORT`, 1024 to 65535 (default 8787, or the existing value) |
 | `--public-url URL` | `-PublicUrl` | `URUTAU_PUBLIC_URL` | Open Urutau to other computers at this address: sets `PUBLIC_URL`, and `HOST=0.0.0.0` unless `--bind-host` is given. Skips the question |
