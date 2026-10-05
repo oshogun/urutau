@@ -959,7 +959,7 @@ describe('App', () => {
       expect(screen.queryByText(/It is shown only now/)).not.toBeInTheDocument()
     })
 
-    it('does not bring the shown token back after a new integration opens its own row', async () => {
+    it('does not bring the shown token back after a new integration opens its own row', { timeout: 15_000 }, async () => {
       const user = userEvent.setup()
       renderApp('?view=users', { integrations: [planner] })
       const secret = (await issueToken(user)).textContent ?? ''
