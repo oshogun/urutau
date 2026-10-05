@@ -1,8 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
-import { ApiError } from '../api/client'
-import { getServerSettings, SERVER_SETTINGS_QUERY_KEY } from '../api/settings'
-import type { CreateIssueRequest, ServerSettings } from '../domain/api'
+import type { CreateIssueRequest } from '../domain/api'
 import { placeNewIssue } from '../domain/board'
 import { repoKey } from '../domain/repoRef'
 import type { Issue, RepoRef, RepoSnapshot } from '../domain/types'
@@ -12,8 +10,7 @@ import {
   createIssueFailures,
   normalizeIssueFields,
 } from '../github/createIssue'
-import { useSession } from '../state/session'
-import { useSettings } from '../state/settings'
+import { chooseWritePath, noteWriteFailure, requireWritesOn } from './issueWriteSteps'
 import { useBoard } from './useBoard'
 import { SNAPSHOT_QUERY_ROOT } from './useRepoSnapshot'
 
@@ -35,18 +32,6 @@ export function withCreatedIssue(snapshot: RepoSnapshot, issue: Issue): RepoSnap
   }
 }
 
-const ABORTED = Symbol('aborted')
-
-/** Resolves with the promise's value, or ABORTED as soon as `signal` aborts. */
-function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T | typeof ABORTED> {
-  if (!signal) return promise
-  if (signal.aborted) return Promise.resolve(ABORTED)
-  return new Promise((resolve, reject) => {
-    signal.addEventListener('abort', () => resolve(ABORTED), { once: true })
-    promise.then(resolve, reject)
-  })
-}
-
 /**
  * Returns `create`, which makes one GitHub issue and puts it on the board without a snapshot
  * request: the issue GitHub answers with is added to every cached snapshot of `repo`, and its
@@ -64,43 +49,14 @@ export function useCreateIssue(repo: RepoRef) {
       const normalized = normalizeIssueFields(fields)
       if (!normalized.ok) throw createIssueFailures.invalid(normalized.message)
 
-      const via = useSession.getState().session?.githubAccess.mode === 'server' ? 'server' : 'browser'
-      const token = useSettings.getState().token
-      if (via === 'browser' && token.trim() === '') throw createIssueFailures.noToken()
-
-      // Ask the server for the switch again: the admin may have turned it off since the board loaded.
-      let settings: ServerSettings | typeof ABORTED
-      try {
-        settings = await untilAborted(
-          queryClient.fetchQuery({
-            queryKey: SERVER_SETTINGS_QUERY_KEY,
-            queryFn: ({ signal: querySignal }) => getServerSettings(querySignal),
-            staleTime: 0,
-          }),
-          signal,
-        )
-      } catch (error) {
-        throw error instanceof ApiError && error.code === 'signed-out'
-          ? createIssueFailures.signedOut()
-          : createIssueFailures.settingsUnreachable()
-      }
-      if (settings === ABORTED) throw createIssueFailures.stoppedBeforeSend()
-      if (typeof settings !== 'object' || settings === null) throw createIssueFailures.settingsUnreachable()
-      if (!settings.githubWrites) throw createIssueFailures.writesOff()
-      if (signal?.aborted) throw createIssueFailures.stoppedBeforeSend()
+      const { via, token } = chooseWritePath(createIssueFailures)
+      await requireWritesOn(queryClient, signal, createIssueFailures)
 
       let issue: Issue
       try {
         issue = await createIssue({ fullName, fields: normalized.value, via, token, signal })
       } catch (error) {
-        if (error instanceof CreateIssueError) {
-          if (error.kind === 'writes-off') {
-            queryClient.setQueryData<ServerSettings>(SERVER_SETTINGS_QUERY_KEY, { githubWrites: false })
-          }
-          const sessionChanged =
-            error.kind === 'refused' || (error.kind === 'server-access' && error.problem !== 'unavailable')
-          if (sessionChanged) void useSession.getState().refresh()
-        }
+        if (error instanceof CreateIssueError) noteWriteFailure(queryClient, error)
         throw error
       }
 

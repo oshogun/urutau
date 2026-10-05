@@ -10,8 +10,17 @@ import {
 } from '../domain/api'
 import type { Issue } from '../domain/types'
 import { toIssue } from './api'
+import {
+  API_ROOT,
+  githubHeaders,
+  isFailureDetail,
+  isRecord,
+  serverAccessOutcome,
+  startTimedRequest,
+  timeOf,
+  validationDetail,
+} from './issueWrite'
 
-const API_ROOT = 'https://api.github.com'
 const BROWSER_TIMEOUT_MS = 30_000
 const SERVER_TIMEOUT_MS = 60_000
 
@@ -132,8 +141,6 @@ export function normalizeIssueFields(
 
 // ---------------------------------------------------------------- reading GitHub's answers
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
 const cut = (value: unknown, max: number): string | null =>
   typeof value === 'string' ? [...value].slice(0, max).join('') : null
 const whole = (value: string | null): number | null => (value !== null && /^\d+$/.test(value) ? Number(value) : null)
@@ -182,15 +189,6 @@ export function parseCreatedIssue(body: unknown): Issue | null {
 }
 
 // ---------------------------------------------------------------- classification
-
-const timeOf = (date: Date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-
-function validationDetail(detail: GitHubFailureDetail): string {
-  if (detail.message === null) return ''
-  const [first] = detail.errors
-  const reason = first ? (first.message ?? [first.field, first.code].filter(Boolean).join(' ')) : ''
-  return reason ? ` (${detail.message}: ${reason})` : ` (${detail.message})`
-}
 
 /** Turns GitHub's failure, read on either path, into a CreateIssueError with the message for that path. */
 export function classifyGitHubFailure(
@@ -286,13 +284,6 @@ export function classifyGitHubFailure(
   })
 }
 
-const SERVER_ACCESS_MESSAGES: Record<GitHubAccessProblem | 'unavailable', string> = {
-  'signin-expired': 'Sign in with Keycloak again to create issues through your GitHub link.',
-  'not-linked': "Your Keycloak account has no linked GitHub account, so the server can't create issues for you.",
-  refused: "Keycloak did not hand out your GitHub token, so the server can't create issues for you.",
-  unavailable: 'Keycloak could not be reached. Nothing was sent to GitHub. Try again shortly.',
-}
-
 const STOPPED_AFTER_SEND =
   "You stopped waiting, so Urutau doesn't know whether the issue was created. Refresh the board and look for it before creating it again; if it was created, the bucket rules place it."
 
@@ -307,10 +298,6 @@ const createdUnreadable = () =>
 
 const stoppedAfterSend = () =>
   new CreateIssueError({ kind: 'stopped', outcome: 'unknown', action: 'refresh', message: STOPPED_AFTER_SEND })
-
-function isFailureDetail(value: unknown): value is GitHubFailureDetail {
-  return isRecord(value) && typeof value.status === 'number' && Array.isArray(value.errors)
-}
 
 function classifyServerError(error: ApiError, fullName: string, now: Date): CreateIssueError {
   // The route answers 2xx only after GitHub created the issue, so a 2xx whose body could not be read still means it exists.
@@ -327,17 +314,7 @@ function classifyServerError(error: ApiError, fullName: string, now: Date): Crea
   }
   if (error.code === 'github-writes-off') return createIssueFailures.writesOff()
   if (error.code === 'github-access') {
-    const problem =
-      typeof body.problem === 'string' && Object.hasOwn(SERVER_ACCESS_MESSAGES, body.problem)
-        ? (body.problem as GitHubAccessProblem | 'unavailable')
-        : 'unavailable'
-    return new CreateIssueError({
-      kind: 'server-access',
-      status: error.status,
-      problem,
-      action: problem === 'signin-expired' ? 'sign-in-keycloak' : null,
-      message: SERVER_ACCESS_MESSAGES[problem],
-    })
+    return new CreateIssueError({ kind: 'server-access', status: error.status, ...serverAccessOutcome(body, 'create') })
   }
   if (error.code === 'signed-out') return createIssueFailures.signedOut()
   if (error.code === 'csrf-rejected' || error.code === 'forbidden') {
@@ -405,14 +382,7 @@ export async function createIssue(call: CreateIssueCall): Promise<Issue> {
   const server = via === 'server'
   const [owner = '', name = ''] = fullName.split('/')
 
-  const controller = new AbortController()
-  let stopped = false
-  const onStop = () => {
-    stopped = true
-    controller.abort()
-  }
-  signal?.addEventListener('abort', onStop, { once: true })
-  const timer = setTimeout(() => controller.abort(), server ? SERVER_TIMEOUT_MS : BROWSER_TIMEOUT_MS)
+  const { controller, wasStopped, release } = startTimedRequest(signal, server ? SERVER_TIMEOUT_MS : BROWSER_TIMEOUT_MS)
 
   try {
     if (server) {
@@ -420,14 +390,14 @@ export async function createIssue(call: CreateIssueCall): Promise<Issue> {
       try {
         created = await createIssueOnServer({ owner, name }, fields, controller.signal)
       } catch (error) {
-        if (stopped) throw stoppedAfterSend()
+        if (wasStopped()) throw stoppedAfterSend()
         if (error instanceof ApiError) throw classifyServerError(error, fullName, new Date())
         if (error instanceof DOMException && error.name === 'AbortError') {
           throw unknownOutcome(`No answer came from the Urutau server, so the issue may have been created. ${LOOK_FIRST}`)
         }
         throw error
       }
-      if (stopped) throw stoppedAfterSend()
+      if (wasStopped()) throw stoppedAfterSend()
       const issue = parseCreatedIssue(isRecord(created) ? created.issue : null)
       if (!issue) throw createdUnreadable()
       return issue
@@ -437,18 +407,13 @@ export async function createIssue(call: CreateIssueCall): Promise<Issue> {
     try {
       response = await fetch(`${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues`, {
         method: 'POST',
-        headers: {
-          Accept: 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-          Authorization: `Bearer ${token ?? ''}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { ...githubHeaders(token ?? ''), 'Content-Type': 'application/json' },
         body: JSON.stringify(fields),
         redirect: 'error',
         signal: controller.signal,
       })
     } catch {
-      if (stopped) throw stoppedAfterSend()
+      if (wasStopped()) throw stoppedAfterSend()
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
         throw new CreateIssueError({
           kind: 'unreachable',
@@ -469,7 +434,6 @@ export async function createIssue(call: CreateIssueCall): Promise<Issue> {
     if (!issue) throw createdUnreadable()
     return issue
   } finally {
-    clearTimeout(timer)
-    signal?.removeEventListener('abort', onStop)
+    release()
   }
 }

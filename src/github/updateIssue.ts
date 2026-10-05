@@ -4,8 +4,17 @@ import type { GitHubAccessProblem, GitHubFailureDetail, IssueUpdateFields } from
 import { sameUpdatedAt } from '../domain/issueUpdate'
 import type { Issue } from '../domain/types'
 import { failureDetailOf, parseCreatedIssue } from './createIssue'
+import {
+  API_ROOT,
+  githubHeaders,
+  isFailureDetail,
+  isRecord,
+  serverAccessOutcome,
+  startTimedRequest,
+  timeOf,
+  validationDetail,
+} from './issueWrite'
 
-const API_ROOT = 'https://api.github.com'
 const CHECK_TIMEOUT_MS = 20_000
 const WRITE_TIMEOUT_MS = 30_000
 
@@ -105,18 +114,6 @@ export const updateIssueFailures = {
       message: 'You stopped before anything was sent to GitHub. Nothing was changed.',
     }),
   invalid: (message: string) => new UpdateIssueError({ kind: 'invalid', message }),
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
-const timeOf = (date: Date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-
-function validationDetail(detail: GitHubFailureDetail): string {
-  if (detail.message === null) return ''
-  const [first] = detail.errors
-  const reason = first ? (first.message ?? [first.field, first.code].filter(Boolean).join(' ')) : ''
-  return reason ? ` (${detail.message}: ${reason})` : ` (${detail.message})`
 }
 
 const NOT_CHANGED = 'Nothing was changed.'
@@ -263,13 +260,6 @@ export function classifyUpdateFailure(
   })
 }
 
-const SERVER_ACCESS_MESSAGES: Record<GitHubAccessProblem | 'unavailable', string> = {
-  'signin-expired': 'Sign in with Keycloak again to change issues through your GitHub link.',
-  'not-linked': "Your Keycloak account has no linked GitHub account, so the server can't change issues for you.",
-  refused: "Keycloak did not hand out your GitHub token, so the server can't change issues for you.",
-  unavailable: 'Keycloak could not be reached. Nothing was sent to GitHub. Try again shortly.',
-}
-
 const stale = (current: Issue | null) =>
   new UpdateIssueError({
     kind: 'stale',
@@ -306,10 +296,6 @@ const checkUnreadable = () =>
     message: "GitHub's answer about the issue could not be read. Nothing was sent. Try again.",
   })
 
-function isFailureDetail(value: unknown): value is GitHubFailureDetail {
-  return isRecord(value) && typeof value.status === 'number' && Array.isArray(value.errors)
-}
-
 function classifyServerError(error: ApiError, fullName: string, number: number, now: Date): UpdateIssueError {
   // The route answers 2xx only after GitHub accepted the change, so a 2xx whose body could not be read still means it was applied.
   if (error.status >= 200 && error.status < 300) return appliedUnreadable()
@@ -327,17 +313,7 @@ function classifyServerError(error: ApiError, fullName: string, number: number, 
   }
   if (error.code === 'github-writes-off') return updateIssueFailures.writesOff()
   if (error.code === 'github-access') {
-    const problem =
-      typeof body.problem === 'string' && Object.hasOwn(SERVER_ACCESS_MESSAGES, body.problem)
-        ? (body.problem as GitHubAccessProblem | 'unavailable')
-        : 'unavailable'
-    return new UpdateIssueError({
-      kind: 'server-access',
-      status: error.status,
-      problem,
-      action: problem === 'signin-expired' ? 'sign-in-keycloak' : null,
-      message: SERVER_ACCESS_MESSAGES[problem],
-    })
+    return new UpdateIssueError({ kind: 'server-access', status: error.status, ...serverAccessOutcome(body, 'change') })
   }
   if (error.code === 'signed-out') return updateIssueFailures.signedOut()
   if (error.code === 'csrf-rejected' || error.code === 'forbidden') {
@@ -405,27 +381,20 @@ export async function updateIssue(call: UpdateIssueCall): Promise<Issue> {
   const [owner = '', name = ''] = fullName.split('/')
 
   if (via === 'server') {
-    const controller = new AbortController()
-    let stopped = false
-    const onStop = () => {
-      stopped = true
-      controller.abort()
-    }
-    signal?.addEventListener('abort', onStop, { once: true })
-    const timer = setTimeout(() => controller.abort(), SERVER_UPDATE_TIMEOUT_MS)
+    const { controller, wasStopped, release } = startTimedRequest(signal, SERVER_UPDATE_TIMEOUT_MS)
     try {
       let answer
       try {
         answer = await updateIssueOnServer({ owner, name }, number, { expectedUpdatedAt, fields }, controller.signal)
       } catch (error) {
-        if (stopped) throw stoppedAfterSend()
+        if (wasStopped()) throw stoppedAfterSend()
         if (error instanceof ApiError) throw classifyServerError(error, fullName, number, new Date())
         if (error instanceof DOMException && error.name === 'AbortError') {
           throw unknownOutcome(`No answer came from the Urutau server, so the change may have been applied. ${REFRESH_TO_SEE}`)
         }
         throw error
       }
-      if (stopped) throw stoppedAfterSend()
+      if (wasStopped()) throw stoppedAfterSend()
       if (controller.signal.aborted) {
         throw unknownOutcome(`No answer came from the Urutau server, so the change may have been applied. ${REFRESH_TO_SEE}`)
       }
@@ -433,17 +402,12 @@ export async function updateIssue(call: UpdateIssueCall): Promise<Issue> {
       if (!issue) throw appliedUnreadable()
       return issue
     } finally {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', onStop)
+      release()
     }
   }
 
   const url = `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${number}`
-  const headers: Record<string, string> = {
-    Accept: 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    Authorization: `Bearer ${token ?? ''}`,
-  }
+  const headers = githubHeaders(token ?? '')
 
   /** One request's answer, with its body already read: a refused answer carries its detail, an accepted one its JSON. */
   type Sent =
@@ -456,14 +420,7 @@ export async function updateIssue(call: UpdateIssueCall): Promise<Issue> {
    * stop or a time limit also ends a body that never finishes.
    */
   async function send(init: RequestInit, timeoutMs: number): Promise<Sent> {
-    const controller = new AbortController()
-    let stopped = false
-    const onStop = () => {
-      stopped = true
-      controller.abort()
-    }
-    signal?.addEventListener('abort', onStop, { once: true })
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const { controller, wasStopped, release } = startTimedRequest(signal, timeoutMs)
     try {
       const response = await fetch(url, { ...init, redirect: 'manual', signal: controller.signal })
       if (response.type === 'opaqueredirect') {
@@ -471,7 +428,7 @@ export async function updateIssue(call: UpdateIssueCall): Promise<Issue> {
       }
       if (!response.ok) {
         const detail = await failureDetailOf(response)
-        return controller.signal.aborted ? { failed: stopped ? 'stopped' : 'no-answer' } : { refused: detail }
+        return controller.signal.aborted ? { failed: wasStopped() ? 'stopped' : 'no-answer' } : { refused: detail }
       }
       let body: unknown = null
       try {
@@ -479,12 +436,11 @@ export async function updateIssue(call: UpdateIssueCall): Promise<Issue> {
       } catch {
         // An unreadable body is reported by the caller; an aborted read is detected below.
       }
-      return controller.signal.aborted ? { failed: stopped ? 'stopped' : 'no-answer' } : { accepted: body }
+      return controller.signal.aborted ? { failed: wasStopped() ? 'stopped' : 'no-answer' } : { accepted: body }
     } catch {
-      return { failed: stopped ? 'stopped' : 'no-answer' }
+      return { failed: wasStopped() ? 'stopped' : 'no-answer' }
     } finally {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', onStop)
+      release()
     }
   }
 
