@@ -29,7 +29,6 @@
     "bcryptjs": "^3.0.3",
     "hono": "^4.13.12",
     "kysely": "~0.29.6",
-    "markdown-it": "^15.0.2",
     "openid-client": "^6.8.8",
     "zod": "^4.6.5"
   },
@@ -54,6 +53,7 @@
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "jsdom": "^30.1.1",
+    "markdown-it": "^15.0.2",
     "oxlint": "^1.81.0",
     "playwright": "^1.63.0",
     "react": "^19.2.8",

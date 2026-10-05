@@ -85,6 +85,7 @@ export function useCreateIssue(repo: RepoRef) {
           : createIssueFailures.settingsUnreachable()
       }
       if (settings === ABORTED) throw createIssueFailures.stoppedBeforeSend()
+      if (typeof settings !== 'object' || settings === null) throw createIssueFailures.settingsUnreachable()
       if (!settings.githubWrites) throw createIssueFailures.writesOff()
       if (signal?.aborted) throw createIssueFailures.stoppedBeforeSend()
 

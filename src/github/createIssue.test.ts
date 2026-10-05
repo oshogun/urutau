@@ -268,6 +268,26 @@ describe('createIssue on the server path', () => {
     expect(await failure(server())).toMatchObject({ kind: 'created-unreadable', outcome: 'created' })
   })
 
+  it.each([
+    ['an empty 201 body', () => new Response('', { status: 201 })],
+    ['a 204', () => new Response(null, { status: 204 })],
+    ['a 201 whose body is not JSON', () => new Response('<html>created</html>', { status: 201 })],
+  ])('reads %s as created but unreadable, not a TypeError or not-created', async (_name, answer) => {
+    await start({ createIssue: answer })
+    expect(await failure(server())).toMatchObject({ kind: 'created-unreadable', outcome: 'created', action: 'refresh' })
+  })
+
+  it('a stop that fires while the answer arrives is reported as stopped, not as the issue', async () => {
+    const stop = new AbortController()
+    await start({
+      createIssue: () => {
+        stop.abort()
+        return undefined
+      },
+    })
+    expect(await failure(server(stop.signal))).toMatchObject({ kind: 'stopped', outcome: 'unknown', action: 'refresh' })
+  })
+
   it('times out after 60 s as an unknown outcome', async () => {
     await start()
     honourAbort()

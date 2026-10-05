@@ -313,6 +313,8 @@ function isFailureDetail(value: unknown): value is GitHubFailureDetail {
 }
 
 function classifyServerError(error: ApiError, fullName: string, now: Date): CreateIssueError {
+  // The route answers 2xx only after GitHub created the issue, so a 2xx whose body could not be read still means it exists.
+  if (error.status >= 200 && error.status < 300) return createdUnreadable()
   const body = isRecord(error.body) ? error.body : {}
   if (error.code === 'github-rejected' && isFailureDetail(body.github)) {
     return classifyGitHubFailure(body.github, 'server', fullName, now)
@@ -425,7 +427,8 @@ export async function createIssue(call: CreateIssueCall): Promise<Issue> {
         }
         throw error
       }
-      const issue = parseCreatedIssue(created.issue)
+      if (stopped) throw stoppedAfterSend()
+      const issue = parseCreatedIssue(isRecord(created) ? created.issue : null)
       if (!issue) throw createdUnreadable()
       return issue
     }

@@ -162,6 +162,23 @@ describe('useCreateIssue', () => {
     expect(queryClient.getQueryData(SERVER_SETTINGS_QUERY_KEY)).toEqual({ githubWrites: false })
   })
 
+  it.each([
+    ['empty', () => new Response('', { status: 200 })],
+    ['null', () => new Response('null', { status: 200 })],
+  ])('a %s settings answer is reported as unreachable, not a TypeError', async (_name, answer) => {
+    await start()
+    const { result, queryClient } = render()
+    await waitFor(() => expect(result.current.snapshot.data).toBeDefined())
+    queryClient.removeQueries({ queryKey: SERVER_SETTINGS_QUERY_KEY })
+    const inner = globalThis.fetch
+    vi.stubGlobal('fetch', (url: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(url), 'http://localhost').pathname.endsWith('/api/settings') ? Promise.resolve(answer()) : inner(url, init),
+    )
+    const before = githubCalls.length
+    await expect(result.current.create(input())).rejects.toMatchObject({ kind: 'unreachable' })
+    expect(githubCalls).toHaveLength(before)
+  })
+
   it('a server 403 github-writes-off turns the cached switch off', async () => {
     const stub = await start({ githubAccess: { mode: 'server' }, github: ({ path }) => githubAnswer('GET', `/${path}`) })
     const { result, queryClient } = render()
