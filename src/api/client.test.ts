@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, apiRequest, setCsrfToken, setSignedOutHandler } from './client'
+import { ApiError, CLIENT_ID, apiRequest, setCsrfToken, setSignedOutHandler } from './client'
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status })
 
@@ -67,5 +67,19 @@ describe('apiRequest', () => {
     stubFetch(() => json(401, { error: 'signed-out', message: 'Sign in.' }))
     await expect(apiRequest('boards')).rejects.toMatchObject({ code: 'signed-out' })
     expect(handler).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('CLIENT_ID', () => {
+  it('is 32 lowercase hex characters, which the server accepts as a tab id', () => {
+    expect(CLIENT_ID).toMatch(/^[0-9a-f]{32}$/)
+  })
+
+  it('is generated without crypto.randomUUID', async () => {
+    vi.resetModules()
+    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) })
+    const fresh = await import('./client')
+    vi.unstubAllGlobals()
+    expect(fresh.CLIENT_ID).toMatch(/^[0-9a-f]{32}$/)
   })
 })

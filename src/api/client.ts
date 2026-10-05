@@ -1,4 +1,5 @@
 import { CSRF_HEADER } from '../domain/api'
+import { randomHex } from '../domain/ids'
 import type { ApiErrorBody, ApiErrorCode } from '../domain/api'
 
 /** Thrown for every non-2xx /api response and for network failures (status 0, code 'unavailable'). */
@@ -30,15 +31,8 @@ export function setSignedOutHandler(handler: (() => void) | null): void {
   signedOutHandler = handler
 }
 
-function randomId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return Math.random().toString(36).slice(2) + Date.now().toString(36)
-}
-
 /** Random per tab, sent as X-Urutau-Client on board saves so a tab can ignore its own events. */
-export const CLIENT_ID: string = randomId()
+export const CLIENT_ID: string = randomHex(16)
 
 const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 

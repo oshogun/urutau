@@ -1,3 +1,4 @@
+import { randomHex } from './ids.ts'
 import type { BoardConfig, Bucket, Issue, Label } from './types.ts'
 
 export const DEFAULT_CLOSED_WINDOW_DAYS = 14
@@ -58,7 +59,7 @@ export function createDefaultBoard(labels: Label[]): BoardConfig {
 }
 
 export function newBucketId(): string {
-  return `bucket-${crypto.randomUUID().slice(0, 8)}`
+  return `bucket-${randomHex(4)}`
 }
 
 /**

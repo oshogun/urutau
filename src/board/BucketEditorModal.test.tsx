@@ -50,3 +50,21 @@ describe('BucketEditorModal Enter', () => {
     expect(onSave.mock.calls[0]![0]).toMatchObject({ title: 'Review' })
   })
 })
+
+describe('BucketEditorModal without crypto.randomUUID', () => {
+  it('saves a new bucket when crypto.randomUUID is undefined', async () => {
+    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) })
+    try {
+      const { onSave } = renderEditor()
+      await userEvent.setup().type(screen.getByRole('textbox', { name: 'Name' }), 'Backlog')
+      const addButton = screen.getByRole('button', { name: 'Add bucket' })
+      addButton.click()
+      expect(onSave).toHaveBeenCalledTimes(1)
+      const savedBucket = onSave.mock.calls[0]![0]
+      expect(savedBucket.title).toBe('Backlog')
+      expect(savedBucket.id).toMatch(/^bucket-[0-9a-f]{8}$/)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})

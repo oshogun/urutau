@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeBoard, makeBucket, makeIssue, makeLabel } from '../test/fixtures.ts'
 import {
   boardFromExport,
@@ -10,6 +10,7 @@ import {
   moveBucket,
   moveIssue,
   moveIssueTo,
+  newBucketId,
   normalizeLabelName,
   placeNewIssue,
   reorderBucket,
@@ -651,5 +652,16 @@ describe('a bucket id that names an array property', () => {
     expect(() => resolveBuckets(issues, config)).not.toThrow()
     expect(() => moveIssue(config, issues, 1, 'length', null)).not.toThrow()
     expect(() => placeNewIssue(config, 9, 'length')).not.toThrow()
+  })
+})
+
+describe('newBucketId', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('works without crypto.randomUUID, as on plain HTTP pages', () => {
+    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) })
+    const a = newBucketId()
+    expect(a).toMatch(/^bucket-[0-9a-f]{8}$/)
+    expect(newBucketId()).not.toBe(a)
   })
 })
