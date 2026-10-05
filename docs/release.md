@@ -3,8 +3,9 @@
 Urutau uses [semantic versioning](https://semver.org/). Each release is an
 annotated git tag `vX.Y.Z` on `main`, published as a
 [GitHub Release](https://github.com/oshogun/urutau/releases) whose notes come
-from the tag message. CI publishes the Release and pushes the container image
-to GHCR, once the tagged commit passes every check.
+from the tag message. CI publishes the Release, with the server bundle and the installer scripts
+attached, and pushes the container image to GHCR, once the tagged commit passes
+every check.
 
 ## Versions so far
 
@@ -75,6 +76,12 @@ says what to do about each break.
 Back up the database first, and read the Release notes for every version
 between yours and the new one, looking for `BREAKING:`.
 
+**Installer.** Run the install command again (see
+[install.md](install.md#upgrading)). It copies the SQLite database to
+`backups/` before it swaps the app, and restores the old version if the new one
+does not start. Releases v0.1.0 to v0.5.0 have no bundle, so the installer
+works from the first release that has one.
+
 **Container image.** Pull and run the version you want:
 
 ```bash
@@ -100,6 +107,45 @@ Migrations run when the server starts. An older server build refuses to start
 on a database a newer one has migrated; restore the backup, or follow the
 downgrade steps in the [README](../README.md#downgrading-past-the-integrations)
 where one exists.
+
+## The release bundle
+
+Each Release carries four assets:
+
+| Asset | What |
+| --- | --- |
+| `urutau-server-X.Y.Z.tar.gz` | the server bundle |
+| `urutau-server-X.Y.Z.tar.gz.sha256` | its SHA-256 checksum |
+| `install.sh` | `packaging/install.sh` from the tagged commit |
+| `install.ps1` | `packaging/install.ps1` from the tagged commit |
+
+`packaging/build-bundle.sh <version> <out-dir>` builds the bundle from a built
+tree. The archive has one top-level directory, `urutau-server-X.Y.Z/`, with
+exactly these entries: `dist/` (the built app), `server/`, `src/domain/`,
+`src/github/api.ts`, `src/github/paging.ts`, `package.json`,
+`package-lock.json`, `LICENSE` and `VERSION`. It is the list the `Dockerfile`
+runs, without the test files, `server/testing/`, `server/oidc/support.ts`,
+`server/oidc/fakeKeycloak.ts` and `server/db/connector.suite.ts`. There is no
+`node_modules/`: the installer runs `npm ci --omit=dev`. The script checks the
+entries before and after archiving and deletes the output when they do not match.
+
+The build is reproducible: file times are the tagged commit's time, owner and
+group are 0, entries are sorted, and `gzip -n` leaves out the name and time. Two
+builds of the same commit give the same bytes.
+
+The jobs `bundle`, `install-linux` and `install-windows` run on every pull
+request and every push, not only on tags, and `release` needs all three. `bundle`
+builds the bundle. `install-linux` and `install-windows` install it with the
+real scripts (a pipe with no terminal, an upgrade, a rollback from a bundle that
+does not start, uninstall and purge) against a local copy of the release layout.
+`install-windows` takes about 7 minutes; `install-linux` about 1.5. A release is
+therefore not published when an installer is broken.
+
+The bundle is named after the version, and v0.1.0 to v0.5.0 have none. The first
+packaged release is the first one whose assets include
+`urutau-server-X.Y.Z.tar.gz`, whatever its number. The installer does not
+depend on a number: it refuses the five known versions and answers any other
+404 with a message.
 
 ## Prereleases
 
@@ -136,7 +182,9 @@ Then:
 3. Push `main`, then push the tag on its own: `git push origin vX.Y.Z`.
 
 Pushing the tag starts a CI run on that commit. Its `release` job runs only for
-tags that start with `v`, and only after `check` and `databases` pass. The job:
+tags that start with `v`, and only after `check`, `databases`, `bundle`,
+`install-linux` and `install-windows` pass (see
+[The release bundle](#the-release-bundle)). The job:
 
 1. fails if the tag without its `v` differs from `version` in `package.json` or
    either version field in `package-lock.json`;
@@ -149,8 +197,14 @@ tags that start with `v`, and only after `check` and `databases` pass. The job:
    publish a Release titled after a commit;
 4. creates the Release with `gh release create --verify-tag`, using the tag
    message's first line as the title and the text after the blank line as the
-   notes. It adds `--prerelease` when the version contains `-`. The Release has
-   no attached files.
+   notes. It adds `--prerelease` when the version contains `-`. The Release
+   carries the four files in [The release bundle](#the-release-bundle). `gh`
+   creates it as a draft, uploads the files and then publishes it, so a
+   published Release always has all four.
+5. When the Release already exists (a re-run), uploads the four files again with
+   `gh release upload --clobber` and publishes the Release if a failed attempt
+   left it as a draft. Replacing a file is safe because the bundle is
+   reproducible and the scripts come from the tagged commit.
 
 A `publish-image` job then runs after `release`. It builds the image for
 `linux/amd64` and `linux/arm64` and pushes it to `ghcr.io/oshogun/urutau`,

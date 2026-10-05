@@ -123,7 +123,24 @@ hour and is required for private repositories. There are three ways to give Urut
 
 ## Deploying
 
-One Node process serves the built app, `/api` and `/mcp`:
+**One-line installer.** Each release from the first packaged one on installs per user (no `sudo`),
+with its own Node 24 and a service that starts at boot (Linux, systemd user unit) or at logon
+(Windows, Scheduled Task):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/oshogun/urutau/main/packaging/install.sh | bash
+```
+
+```powershell
+irm https://raw.githubusercontent.com/oshogun/urutau/main/packaging/install.ps1 | iex
+```
+
+It asks which address people will open. An unattended run listens on this computer only, and whoever
+opens a new install first creates the admin account. Releases v0.1.0 to v0.5.0 have no bundle, so the
+installer works from the next release on; until then use Docker or a checkout, below. macOS and Alpine
+use Docker. Options, paths, upgrading and uninstalling: [docs/install.md](docs/install.md).
+
+**From a checkout.** One Node process serves the built app, `/api` and `/mcp`:
 
 ```bash
 npm ci

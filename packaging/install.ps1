@@ -1480,7 +1480,7 @@ try {
 
     function Get-LogCommand {
         if ($S.Autostart -ne 'none') { return "Get-Content -Wait `"$($S.Root)\logs\urutau.out.log`"" }
-        return (Join-Path $S.Staging 'trial.log')
+        return "$(Join-Path $S.Staging 'trial.log') and $(Join-Path $S.Staging 'trial.err.log')"
     }
 
     function Get-StartCommand {

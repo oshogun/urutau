@@ -1,6 +1,6 @@
 ---
 name: version-release
-description: Cut a new Urutau version. Pick the next semver from the commits since the last v* tag, bump the version in package.json and package-lock.json, commit, write the annotated tag (its subject and body become the GitHub Release title and notes), push, and watch CI's `release` and `publish-image` jobs publish the Release and the GHCR image. Use for "release", "cut a release", "tag a new version", "ship vX.Y.Z", "bump the version". Not for fixing the release jobs in .github/workflows/ci.yml (that's /update-ci).
+description: Cut a new Urutau version. Pick the next semver from the commits since the last v* tag, bump the version in package.json and package-lock.json, commit, write the annotated tag (its subject and body become the GitHub Release title and notes), push, and watch CI's `release` and `publish-image` jobs publish the Release (with its bundle and installer assets) and the GHCR image. Use for "release", "cut a release", "tag a new version", "ship vX.Y.Z", "bump the version". Not for fixing the release jobs in .github/workflows/ci.yml (that's /update-ci).
 ---
 
 You are running the **version-release** skill as the Orchestrator. This is
@@ -30,7 +30,11 @@ means" section before step 3.
 
 `.github/workflows/ci.yml` runs on pushes to `main`, on `v*` tag pushes and on
 pull requests. Its `release` job runs only for `refs/tags/v*`, and only after
-`check` and `databases` pass on that commit. Then it:
+`check`, `databases`, `bundle`, `install-linux` and `install-windows` pass on
+that commit. `bundle` builds the server bundle; the two install jobs run the
+real installers against it, and the Windows one takes about 7 minutes (the
+Linux one about 1.5), so the tag's run takes longer than it used to. Then the
+`release` job:
 
 1. fails unless the tag minus its `v` equals all three version fields;
 2. skips the rest if a Release for the tag already exists;
@@ -40,8 +44,12 @@ pull requests. Its `release` job runs only for `refs/tags/v*`, and only after
    commit, because git's `%(contents:subject)` returns the commit's subject for
    a lightweight tag;
 4. runs `gh release create` with the tag's **subject as the title** and its
-   **body as the notes**, and with `--prerelease` when the version contains a
-   `-`.
+   **body as the notes**, with `--prerelease` when the version contains a `-`,
+   and with four files: `urutau-server-X.Y.Z.tar.gz`, its `.sha256`,
+   `install.sh` and `install.ps1`. `gh` makes the Release a draft, uploads the
+   files, then publishes it, so a published Release has all four;
+5. on a re-run, when the Release exists, uploads the four files again with
+   `--clobber` and publishes the Release if it was left as a draft.
 
 `publish-image` then pushes `ghcr.io/oshogun/urutau` for linux/amd64 and
 linux/arm64. The tags are `X.Y.Z`, `X.Y` and `latest`, plus `X` from 1.0.0 on.
@@ -191,11 +199,14 @@ gh run list --workflow CI --commit "$(git rev-parse HEAD)" --limit 5 \
 gh run watch <databaseId> --exit-status   # run_in_background: check, databases, release and the image build take several minutes
 gh release view "v$V" --json name,url,isDraft,isPrerelease \
   --jq '{name,url,isDraft,isPrerelease}'
+gh release view "v$V" --json assets --jq '[.assets[].name] | sort'
+                                     # must equal ["install.ps1","install.sh","urutau-server-X.Y.Z.tar.gz","urutau-server-X.Y.Z.tar.gz.sha256"]
 gh api repos/oshogun/urutau/releases/latest --jq .tag_name   # must print v$V (not for a prerelease)
 docker manifest inspect "ghcr.io/oshogun/urutau:$V" >/dev/null && echo image published
 ```
 
-Report the Release URL and the image reference.
+Report the Release URL, the four asset names and the image reference. A missing asset
+means the Release is incomplete: re-run the `release` job (step 8) rather than uploading by hand.
 
 ## 8. When it goes wrong
 
@@ -208,7 +219,7 @@ user first**, then:
   `git tag -d vX.Y.Z`), run step 6's bump, and re-tag.
 - **Lightweight tag, empty message or wrapped title**: delete the tag the same
   way and re-tag with `git tag -a "v$V" -F <message file>`.
-- **`check` or `databases` failed**: the commit isn't releasable. Delete the
+- **`check`, `databases`, `bundle`, `install-linux` or `install-windows` failed**: the commit isn't releasable. Delete the
   tag the same way, fix the problem through the normal workflow, and run this
   skill again. Reusing the version number is fine, because nothing was
   published under it.
