@@ -77,11 +77,275 @@ jobs:
       - run: npm run test:db:postgres
       - run: npm run test:db:mariadb
 
+  # Builds the server bundles the installers install: the package.json version (on a tag
+  # run, the file the release job attaches), a fake older version to upgrade from, and a
+  # bundle whose server throws at start, to prove the installer's rollback.
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # Three bundles from the same build: the package.json version (on a tag run this is
+      # the file the release job attaches), an older fake version to upgrade from, and a
+      # bundle whose server throws at start, to prove the rollback.
+      - name: Build the bundles
+        run: |
+          VERSION="$(jq -r .version package.json)"
+          packaging/build-bundle.sh "$VERSION" bundles
+          packaging/build-bundle.sh 0.0.0-ci.1 bundles
+          B=urutau-server-0.0.0-ci.broken
+          mkdir -p "$RUNNER_TEMP/broken"
+          tar -xzf bundles/urutau-server-0.0.0-ci.1.tar.gz -C "$RUNNER_TEMP/broken"
+          mv "$RUNNER_TEMP/broken/urutau-server-0.0.0-ci.1" "$RUNNER_TEMP/broken/$B"
+          printf '0.0.0-ci.broken\n' > "$RUNNER_TEMP/broken/$B/VERSION"
+          { printf "throw new Error('This bundle is built to fail at start, to test the installer rollback.')\n"; cat "$RUNNER_TEMP/broken/$B/server/main.ts"; } > "$RUNNER_TEMP/main.ts"
+          mv "$RUNNER_TEMP/main.ts" "$RUNNER_TEMP/broken/$B/server/main.ts"
+          tar -czf "bundles/$B.tar.gz" -C "$RUNNER_TEMP/broken" "$B"
+          (cd bundles && sha256sum "$B.tar.gz" > "$B.tar.gz.sha256")
+          ls -l bundles
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bundles
+          path: bundles/
+          if-no-files-found: error
+
+  # Runs packaging/install.sh on this runner against those bundles: install from a pipe,
+  # upgrade, release lookup against a local server, rollback, uninstall and purge.
+  install-linux:
+    runs-on: ubuntu-latest
+    needs: bundle
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: bundles
+          path: bundles
+      # ubuntu-latest runs a systemd user manager for `runner`; if it does not answer,
+      # start it with linger and point XDG_RUNTIME_DIR at it.
+      - name: Make sure the runner's systemd user manager answers
+        run: |
+          if ! systemctl --user show-environment >/dev/null 2>&1; then
+            sudo loginctl enable-linger "$USER"
+            echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+            XDG_RUNTIME_DIR="/run/user/$(id -u)"
+            export XDG_RUNTIME_DIR
+            for _ in $(seq 1 20); do systemctl --user show-environment >/dev/null 2>&1 && break; sleep 0.5; done
+          fi
+          systemctl --user show-environment >/dev/null
+          loginctl show-user "$USER" -p Linger
+      - name: Install from a pipe with no terminal
+        run: URUTAU_BUNDLE="$PWD/bundles/urutau-server-0.0.0-ci.1.tar.gz" bash -s < packaging/install.sh
+      - name: Check the first install
+        run: |
+          R="$HOME/.local/share/urutau"
+          test "$(curl --noproxy '*' -fsS http://127.0.0.1:8787/api/health)" = '{"ok":true}'
+          curl --noproxy '*' -fsS http://127.0.0.1:8787/api/session | grep -qF '"firstRun":true'
+          test "$(systemctl --user is-active urutau.service)" = active
+          test "$(systemctl --user is-enabled urutau.service)" = enabled
+          grep -qx 'HOST=127.0.0.1' "$R/urutau.env"
+          if grep -q '^PUBLIC_URL=' "$R/urutau.env"; then exit 1; fi
+          grep -qE '^TOKEN_ENCRYPTION_KEY=[A-Za-z0-9+/]{43}=$' "$R/urutau.env"
+          test "$(stat -c %a "$R/urutau.env")" = 600
+          test "$(stat -c %a "$R")" = 700
+          test "$(cat "$R/app/VERSION")" = 0.0.0-ci.1
+          grep -qx 'state=installed' "$R/.urutau-install"
+          grep '^TOKEN_ENCRYPTION_KEY=' "$R/urutau.env" | sha256sum > "$RUNNER_TEMP/key.sha256"
+      - name: Upgrade to the release bundle and open it to the network
+        run: bash packaging/install.sh --bundle "bundles/urutau-server-$(jq -r .version package.json).tar.gz" --public-url http://localhost:8787
+      - name: Check the upgrade
+        run: |
+          R="$HOME/.local/share/urutau"
+          test "$(curl --noproxy '*' -fsS http://127.0.0.1:8787/api/health)" = '{"ok":true}'
+          test "$(cat "$R/app/VERSION")" = "$(jq -r .version package.json)"
+          grep -qx 'HOST=0.0.0.0' "$R/urutau.env"
+          grep -qx 'PUBLIC_URL=http://localhost:8787' "$R/urutau.env"
+          test "$(grep '^TOKEN_ENCRYPTION_KEY=' "$R/urutau.env" | sha256sum)" = "$(cat "$RUNNER_TEMP/key.sha256")"
+          test -f "$R/data/urutau.db"
+          test "$(find "$R/backups" -mindepth 1 -maxdepth 1 -type d | wc -l)" = 1
+      - name: Install through the release lookup, from a local copy of the release layout
+        run: |
+          # The version is the fake one, not package.json's: the lookup refuses every release up
+          # to v0.5.0, which has no bundle, and package.json says 0.5.0 until the next release.
+          V=0.0.0-ci.1
+          F="$RUNNER_TEMP/fake-github"
+          mkdir -p "$F/download/v$V"
+          cp "bundles/urutau-server-$V.tar.gz" "bundles/urutau-server-$V.tar.gz.sha256" "$F/download/v$V/"
+          printf '{"tag_name":"v%s"}\n' "$V" > "$F/latest.json"
+          (cd "$F" && nohup python3 -m http.server 8799 --bind 127.0.0.1 > /dev/null 2>&1 &)
+          for _ in $(seq 1 20); do curl --noproxy '*' -fs -o /dev/null http://127.0.0.1:8799/latest.json && break; sleep 0.5; done
+          export URUTAU_API_URL=http://127.0.0.1:8799/latest.json URUTAU_RELEASE_BASE_URL=http://127.0.0.1:8799/download
+          bash packaging/install.sh --force
+          test "$(curl --noproxy '*' -fsS http://127.0.0.1:8787/api/health)" = '{"ok":true}'
+          printf '{"tag_name":"v0.0.0-ci.9"}\n' > "$F/latest.json"
+          if bash packaging/install.sh > "$RUNNER_TEMP/out-404.txt" 2>&1; then exit 1; fi
+          grep -qF 'HTTP 404' "$RUNNER_TEMP/out-404.txt"
+          if bash packaging/install.sh --version 0.4.0 > "$RUNNER_TEMP/out-old.txt" 2>&1; then exit 1; fi
+          grep -qF 'Releases v0.1.0 to v0.5.0' "$RUNNER_TEMP/out-old.txt"
+          test "$(curl --noproxy '*' -fsS http://127.0.0.1:8787/api/health)" = '{"ok":true}'
+          test "$(cat "$HOME/.local/share/urutau/app/VERSION")" = "$V"
+      - name: An upgrade that does not start rolls back
+        run: |
+          if bash packaging/install.sh --bundle bundles/urutau-server-0.0.0-ci.broken.tar.gz > "$RUNNER_TEMP/out-broken.txt" 2>&1; then exit 1; fi
+          grep -qF 'was restored' "$RUNNER_TEMP/out-broken.txt"
+          test "$(curl --noproxy '*' -fsS http://127.0.0.1:8787/api/health)" = '{"ok":true}'
+          # The lookup step above left 0.0.0-ci.1 installed, so that is the version restored.
+          test "$(cat "$HOME/.local/share/urutau/app/VERSION")" = 0.0.0-ci.1
+          test "$(systemctl --user is-active urutau.service)" = active
+      - name: Uninstall keeps the configuration and the data
+        run: |
+          R="$HOME/.local/share/urutau"
+          bash packaging/install.sh --uninstall
+          if systemctl --user is-active --quiet urutau.service; then exit 1; fi
+          test ! -e "$HOME/.config/systemd/user/urutau.service"
+          if curl --noproxy '*' -fs -o /dev/null http://127.0.0.1:8787/api/health; then exit 1; fi
+          test -f "$R/urutau.env"
+          test -f "$R/data/urutau.db"
+          test ! -e "$R/app"
+          test ! -e "$R/node"
+          grep -qx 'state=uninstalled' "$R/.urutau-install"
+      - name: Purge deletes the install directory
+        run: |
+          bash packaging/install.sh --uninstall --purge --yes
+          test ! -e "$HOME/.local/share/urutau"
+      - name: Show the service log
+        if: failure()
+        run: journalctl --user -u urutau --no-pager -n 200 || true
+
+  # Runs packaging/install.ps1 on Windows PowerShell 5.1 against the same bundles, with the
+  # same sequence as install-linux, plus the Scheduled Task, the firewall rule and the ACL.
+  install-windows:
+    runs-on: windows-latest
+    needs: bundle
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: bundles
+          path: bundles
+      # Runs the script text through Invoke-Expression, as `irm <url> | iex` does. No -Yes:
+      # this proves that a run without a console to answer on does not wait for one. The
+      # step timeout bounds the case where it does.
+      - name: Install through Invoke-Expression
+        timeout-minutes: 10
+        run: |
+          $env:URUTAU_BUNDLE = Join-Path $PWD 'bundles\urutau-server-0.0.0-ci.1.tar.gz'
+          Get-Content -Raw packaging\install.ps1 | Invoke-Expression
+      - name: Check the first install
+        run: |
+          $R = Join-Path $env:LOCALAPPDATA 'Urutau'
+          $h = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8787/api/health
+          if ($h.StatusCode -ne 200) { throw 'health did not answer 200' }
+          if ((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8787/api/session).Content -notmatch '"firstRun":true') { throw 'not a first run' }
+          if (-not (Get-ScheduledTask -TaskName 'Urutau' -ErrorAction SilentlyContinue)) { throw 'no scheduled task' }
+          if (-not (Select-String -Path "$R\.urutau-install" -Pattern '^state=installed$' -Quiet)) { throw 'state is not installed' }
+          if (-not (Select-String -Path "$R\urutau.env" -Pattern '^HOST=127\.0\.0\.1$' -Quiet)) { throw 'HOST is not loopback' }
+          if (Select-String -Path "$R\urutau.env" -Pattern '^PUBLIC_URL=' -Quiet) { throw 'PUBLIC_URL was written' }
+          if (-not (Select-String -Path "$R\urutau.env" -Pattern '^TOKEN_ENCRYPTION_KEY=[A-Za-z0-9+/]{43}=$' -Quiet -CaseSensitive)) { throw 'no key' }
+          if (Get-NetFirewallRule -Name 'UrutauServer-In' -ErrorAction SilentlyContinue) { throw 'firewall rule on a loopback install' }
+          $acl = Get-Acl $R
+          if (-not $acl.AreAccessRulesProtected) { throw 'install root inherits permissions' }
+          $acl.Access | Format-Table IdentityReference, FileSystemRights -AutoSize
+          if ((Get-Content -Raw "$R\app\VERSION").Trim() -ne '0.0.0-ci.1') { throw 'wrong version' }
+          Get-Content "$R\.urutau-install" | Where-Object { $_ -match '^(autostart|state)=' }
+          $line = Select-String -Path "$R\urutau.env" -Pattern '^TOKEN_ENCRYPTION_KEY=' -CaseSensitive | Select-Object -First 1
+          $bytes = [Text.Encoding]::UTF8.GetBytes($line.Line)
+          $hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($bytes))
+          Set-Content -Path "$env:RUNNER_TEMP\key.sha256" -Value $hash
+      - name: Upgrade to the release bundle and open it to the network
+        run: |
+          $v = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          & .\packaging\install.ps1 -Bundle (Join-Path $PWD "bundles\urutau-server-$v.tar.gz") -PublicUrl 'http://localhost:8787'
+      - name: Check the upgrade
+        run: |
+          $R = Join-Path $env:LOCALAPPDATA 'Urutau'
+          $v = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          if ((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8787/api/health).StatusCode -ne 200) { throw 'health' }
+          if ((Get-Content -Raw "$R\app\VERSION").Trim() -ne $v) { throw 'wrong version' }
+          if (-not (Select-String -Path "$R\urutau.env" -Pattern '^HOST=0\.0\.0\.0$' -Quiet)) { throw 'HOST' }
+          if (-not (Select-String -Path "$R\urutau.env" -Pattern '^PUBLIC_URL=http://localhost:8787$' -Quiet)) { throw 'PUBLIC_URL' }
+          if (-not (Get-NetFirewallRule -Name 'UrutauServer-In' -ErrorAction SilentlyContinue)) { throw 'no firewall rule' }
+          $line = Select-String -Path "$R\urutau.env" -Pattern '^TOKEN_ENCRYPTION_KEY=' -CaseSensitive | Select-Object -First 1
+          $hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($line.Line)))
+          if ($hash -ne (Get-Content "$env:RUNNER_TEMP\key.sha256")) { throw 'the key changed' }
+          if (-not (Test-Path "$R\data\urutau.db")) { throw 'no database' }
+          if (@(Get-ChildItem -Directory "$R\backups").Count -ne 1) { throw 'expected one backup' }
+      - name: Install through the release lookup, from a local copy of the release layout
+        run: |
+          # The version is the fake one, not package.json's: the lookup refuses every release up
+          # to v0.5.0, which has no bundle, and package.json says 0.5.0 until the next release.
+          $v = '0.0.0-ci.1'
+          $F = Join-Path $env:RUNNER_TEMP 'fake-github'
+          New-Item -ItemType Directory -Force -Path "$F\download\v$v" | Out-Null
+          Copy-Item "bundles\urutau-server-$v.tar.gz", "bundles\urutau-server-$v.tar.gz.sha256" "$F\download\v$v\"
+          Set-Content -Path "$F\latest.json" -Value ('{"tag_name":"v' + $v + '"}') -Encoding Ascii
+          Start-Process python -ArgumentList '-m', 'http.server', '8799', '--bind', '127.0.0.1' -WorkingDirectory $F -WindowStyle Hidden
+          for ($i = 0; $i -lt 20; $i++) { try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8799/latest.json | Out-Null; break } catch { Start-Sleep -Milliseconds 500 } }
+          $env:URUTAU_API_URL = 'http://127.0.0.1:8799/latest.json'
+          $env:URUTAU_RELEASE_BASE_URL = 'http://127.0.0.1:8799/download'
+          & .\packaging\install.ps1 -Force
+          if ((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8787/api/health).StatusCode -ne 200) { throw 'health' }
+          Set-Content -Path "$F\latest.json" -Value '{"tag_name":"v0.0.0-ci.9"}' -Encoding Ascii
+          $failed = $false
+          try { & .\packaging\install.ps1 } catch { $failed = $true; if ($_.Exception.Message -notmatch 'HTTP 404') { throw } }
+          if (-not $failed) { throw 'expected a failure for a release without a bundle' }
+          $failed = $false
+          try { & .\packaging\install.ps1 -Version '0.4.0' } catch { $failed = $true; if ($_.Exception.Message -notmatch 'Releases v0\.1\.0 to v0\.5\.0') { throw } }
+          if (-not $failed) { throw 'expected a failure for v0.4.0' }
+          if ((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8787/api/health).StatusCode -ne 200) { throw 'health' }
+          if ((Get-Content -Raw (Join-Path $env:LOCALAPPDATA 'Urutau\app\VERSION')).Trim() -ne $v) { throw 'wrong version after the lookup install' }
+      - name: An upgrade that does not start rolls back
+        run: |
+          $R = Join-Path $env:LOCALAPPDATA 'Urutau'
+          # The lookup step above left 0.0.0-ci.1 installed, so that is the version restored.
+          $v = '0.0.0-ci.1'
+          $failed = $false
+          try { & .\packaging\install.ps1 -Bundle (Join-Path $PWD 'bundles\urutau-server-0.0.0-ci.broken.tar.gz') } catch { $failed = $true; if ($_.Exception.Message -notmatch 'was restored') { throw } }
+          if (-not $failed) { throw 'expected the broken bundle to fail' }
+          if ((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8787/api/health).StatusCode -ne 200) { throw 'health' }
+          if ((Get-Content -Raw "$R\app\VERSION").Trim() -ne $v) { throw 'wrong version after rollback' }
+      - name: Uninstall keeps the configuration and the data
+        run: |
+          $R = Join-Path $env:LOCALAPPDATA 'Urutau'
+          & .\packaging\install.ps1 -Uninstall
+          if (Get-ScheduledTask -TaskName 'Urutau' -ErrorAction SilentlyContinue) { throw 'task still registered' }
+          if (Get-NetFirewallRule -Name 'UrutauServer-In' -ErrorAction SilentlyContinue) { throw 'firewall rule still there' }
+          if (Test-Path (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\Urutau.lnk')) { throw 'startup shortcut still there' }
+          $up = $true
+          try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:8787/api/health | Out-Null } catch { $up = $false }
+          if ($up) { throw 'the server still answers' }
+          if (-not (Test-Path "$R\urutau.env")) { throw 'urutau.env removed' }
+          if (-not (Test-Path "$R\data\urutau.db")) { throw 'database removed' }
+          if (Test-Path "$R\app") { throw 'app still there' }
+          if (Test-Path "$R\node") { throw 'node still there' }
+      - name: Purge deletes the install directory
+        run: |
+          & .\packaging\install.ps1 -Uninstall -Purge -Yes
+          if (Test-Path (Join-Path $env:LOCALAPPDATA 'Urutau')) { throw 'install directory still there' }
+      - name: Show the server logs
+        if: failure()
+        run: |
+          $R = Join-Path $env:LOCALAPPDATA 'Urutau'
+          Get-Content "$R\logs\urutau.err.log", "$R\logs\urutau.out.log" -Tail 100 -ErrorAction SilentlyContinue
+          Get-ScheduledTask -TaskName 'Urutau' -ErrorAction SilentlyContinue | Get-ScheduledTaskInfo
+
   # Publishes a GitHub Release from an annotated `vX.Y.Z` tag, once the checks
   # pass on that commit. A tag whose checks fail never gets a Release or an image.
   release:
     runs-on: ubuntu-latest
-    needs: [check, databases]
+    needs: [check, databases, bundle, install-linux, install-windows]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -115,9 +379,25 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG already exists, skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "draft=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # The bundle the smoke jobs installed, not a rebuild. gh release create below uploads
+      # these files and the two installers.
+      - uses: actions/download-artifact@v8
+        with:
+          name: bundles
+          path: bundles
+
+      - name: Check the bundle carries the tag's version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          (cd bundles && sha256sum -c "urutau-server-$VERSION.tar.gz.sha256")
+          test "$(tar -xzOf "bundles/urutau-server-$VERSION.tar.gz" "urutau-server-$VERSION/VERSION")" = "$VERSION"
 
       - name: Create the Release from the annotated tag
         if: steps.existing.outputs.skip == 'false'
@@ -160,9 +440,30 @@ jobs:
             *-*) PRERELEASE_FLAGS+=(--prerelease) ;;
           esac
           echo "Title: $SUBJECT"
+          # gh creates the Release as a draft, uploads the files, then publishes it, so a
+          # published Release always has its assets.
+          VERSION="${TAG#v}"
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
             --verify-tag --title "$SUBJECT" --notes "$BODY" \
-            "${PRERELEASE_FLAGS[@]}"
+            "${PRERELEASE_FLAGS[@]}" \
+            "bundles/urutau-server-$VERSION.tar.gz" "bundles/urutau-server-$VERSION.tar.gz.sha256" \
+            packaging/install.sh packaging/install.ps1
+
+      # A re-run after a failed upload: replace the files (same bytes, the bundle is
+      # reproducible) and publish the Release if it was left as a draft.
+      - name: Attach the files to a Release that already exists
+        if: steps.existing.outputs.skip == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            "bundles/urutau-server-$VERSION.tar.gz" "bundles/urutau-server-$VERSION.tar.gz.sha256" \
+            packaging/install.sh packaging/install.ps1
+          if [ "${{ steps.existing.outputs.draft }}" = true ]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          fi
 
   # Pushes the multi-architecture image to GHCR once the Release exists, so a tag
   # that fails the release job's checks never publishes an image. It logs in with
