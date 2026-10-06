@@ -2,8 +2,10 @@ import type { QueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
 import { getServerSettings, SERVER_SETTINGS_QUERY_KEY } from '../api/settings'
 import type { ServerSettings } from '../domain/api'
+import type { RepoSnapshot } from '../domain/types'
 import { useSession } from '../state/session'
 import { useSettings } from '../state/settings'
+import { SNAPSHOT_QUERY_ROOT } from './useRepoSnapshot'
 
 const ABORTED = Symbol('aborted')
 
@@ -66,4 +68,28 @@ export function noteWriteFailure(queryClient: QueryClient, error: { kind: string
   }
   const sessionChanged = error.kind === 'refused' || (error.kind === 'server-access' && error.problem !== 'unavailable')
   if (sessionChanged) void useSession.getState().refresh()
+}
+
+/**
+ * Writes `withIssue` into every cached snapshot of the repository. A snapshot fetch still running
+ * would overwrite the new version when it lands, so it is cancelled first. Cancelling sends a
+ * query that had no data yet (its first fetch) back to pending and discards a Refresh's result,
+ * and nothing would fetch either again, so after the write each cancelled query is fetched again
+ * (not awaited): the new request starts after GitHub has the change. Queries that were not
+ * fetching are left alone. `afterWrite` runs synchronously right after the cache write, so a
+ * caller can change other state in the same render.
+ */
+export async function applyToSnapshots(
+  queryClient: QueryClient,
+  key: string,
+  withIssue: (snapshot: RepoSnapshot) => RepoSnapshot,
+  afterWrite?: () => void,
+): Promise<void> {
+  const snapshots = { queryKey: [SNAPSHOT_QUERY_ROOT, key] }
+  const fetching = queryClient.getQueryCache().findAll({ ...snapshots, fetchStatus: 'fetching' })
+  const fetchingKeys = fetching.map((query) => query.queryKey)
+  if (fetching.length > 0) await queryClient.cancelQueries(snapshots)
+  queryClient.setQueriesData<RepoSnapshot>(snapshots, (old) => old && withIssue(old))
+  afterWrite?.()
+  for (const queryKey of fetchingKeys) void queryClient.refetchQueries({ queryKey, exact: true })
 }

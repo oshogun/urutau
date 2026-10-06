@@ -4,6 +4,7 @@ import { createElement } from 'react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SERVER_SETTINGS_QUERY_KEY } from '../api/settings'
+import type { RepoSnapshot } from '../domain/types'
 import { CreateIssueError } from '../github/createIssue'
 import { useBoards } from '../state/boardStore'
 import { useSession } from '../state/session'
@@ -34,11 +35,17 @@ const existing = {
 
 let githubCalls: { method: string; path: string; init?: RequestInit }[] = []
 let snapshotGate: Promise<void> | null = null
+let githubHasCreated = false
 
 /** What api.github.com (and the server's proxy) answers; every call is recorded. */
 function githubAnswer(method: string, path: string): Response {
-  if (method === 'POST') return json(stubCreatedIssue(KEY, 19, 'From GitHub', 'Steps'), 201)
-  if (path.endsWith('/labels') || path.includes('/issues')) return json(path.includes('/issues') ? [existing] : [])
+  if (method === 'POST') {
+    githubHasCreated = true
+    return json(stubCreatedIssue(KEY, 19, 'From GitHub', 'Steps'), 201)
+  }
+  if (path.endsWith('/labels') || path.includes('/issues')) {
+    return json(path.includes('/issues') ? [existing, ...(githubHasCreated ? [stubCreatedIssue(KEY, 19, 'From GitHub', 'Steps')] : [])] : [])
+  }
   return json(repository)
 }
 
@@ -51,6 +58,7 @@ function setup() {
 beforeEach(() => {
   githubCalls = []
   snapshotGate = null
+  githubHasCreated = false
   useBoards.setState({ entries: {} })
   useSession.setState({ status: 'loading', firstRun: false, session: null, config: null, loadError: null })
   useSettings.setState({ token: TOKEN })
@@ -83,8 +91,8 @@ async function start(options: Parameters<typeof installApiStub>[0] = {}): Promis
 function render() {
   const { queryClient, wrapper } = setup()
   const view = renderHook(
-    () => ({ snapshot: useRepoSnapshot(REPO, 0), create: useCreateIssue(REPO), board: useBoard(REPO) }),
-    { wrapper },
+    ({ days }: { days: number }) => ({ snapshot: useRepoSnapshot(REPO, days), create: useCreateIssue(REPO), board: useBoard(REPO) }),
+    { wrapper, initialProps: { days: 0 } },
   )
   return { ...view, queryClient }
 }
@@ -279,7 +287,7 @@ describe('useCreateIssue', () => {
     expect(result.current.snapshot.data?.issues.map((issue) => issue.number)).toContain(19)
   })
 
-  it('cancels a snapshot fetch in flight so the new card is not overwritten, and does not restart it', async () => {
+  it('starts a cancelled Refresh again after the change, so its result is not lost', async () => {
     await start()
     const { result, queryClient } = render()
     await waitFor(() => expect(result.current.snapshot.data).toBeDefined())
@@ -296,12 +304,46 @@ describe('useCreateIssue', () => {
       await result.current.create(input())
     })
     release()
-    await settle()
-    expect(result.current.snapshot.isFetching).toBe(false)
+    await waitFor(() => expect(result.current.snapshot.isFetching).toBe(false))
     expect(result.current.snapshot.data?.issues.map((issue) => issue.number)).toEqual([1, 19])
-    // One read started for the refetch and was cancelled, then the POST; no read was started again.
-    expect(githubCalls.slice(reads).filter((call) => call.method === 'GET').length).toBe(1)
-    expect(githubCalls.slice(reads).filter((call) => call.method === 'POST')).toHaveLength(1)
+    // The Refresh was cancelled after its read started, then the POST, then the Refresh ran again.
+    const sent = githubCalls.slice(reads)
+    expect(sent.filter((call) => call.method === 'POST')).toHaveLength(1)
+    const firstPost = sent.findIndex((call) => call.method === 'POST')
+    expect(sent.slice(0, firstPost).filter((call) => call.method === 'GET' && call.path === '/repos/acme/widgets')).toHaveLength(1)
+    expect(sent.slice(firstPost).filter((call) => call.method === 'GET' && call.path === '/repos/acme/widgets')).toHaveLength(1)
+  })
+
+  it('a snapshot in its first fetch when the card is created ends up loaded with the card', async () => {
+    await start()
+    const { result, rerender, queryClient } = render()
+    await waitFor(() => expect(result.current.snapshot.data).toBeDefined())
+    let release = () => {}
+    snapshotGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    rerender({ days: 30 })
+    await waitFor(() => expect(queryClient.isFetching({ queryKey: ['snapshot'] })).toBe(1))
+    await act(async () => {
+      await result.current.create(input())
+    })
+    release()
+    await waitFor(() => expect(queryClient.getQueryState(['snapshot', KEY, 30, 'browser'])?.status).toBe('success'))
+    const wide = queryClient.getQueryState<RepoSnapshot>(['snapshot', KEY, 30, 'browser'])
+    expect(wide?.status).toBe('success')
+    expect(wide?.data?.issues.map((issue) => issue.number)).toEqual([1, 19])
+  })
+
+  it('does not fetch again a snapshot that was not fetching', async () => {
+    await start()
+    const { result } = render()
+    await waitFor(() => expect(result.current.snapshot.data).toBeDefined())
+    const reads = githubCalls.length
+    await act(async () => {
+      await result.current.create(input())
+    })
+    await settle()
+    expect(githubCalls.slice(reads).map((call) => call.method)).toEqual(['POST'])
   })
 })
 

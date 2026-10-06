@@ -5,8 +5,7 @@ import { normalizeIssueUpdate } from '../domain/issueUpdate'
 import { repoKey } from '../domain/repoRef'
 import type { Issue, RepoRef, RepoSnapshot } from '../domain/types'
 import { UpdateIssueError, updateIssue, updateIssueFailures } from '../github/updateIssue'
-import { chooseWritePath, noteWriteFailure, requireWritesOn } from './issueWriteSteps'
-import { SNAPSHOT_QUERY_ROOT } from './useRepoSnapshot'
+import { applyToSnapshots, chooseWritePath, noteWriteFailure, requireWritesOn } from './issueWriteSteps'
 
 export interface UpdateIssueInput {
   /** `snapshot.repository.fullName`. */
@@ -53,12 +52,7 @@ export function useUpdateIssue(repo: RepoRef): IssueUpdater {
       const { via, token } = chooseWritePath(updateIssueFailures)
       await requireWritesOn(queryClient, signal, updateIssueFailures)
 
-      const snapshots = { queryKey: [SNAPSHOT_QUERY_ROOT, key] }
-      /** A snapshot fetch still running would overwrite the new version when it lands, so cancel it. */
-      const apply = async (issue: Issue) => {
-        if (queryClient.isFetching(snapshots) > 0) await queryClient.cancelQueries(snapshots)
-        queryClient.setQueriesData<RepoSnapshot>(snapshots, (old) => old && withUpdatedIssue(old, issue))
-      }
+      const apply = (issue: Issue) => applyToSnapshots(queryClient, key, (snapshot) => withUpdatedIssue(snapshot, issue))
 
       let issue: Issue
       try {

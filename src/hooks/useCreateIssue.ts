@@ -10,9 +10,8 @@ import {
   createIssueFailures,
   normalizeIssueFields,
 } from '../github/createIssue'
-import { chooseWritePath, noteWriteFailure, requireWritesOn } from './issueWriteSteps'
+import { applyToSnapshots, chooseWritePath, noteWriteFailure, requireWritesOn } from './issueWriteSteps'
 import { useBoard } from './useBoard'
-import { SNAPSHOT_QUERY_ROOT } from './useRepoSnapshot'
 
 export interface CreateIssueInput {
   /** `snapshot.repository.fullName`. */
@@ -60,12 +59,13 @@ export function useCreateIssue(repo: RepoRef) {
         throw error
       }
 
-      // A snapshot fetch still running would overwrite the new card when it lands, so cancel it.
-      const snapshots = { queryKey: [SNAPSHOT_QUERY_ROOT, key] }
-      if (queryClient.isFetching(snapshots) > 0) await queryClient.cancelQueries(snapshots)
-      // No await between these two, so React renders the card and its placement together.
-      queryClient.setQueriesData<RepoSnapshot>(snapshots, (old) => old && withCreatedIssue(old, issue))
-      update((current) => placeNewIssue(current, issue.number, bucketId))
+      // The placement runs right after the cache write with no await between, so React renders the card and its placement together.
+      await applyToSnapshots(
+        queryClient,
+        key,
+        (snapshot) => withCreatedIssue(snapshot, issue),
+        () => update((current) => placeNewIssue(current, issue.number, bucketId)),
+      )
       return issue
     },
     [queryClient, update, key],

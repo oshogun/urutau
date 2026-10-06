@@ -4,6 +4,7 @@ import { createElement } from 'react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SERVER_SETTINGS_QUERY_KEY } from '../api/settings'
+import type { RepoSnapshot } from '../domain/types'
 import { UpdateIssueError } from '../github/updateIssue'
 import { useBoards } from '../state/boardStore'
 import { useSession } from '../state/session'
@@ -30,19 +31,24 @@ const existing = { ...stubCreatedIssue(KEY, 1, 'Existing'), created_at: UPDATED_
 
 let githubCalls: { method: string; path: string }[] = []
 let githubNow: Record<string, unknown> = existing
+let snapshotGate: Promise<void> | null = null
 
 /** What api.github.com (and the server's proxy) answers; every call is recorded. */
 function githubAnswer(method: string, path: string): Response {
-  if (method === 'PATCH') return json({ ...githubNow, title: 'Renamed', updated_at: '2026-02-02T00:00:00Z' })
+  if (method === 'PATCH') {
+    githubNow = { ...githubNow, title: 'Renamed', updated_at: '2026-02-02T00:00:00Z' }
+    return json(githubNow)
+  }
   if (/\/issues\/\d+$/.test(path)) return json(githubNow)
   if (path.endsWith('/labels')) return json([])
-  if (path.includes('/issues')) return json([existing])
+  if (path.includes('/issues')) return json([githubNow])
   return json(repository)
 }
 
 beforeEach(() => {
   githubCalls = []
   githubNow = existing
+  snapshotGate = null
   useBoards.setState({ entries: {} })
   useSession.setState({ status: 'loading', firstRun: false, session: null, config: null, loadError: null })
   useSettings.setState({ token: TOKEN })
@@ -51,6 +57,14 @@ beforeEach(() => {
     vi.fn<typeof fetch>(async (url, init) => {
       const { pathname } = new URL(String(url))
       githubCalls.push({ method: init?.method ?? 'GET', path: pathname })
+      if (snapshotGate && (init?.method ?? 'GET') === 'GET' && pathname.endsWith('/issues')) {
+        await Promise.race([
+          snapshotGate,
+          new Promise<never>((_resolve, reject) =>
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
+          ),
+        ])
+      }
       return githubAnswer(init?.method ?? 'GET', pathname)
     }),
   )
@@ -233,5 +247,63 @@ describe('useUpdateIssue', () => {
     await expect(pending).rejects.toMatchObject({ kind: 'stopped', outcome: 'not-applied' })
     gate.release()
     expect(githubCalls).toHaveLength(before)
+  })
+
+  describe('a snapshot fetch running when the change finishes', () => {
+    function holdSnapshots() {
+      let release = () => {}
+      snapshotGate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return () => release()
+    }
+    const issuesReads = (from: number) =>
+      githubCalls.slice(from).filter((call) => call.method === 'GET' && call.path.endsWith('/issues'))
+
+    it('a snapshot in its first fetch ends up loaded with the change', async () => {
+      await start()
+      const release = holdSnapshots()
+      const { result, queryClient } = render(30)
+      await waitFor(() => expect(queryClient.isFetching({ queryKey: ['snapshot', KEY, 30, 'browser'] })).toBe(1))
+      await act(async () => {
+        await result.current.update(input())
+      })
+      release()
+      await waitFor(() => expect(queryClient.getQueryState(['snapshot', KEY, 30, 'browser'])?.status).toBe('success'))
+      const wide = queryClient.getQueryState<RepoSnapshot>(['snapshot', KEY, 30, 'browser'])
+      expect(wide?.status).toBe('success')
+      expect(wide?.data?.issues[0]).toMatchObject({ number: 1, title: 'Renamed' })
+    })
+
+    it('a Refresh running at that moment is fetched again, and the change is not lost', async () => {
+      await start()
+      const { result, queryClient } = render()
+      await waitFor(() => expect(result.current.snapshot.data).toBeDefined())
+      const release = holdSnapshots()
+      const reads = githubCalls.length
+      await act(async () => {
+        void result.current.snapshot.refetch()
+      })
+      await waitFor(() => expect(queryClient.isFetching({ queryKey: ['snapshot'] })).toBeGreaterThan(0))
+      await act(async () => {
+        await result.current.update(input())
+      })
+      release()
+      await waitFor(() => expect(result.current.snapshot.isFetching).toBe(false))
+      expect(result.current.snapshot.data?.issues[0]).toMatchObject({ number: 1, title: 'Renamed' })
+      expect(issuesReads(reads)).toHaveLength(2)
+    })
+
+    it('a snapshot that was not fetching is not fetched again', async () => {
+      await start()
+      const { result } = render()
+      await waitFor(() => expect(result.current.snapshot.data).toBeDefined())
+      const reads = githubCalls.length
+      await act(async () => {
+        await result.current.update(input())
+      })
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)))
+      expect(issuesReads(reads)).toEqual([])
+    })
   })
 })
