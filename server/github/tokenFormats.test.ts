@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { BEARER_PATTERN } from '../auth/bearer.ts'
-import { SECRET_PATTERNS, checkGitHubToken, redactPatterns } from './tokenFormats.ts'
+import { redact } from '../log.ts'
+import { LOOKALIKE_TEXT, TOKEN_SAMPLES } from '../testing/tokenSamples.ts'
+import { SECRET_PATTERN, checkGitHubToken } from './tokenFormats.ts'
+
+const redactPatterns = (text: string) => redact(text, [], { patterns: true })
 
 const classic = 'ghp_' + 'F'.repeat(36)
 const bearer = 'urutau_mcp_' + 'A'.repeat(43)
@@ -43,28 +47,27 @@ describe('checkGitHubToken', () => {
   })
 })
 
-describe('SECRET_PATTERNS', () => {
-  const samples: Record<string, string> = {
-    urutau_mcp_: bearer,
-    github_pat_: 'github_pat_urutau_fixture_not_a_real_token',
-    ghp_: classic,
-    gho_: 'gho_' + 'F'.repeat(36),
-    ghu_: 'ghu_' + 'F'.repeat(36),
-    ghs_: 'ghs_' + 'F'.repeat(36),
-    ghr_: 'ghr_' + 'F'.repeat(36),
-  }
-
-  it('are global so every match is replaced', () => {
-    for (const pattern of SECRET_PATTERNS) expect(pattern.global).toBe(true)
+describe('SECRET_PATTERN', () => {
+  it('is global so every match is replaced', () => {
+    expect(SECRET_PATTERN.global).toBe(true)
   })
 
-  it.each(Object.entries(samples))('removes a %s value', (_prefix, value) => {
+  it.each(Object.entries(TOKEN_SAMPLES))('removes a %s value', (_prefix, value) => {
     expect(redactPatterns(`before ${value} after`)).toBe('before [redacted] after')
   })
 
   it('removes every occurrence and leaves short look-alikes alone', () => {
     expect(redactPatterns(`${classic} and ${bearer}`)).toBe('[redacted] and [redacted]')
     expect(redactPatterns('ghp_short urutau_mcp_ github_pat_abc')).toBe('ghp_short urutau_mcp_ github_pat_abc')
+  })
+
+  it('leaves snake_case text that merely contains gh and an underscore alone', () => {
+    for (const text of LOOKALIKE_TEXT) expect(redactPatterns(text)).toBe(text)
+  })
+
+  it('still removes a gh[pousr]_ token that ends a path segment or follows a slash', () => {
+    expect(redactPatterns('/repos/acme/' + classic + '/issues')).toBe('/repos/acme/[redacted]/issues')
+    expect(redactPatterns('acme/highs_' + classic)).toBe('acme/highs_[redacted]')
   })
 
   it('removes a value right after a letter, underscore or URL escape', () => {
@@ -77,9 +80,10 @@ describe('SECRET_PATTERNS', () => {
     it('redacts bearers holding an inner gh token near the start of the body', () => {
       const m = 'urutau_mcp_AAAAAghp_abc-' + 'B'.repeat(30)
       const m19 = 'urutau_mcp_' + 'A'.repeat(19) + 'ghs_' + 'C'.repeat(20)
-      const p1 = 'urutau_mcp_' + 'ghp_' + 'A'.repeat(10) + '-' + 'A'.repeat(29)
+      const p1 = 'urutau_mcp_' + 'ghp_' + 'A'.repeat(10) + '-' + 'A'.repeat(28)
       expect(BEARER_PATTERN.test(m)).toBe(true)
       expect(BEARER_PATTERN.test(m19)).toBe(true)
+      expect(BEARER_PATTERN.test(p1)).toBe(true)
       for (const v of [m, m19, p1]) expect(redactPatterns(v)).toBe('[redacted]')
     })
 

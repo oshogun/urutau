@@ -17,18 +17,14 @@ export function checkGitHubToken(value: string): GitHubTokenCheck {
 }
 
 /**
- * One global pattern for urutau_mcp_, github_pat_ and gh[pousr]_ values with at least 20
- * characters after the prefix. Once a prefix and 20 body characters are seen, the whole run of
- * letters, digits, underscores and hyphens after it is removed, so two tokens written back to
- * back become a single [redacted] and no tail of either is left in the text. It has no leading
- * \b so a token right after a letter, digit, underscore or URL escape (%20, %3D) is still
- * matched. A shorter look-alike such as ghp_short or ghs_count is left alone.
+ * One global pattern for urutau_mcp_, github_pat_ and gh[pousr]_ values. A match needs 20
+ * characters after the prefix that fit that prefix's alphabet: letters, digits and underscores
+ * for github_pat_, letters and digits for gh[pousr]_, letters, digits, underscores and hyphens
+ * for urutau_mcp_. So ordinary text such as highs_and_lows_of_the_season, where "gh" and "_"
+ * are followed by underscore-separated words, is left alone. Once a match starts, the whole run
+ * of letters, digits, underscores and hyphens after it is removed too, so two tokens written back
+ * to back become a single [redacted] and no tail of either is left in the text. It has no
+ * leading \b so a token right after a letter, digit, underscore or URL escape (%20, %3D) is
+ * still matched. A shorter look-alike such as ghp_short or ghs_count is left alone.
  */
-export const SECRET_PATTERNS: readonly RegExp[] = [/(?:github_pat_|gh[pousr]_|urutau_mcp_)[A-Za-z0-9_-]{20,}/g]
-
-/** The text with every SECRET_PATTERNS match replaced by [redacted]. */
-export function redactPatterns(text: string): string {
-  let result = text
-  for (const pattern of SECRET_PATTERNS) result = result.replace(pattern, '[redacted]')
-  return result
-}
+export const SECRET_PATTERN = /(?:github_pat_[A-Za-z0-9_]{20}|gh[pousr]_[A-Za-z0-9]{20}|urutau_mcp_[A-Za-z0-9_-]{20})[A-Za-z0-9_-]*/g

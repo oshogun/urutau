@@ -1,16 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { SECRET_PATTERNS } from './github/tokenFormats.ts'
-import { createLogger, urlSecrets } from './log.ts'
+import { SECRET_PATTERN } from './github/tokenFormats.ts'
+import { createLogger, redact, urlSecrets } from './log.ts'
+import { LOOKALIKE_TEXT, TOKEN_SAMPLES } from './testing/tokenSamples.ts'
 
-const values = [
-  'urutau_mcp_' + 'A'.repeat(43),
-  'github_pat_urutau_fixture_not_a_real_token',
-  'ghp_' + 'F'.repeat(36),
-  'gho_' + 'F'.repeat(36),
-  'ghu_' + 'F'.repeat(36),
-  'ghs_' + 'F'.repeat(36),
-  'ghr_' + 'F'.repeat(36),
-]
+const values = Object.values(TOKEN_SAMPLES)
 
 function capture(patterns?: boolean, secrets?: string[]) {
   const lines: Array<Record<string, unknown>> = []
@@ -70,6 +63,13 @@ describe('createLogger patterns', () => {
     expect(lines[0].detail).toBe('Bearer [redacted]')
   })
 
+  it('leaves snake_case text that merely contains gh and an underscore unchanged', () => {
+    const { lines, logger } = capture(true)
+    for (const text of LOOKALIKE_TEXT) logger.info(text, { path: text })
+    expect(lines.map((line) => line.msg)).toEqual(LOOKALIKE_TEXT)
+    expect(lines.map((line) => line.path)).toEqual(LOOKALIKE_TEXT)
+  })
+
   it('still removes literal secrets with patterns on', () => {
     const { lines, logger } = capture(true, ['hunter2'])
     logger.info('password hunter2', { f: 'hunter2' })
@@ -88,7 +88,7 @@ describe('createLogger patterns', () => {
 describe('createLogger redaction order', () => {
   const secret = 'urutau'
   const body = 'Qk7Zp3Xw9Lm2Vb8Nc4Rt6Yh1Jd5Fg0SaEiOuKqWxMnBvCz'
-  const prefixes = ['urutau_mcp_', 'github_pat_', 'ghp_', 'gho_', 'ghu_', 'ghs_', 'ghr_']
+  const prefixes = Object.keys(TOKEN_SAMPLES)
 
   function survivingRun(text: string, tokenBody: string): string | undefined {
     for (let i = 0; i + 8 <= tokenBody.length; i++) {
@@ -171,13 +171,30 @@ describe('createLogger redaction order', () => {
 
     it('ignores a lastIndex left on the shared token pattern', () => {
       const { lines, logger } = capture(true)
-      SECRET_PATTERNS[0].lastIndex = 43
+      SECRET_PATTERN.lastIndex = 43
       try {
         logger.info('Bearer ghp_' + 'A'.repeat(36))
       } finally {
-        SECRET_PATTERNS[0].lastIndex = 0
+        SECRET_PATTERN.lastIndex = 0
       }
       expect(lines[0].msg).toBe('Bearer [redacted]')
     })
+  })
+})
+
+describe('redact', () => {
+  it('merges overlapping literal secrets into one [redacted]', () => {
+    expect(redact('login failed for ababab', ['abab'])).toBe('login failed for [redacted]')
+    expect(redact('Qababa', ['Qa', 'aba'])).toBe('[redacted]')
+  })
+
+  it('ignores empty secrets and returns the text unchanged when nothing matches', () => {
+    expect(redact('nothing here', ['', 'zzz'])).toBe('nothing here')
+  })
+
+  it('merges a token span that overlaps a literal secret span into one [redacted]', () => {
+    const token = 'ghp_' + 'A'.repeat(36)
+    expect(redact(`x ${token} y`, [token.slice(10, 20)], { patterns: true })).toBe('x [redacted] y')
+    expect(redact(`x ${token} y`, ['x ghp_AAA'], { patterns: true })).toBe('[redacted] y')
   })
 })
