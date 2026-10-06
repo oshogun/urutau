@@ -407,6 +407,88 @@ describe('IssueDetailModal changes', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Reopen' })).toBeInTheDocument())
   })
 
+  describe('when the issue prop stays older than what the dialog has seen', () => {
+    const modalWith = (issue: Issue, update: IssueUpdater) => (
+      <IssueDetailModal
+        issue={issue}
+        repoFullName="acme/widgets"
+        labelsByName={new Map()}
+        fetchedAt={0}
+        launcherButtonRef={createRef<HTMLButtonElement>()}
+        onClose={() => {}}
+        onUpdate={update}
+      />
+    )
+
+    it('starts Edit and Close from the newest version after two refusals', async () => {
+      const v2 = makeIssue(1, { title: 'Two', body: 'Two body', updatedAt: '2026-01-03T00:00:00Z' })
+      const v3 = makeIssue(1, { title: 'Three', body: 'Three body', updatedAt: '2026-01-05T00:00:00Z' })
+      const update = vi
+        .fn<IssueUpdater>()
+        .mockRejectedValueOnce(staleError(v2))
+        .mockRejectedValueOnce(staleError(v3))
+        .mockRejectedValueOnce(staleError(v3))
+      render(modalWith(base, update))
+      const user = userEvent.setup()
+      await user.click(screen.getByRole('button', { name: 'Close as completed' }))
+      expect(await screen.findByText('The title is now “Two”.')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Two' })).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Edit' }))
+      expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Two')
+      await user.type(screen.getByRole('textbox', { name: 'Title' }), '!')
+      await user.click(screen.getByRole('button', { name: 'Save changes' }))
+      expect(update.mock.calls[1]![0].expectedUpdatedAt).toBe('2026-01-03T00:00:00Z')
+      await screen.findByRole('button', { name: 'Apply again' })
+
+      await user.click(screen.getByRole('button', { name: 'Cancel' }))
+      await user.click(screen.getByRole('button', { name: 'Edit' }))
+      expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Three')
+      expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue('Three body')
+
+      await user.click(screen.getByRole('button', { name: 'Cancel' }))
+      await user.click(screen.getByRole('button', { name: 'Close as completed' }))
+      expect(update.mock.calls[2]![0].expectedUpdatedAt).toBe('2026-01-05T00:00:00Z')
+    })
+
+    it('shows Closed and Reopen after a refusal whose current issue is closed', async () => {
+      const closed = makeIssue(1, {
+        state: 'closed',
+        stateReason: 'completed',
+        closedAt: '2026-01-05T00:00:00Z',
+        updatedAt: '2026-01-05T00:00:00Z',
+      })
+      const update = vi.fn<IssueUpdater>().mockRejectedValueOnce(staleError(closed))
+      const view = render(modalWith(base, update))
+      const user = userEvent.setup()
+      expect(screen.getByText('Open', { selector: '.cds--tag *' })).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Close as completed' }))
+      await screen.findByText('It is already closed as completed on GitHub.')
+      view.rerender(modalWith(base, update))
+      expect(screen.getByText('Closed as completed', { selector: '.cds--tag *' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Reopen' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Close as completed' })).not.toBeInTheDocument()
+    })
+
+    it('keeps the closed version a successful change returned when the prop is the old open copy', async () => {
+      const closed = makeIssue(1, {
+        state: 'closed',
+        stateReason: 'completed',
+        closedAt: '2026-02-01T00:00:00Z',
+        updatedAt: '2026-02-01T00:00:00Z',
+      })
+      const update = vi.fn<IssueUpdater>().mockResolvedValueOnce(closed).mockRejectedValueOnce(staleError(closed))
+      const view = render(modalWith(base, update))
+      const user = userEvent.setup()
+      await user.click(screen.getByRole('button', { name: 'Close as completed' }))
+      await screen.findByText('Closed as completed.')
+      view.rerender(modalWith(base, update))
+      await user.click(await screen.findByRole('button', { name: 'Reopen' }))
+      expect(update.mock.calls[1]![0].expectedUpdatedAt).toBe('2026-02-01T00:00:00Z')
+      expect(screen.getByText('Closed as completed', { selector: '.cds--tag *' })).toBeInTheDocument()
+    })
+  })
+
   it('offers Apply again for a refused state change that still applies', async () => {
     const current = makeIssue(1, { body: 'Edited elsewhere', updatedAt: '2026-01-05T00:00:00Z' })
     const update = vi

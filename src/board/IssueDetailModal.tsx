@@ -142,8 +142,13 @@ function Person({ user }: { user: User }) {
   )
 }
 
+/** The version with the later `updatedAt`; `a` when they are equal or a time cannot be read. */
+function newerOf(a: Issue, b: Issue | null): Issue {
+  return b !== null && b.number === a.number && Date.parse(b.updatedAt) > Date.parse(a.updatedAt) ? b : a
+}
+
 export function IssueDetailModal({
-  issue,
+  issue: boardIssue,
   repoFullName,
   labelsByName,
   fetchedAt,
@@ -156,8 +161,13 @@ export function IssueDetailModal({
   const [editor, setEditor] = useState<Editor | null>(null)
   const [sending, setSending] = useState<IssueStateAction | 'edit' | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
-  // GitHub's version after a refused state change; the next state change starts from it.
-  const [viewStart, setViewStart] = useState<IssueVersion | null>(null)
+  // The newest version of the issue this dialog has seen: a change's result or GitHub's version
+  // in a refusal. The board's copy can be older (a closed issue the snapshot does not hold is
+  // passed as it was when the dialog opened), so the dialog shows the newer of the two and starts
+  // every change from it.
+  const [seen, setSeen] = useState<Issue | null>(null)
+  const issue = newerOf(boardIssue, seen)
+  const remember = (version: Issue) => setSeen((previous) => newerOf(version, previous))
   const focusTarget = useRef<string | null>(null)
   const controller = useRef<AbortController | null>(null)
   const loadingRef = useRef<HTMLDivElement>(null)
@@ -177,7 +187,7 @@ export function IssueDetailModal({
   const editing = editor !== null
   const canChange = hasUpdater || editing
   const noToken = hasUpdater && !editing && !serverPath && token.trim() === ''
-  const start: IssueVersion = viewStart ?? issue
+  const start: IssueVersion = issue
 
   const label = `${repoFullName} #${issue.number}`
   const tag = issueStateTag(issue.state, issue.stateReason)
@@ -246,14 +256,14 @@ export function IssueDetailModal({
     setSending(action)
     setNotice(null)
     try {
-      await onUpdate({
+      const changed = await onUpdate({
         fullName: repoFullName,
         number: issue.number,
         expectedUpdatedAt,
         fields: stateFields(action),
         signal: stop.signal,
       })
-      setViewStart(null)
+      remember(changed)
       setNotice({ kind: 'success', text: ACTIONS[action].done })
       focusTarget.current = action === 'reopen' ? 'issue-action-close-completed' : 'issue-action-reopen'
     } catch (error) {
@@ -261,7 +271,7 @@ export function IssueDetailModal({
       focusTarget.current = `issue-action-${action}`
       if (failure.kind === 'stale' && failure.current) {
         const { current } = failure
-        setViewStart(current)
+        remember(current)
         setNotice({
           kind: 'stale',
           changes: describeChanges(start, current),
@@ -319,15 +329,15 @@ export function IssueDetailModal({
     setSending('edit')
     setNotice(null)
     try {
-      await update({
+      const changed = await update({
         fullName: repoFullName,
         number: issue.number,
         expectedUpdatedAt: base.updatedAt,
         fields,
         signal: stop.signal,
       })
+      remember(changed)
       setEditor(null)
-      setViewStart(null)
       setNotice({
         kind: 'success',
         text: `${
@@ -343,6 +353,7 @@ export function IssueDetailModal({
       const failure = fail(error)
       if (failure.kind === 'stale' && failure.current) {
         const { current } = failure
+        remember(current)
         setEditor({
           base: current,
           draft: rebaseDraft(base, draft, current),
