@@ -6,8 +6,22 @@
  * and no database module, so every other MCP module can depend on it.
  */
 import type { BoardSummary, StoredBoard } from '../../src/domain/api.ts'
-import type { BoardConfig, Issue, RepoRef, RepoSnapshot } from '../../src/domain/types.ts'
+import type {
+  BoardConfig,
+  EstimateConfidence,
+  EstimateSize,
+  HoldingStatus,
+  Issue,
+  RepoRef,
+  RepoSnapshot,
+  RunStatus,
+  TerminalStatus,
+  TriageRange,
+  UnverifiedCounts,
+  WaitingStatus,
+} from '../../src/domain/types.ts'
 import type { Logger } from '../log.ts'
+import type { RunStore } from '../runs/types.ts'
 
 // ---------------------------------------------------------------- principal
 
@@ -86,6 +100,16 @@ export type McpToolErrorCode =
   | 'board-deleted'
   | 'board-busy'
   | 'call-stopped'
+  | 'claimed-by-other-run'
+  | 'run-finished'
+  | 'run-id-taken'
+  | 'item-changed'
+  | 'too-many-items'
+  | 'duplicate-item'
+  | 'probed-and-withdrawn'
+  | 'unknown-item'
+  | 'item-needs-a-person'
+  | 'invalid-text'
   | 'server-error'
 
 /** The fixed text of each tool error. Never built from stored data, GitHub data, arguments or exceptions. */
@@ -122,15 +146,32 @@ export const TOOL_ERROR_TEXT: Record<McpToolErrorCode, string> = {
   'board-busy': 'The board kept changing while this change was being saved. Nothing was saved. Try again.',
   'call-stopped':
     'This call was stopped: its Urutau MCP token was revoked, its integration was removed, the repository was taken off its list, or the client closed the connection.',
+  'claimed-by-other-run':
+    'Another run holds the claim on this issue. Nothing was recorded. Stop work on this issue; a person can release the claim from the card in Urutau.',
+  'run-finished':
+    'This run has already ended, and an ended run never changes. Nothing was recorded. runStatus is the status it ended with. A retry needs a new runId.',
+  'run-id-taken': 'This runId is already used for another issue or by another integration. Nothing was recorded. Use a new runId.',
+  'item-changed':
+    'An unverified item reuses the id of an earlier item with a different kind or text. Nothing was recorded. Give a changed item a new id.',
+  'too-many-items': 'A run has at most 20 unverified items, counting those recorded earlier. Nothing was recorded.',
+  'duplicate-item': 'unverified, probes or withdrawn names the same item id more than once. Nothing was recorded.',
+  'probed-and-withdrawn':
+    'The same item id is in both probes and withdrawn. An item is either checked or withdrawn, not both. Nothing was recorded.',
+  'unknown-item': "A probe or a withdrawal names an item id that is not among this run's unverified items. Nothing was recorded.",
+  'item-needs-a-person':
+    'A probe or a withdrawal names a normative item. Only a person closes a normative item, with Accept on the card. Nothing was recorded.',
+  'invalid-text': 'A text field is empty once control characters and extra spaces are removed. Nothing was recorded.',
   'server-error': 'Something went wrong on the server. Call get_board to see the board as it is now.',
 }
 
-/** Extra fields an error may carry: numbers and booleans only. */
+/** Extra fields an error may carry: numbers, booleans, and runStatus, a value of the TerminalStatus enum read from the database. */
 export interface ToolErrorExtra {
   retryAfterSeconds?: number
   reserve?: boolean
   currentVersion?: number | null
   cardMoved?: boolean
+  /** Set only on run-finished: the status the ended run has. */
+  runStatus?: TerminalStatus
 }
 
 /** The object serialised into an error result's text block. */
@@ -236,6 +277,9 @@ export interface CardJson {
   milestone: string | null
   comments: number
   updatedAt: string
+  estimate: { size: EstimateSize | null; confidence: EstimateConfidence; by: string; at: string } | null
+  lastRun: { status: RunStatus; triageRange: TriageRange | null; unverifiedOpen: UnverifiedCounts; runId: string } | null
+  claim: { runId: string; status: HoldingStatus; since: string } | null
 }
 
 export interface BucketJson {
@@ -263,7 +307,27 @@ export interface GetBoardJson {
   closedHidden: number
   cardBudgetReached: boolean
   bucketsOmitted: number
+  /** Hours a card may wait on a human before it counts as over the limit; null: no limit. */
+  humanWaitLimit: number | null
+  /** Every waiting claim of the repository, oldest first, whether or not its issue is a card in this answer. */
+  waitingOnHuman: { issue: number; runId: string; status: WaitingStatus; since: string; overLimit: boolean }[]
   buckets: BucketJson[]
+}
+
+export interface RecordRunJson {
+  repo: string
+  issue: number
+  runId: string
+  status: RunStatus
+  created: boolean
+  statusChanged: boolean
+  claim: { held: boolean; leaseUntil: string | null }
+  unverifiedOpen: UnverifiedCounts
+  probesApplied: number
+  probesSkipped: number
+  withdrawnApplied: number
+  withdrawnSkipped: number
+  notified: boolean
 }
 
 export interface MoveCardJson {
@@ -407,6 +471,9 @@ export interface ToolDeps {
   locks: RepoLocks
   limits: CallLimiter
   inflight: InflightRegistry
+  runs: RunStore
+  /** Sends a card-activity event to the streams open on the repository. Synchronous; call it after the change committed. */
+  publishCardActivity(event: { repoKey: string; issue: number; clientId: null }): void
 }
 
 /** What the save loop needs. */

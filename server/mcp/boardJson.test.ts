@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { StoredBoard } from '../../src/domain/api.ts'
 import { resolveBuckets } from '../../src/domain/board.ts'
 import type { BoardConfig, Bucket, Issue } from '../../src/domain/types.ts'
-import { boardJson, boardListJson, editorJson, readableBoard, type BoardJsonOptions } from './boardJson.ts'
+import { boardJson, boardListJson, editorJson, readableBoard, windowNumbers, type BoardActivityInput, type BoardJsonOptions } from './boardJson.ts'
 import { bucketIds } from './clean.ts'
 import { DISPLAY_CAPS, MCP_LIMITS, type BoardSnapshot } from './contract.ts'
 
@@ -60,8 +60,10 @@ function snapshot(issues: Issue[], overrides: Partial<BoardSnapshot> = {}): Boar
   }
 }
 
-function build(stor: StoredBoard, snap: BoardSnapshot, options: Partial<BoardJsonOptions> = {}) {
-  return boardJson(stor, snap, bucketIds(stor.board.buckets), { ...OPTIONS, ...options })
+const NO_ACTIVITY: BoardActivityInput = { claims: new Map(), lastRuns: new Map(), waiting: [], now: new Date('2026-10-08T14:00:00.000Z') }
+
+function build(stor: StoredBoard, snap: BoardSnapshot, options: Partial<BoardJsonOptions> = {}, activity: BoardActivityInput = NO_ACTIVITY) {
+  return boardJson(stor, snap, bucketIds(stor.board.buckets), { ...OPTIONS, ...options }, activity)
 }
 
 describe('boardJson order', () => {
@@ -260,5 +262,74 @@ describe('readableBoard', () => {
     expect(readableBoard({ ...good, order: { a: [1.5] } })).toBe(false)
     expect(readableBoard({ ...good, closedWindowDays: -1 })).toBe(false)
     expect(readableBoard({ ...good, closedWindowDays: Infinity })).toBe(false)
+  })
+})
+
+describe('boardJson run activity', () => {
+  const NOW = new Date('2026-10-08T14:00:00.000Z')
+  const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOString()
+  const board = makeBoard([makeBucket('todo')], {
+    humanWaitLimit: 24,
+    estimates: {
+      1: { size: 'M', confidence: 'sure', by: 'ada\u202e', at: '2026-10-07T09:00:00.000Z' },
+      2: { size: null, confidence: 'no-idea', by: 'ada', at: '2026-10-07T09:00:00.000Z' },
+    },
+  })
+  const issues = [makeIssue(1), makeIssue(2), makeIssue(3)]
+
+  it('gives every card its estimate, last run and claim, null when absent, with the author cleaned', () => {
+    const answer = build(stored(board), snapshot(issues), {}, {
+      claims: new Map([[3, { runId: 'r3', status: 'running', since: hoursAgo(1) }]]),
+      lastRuns: new Map([[3, { runId: 'r3', status: 'running', triageRange: null, unverifiedOpen: { external: 0, normative: 0, untested: 2 } }]]),
+      waiting: [],
+      now: NOW,
+    })
+    const card = (n: number) => answer.buckets[0].cards.find((c) => c.number === n)!
+    const [one, two, three] = [card(1), card(2), card(3)]
+    expect(one).toMatchObject({ estimate: { size: 'M', confidence: 'sure', by: 'ada' }, lastRun: null, claim: null })
+    expect(two.estimate).toEqual({ size: null, confidence: 'no-idea', by: 'ada', at: '2026-10-07T09:00:00.000Z' })
+    expect(three).toMatchObject({
+      estimate: null,
+      lastRun: { runId: 'r3', status: 'running', triageRange: null, unverifiedOpen: { external: 0, normative: 0, untested: 2 } },
+      claim: { runId: 'r3', status: 'running', since: hoursAgo(1) },
+    })
+  })
+
+  it('marks a waiting card over the limit only when it has waited strictly longer, and lists waiting issues that are not cards', () => {
+    const answer = build(stored(board), snapshot(issues), {}, {
+      claims: new Map(),
+      lastRuns: new Map(),
+      waiting: [
+        { issue: 99, runId: 'old', status: 'budget_exceeded', since: hoursAgo(30) },
+        { issue: 1, runId: 'edge', status: 'needs_human', since: hoursAgo(24) },
+        { issue: 2, runId: 'new', status: 'awaiting_approval', since: hoursAgo(2) },
+      ],
+      now: NOW,
+    })
+    expect(answer.humanWaitLimit).toBe(24)
+    expect(answer.waitingOnHuman.map((w) => [w.issue, w.overLimit])).toEqual([[99, true], [1, false], [2, false]])
+  })
+
+  it('never marks a waiting card over the limit when the board has none', () => {
+    const answer = build(stored(makeBoard([makeBucket('todo')])), snapshot(issues), {}, {
+      claims: new Map(),
+      lastRuns: new Map(),
+      waiting: [{ issue: 1, runId: 'r', status: 'needs_human', since: hoursAgo(5000) }],
+      now: NOW,
+    })
+    expect(answer.humanWaitLimit).toBeNull()
+    expect(answer.waitingOnHuman[0].overLimit).toBe(false)
+  })
+
+  it('names the cards in the offset and limit windows before the card budget', () => {
+    const many = Array.from({ length: 10 }, (_, i) => makeIssue(i + 1))
+    const stor = stored(makeBoard([makeBucket('todo')]))
+    expect(windowNumbers(stor, snapshot(many), { ...OPTIONS, offset: 2, limitPerBucket: 3 })).toEqual([8, 7, 6])
+    expect(windowNumbers(stor, snapshot([...many, makeIssue(11, { state: 'closed' })]), OPTIONS)).toHaveLength(10)
+  })
+
+  it('refuses a board whose estimates are invalid', () => {
+    expect(readableBoard(board)).toBe(true)
+    expect(readableBoard({ ...board, estimates: { 1: { size: 'XL', confidence: 'sure', by: 'a', at: 'x' } } })).toBe(false)
   })
 })

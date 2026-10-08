@@ -8,8 +8,10 @@
 import * as z from 'zod'
 import type { CallToolResult, McpServer } from '@modelcontextprotocol/server'
 import { parseRepoInput } from '../../src/domain/repoRef.ts'
+import { TERMINAL_STATUSES } from '../../src/domain/activity.ts'
 import { repoKeyOf } from '../boards/validate.ts'
-import { boardJson, boardListJson, readableBoard } from './boardJson.ts'
+import { RUN_LIMITS } from '../runs/types.ts'
+import { boardJson, boardListJson, readableBoard, windowNumbers, type BoardJsonOptions } from './boardJson.ts'
 import { bucketIds } from './clean.ts'
 import {
   MCP_LIMITS,
@@ -22,6 +24,7 @@ import {
   type ToolErrorPayload,
 } from './contract.ts'
 import { moveCard } from './move.ts'
+import { recordRunTool } from './recordRun.ts'
 import { reorderBucketTool } from './reorder.ts'
 
 // ---------------------------------------------------------------- shared pieces
@@ -59,6 +62,7 @@ export const SERVER_INSTRUCTIONS = [
   'Urutau is a kanban board for GitHub issues.',
   'list_boards lists the boards this integration may read. get_board returns one board as JSON: its buckets and their cards in the order people see them.',
   'move_card and reorder_bucket change card positions on the Urutau board only. They never change anything on GitHub, and everyone with the board open sees the change.',
+  'record_run reports an agent run on an issue and claims or releases its card. It never changes GitHub or the board layout.',
   UNTRUSTED_SENTENCE,
 ].join(' ')
 
@@ -128,6 +132,64 @@ export const reorderBucketInput = z
   })
   .strict()
 
+const ITEM_ID_PATTERN = new RegExp(RUN_LIMITS.itemIdPattern)
+const itemId = z.string().regex(ITEM_ID_PATTERN)
+/** Path only: no scheme, no leading slash, no spaces, no backslash. */
+const PATH_PATTERN = /^[A-Za-z0-9._@+-]+(?:\/[A-Za-z0-9._@+-]+)*$/
+const noDotSegments = (path: string) => path.split('/').every((segment) => segment !== '.' && segment !== '..')
+const path = (max: number) => z.string().max(max).regex(PATH_PATTERN).refine(noDotSegments)
+
+export const recordRunInput = z
+  .object({
+    repo,
+    issue: issueNumber.describe('The issue number the run works on. It may be closed or not shown on the board.'),
+    runId: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{1,64}$/)
+      .describe('Your id for this run, stable across retries and calls. Use a new one for a new run.'),
+    status: z
+      .enum(['running', 'awaiting_approval', 'needs_human', 'budget_exceeded', 'done', 'failed', 'rejected', 'plan_only'])
+      .describe('running claims the card; awaiting_approval, needs_human and budget_exceeded hold it; the rest end the run.'),
+    triageRange: z.enum(['S', 'M', 'L', 'S-M', 'M-L', 'S-L']).optional().describe('The size range the triage gave the issue.'),
+    uncertaintyKind: z.enum(['external', 'normative', 'untested', 'none']).optional(),
+    unverified: z
+      .array(
+        z
+          .object({
+            id: itemId.describe('Your id for the item, stable across retries, unique within the run.'),
+            kind: z.enum(['external', 'normative', 'untested']),
+            text: z.string().min(1).max(RUN_LIMITS.itemTextInputMax),
+          })
+          .strict(),
+      )
+      .max(RUN_LIMITS.itemsPerRun)
+      .optional()
+      .describe('Claims nothing checked. Items already recorded for this run are kept; new ids are added.'),
+    mergeShas: z.array(z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)).max(RUN_LIMITS.mergeShasPerRun).optional(),
+    files: z.array(path(RUN_LIMITS.fileMax)).max(RUN_LIMITS.filesPerRun).optional(),
+    filesOmitted: z.number().int().min(0).max(RUN_LIMITS.filesOmittedMax).optional(),
+    areas: z.array(path(RUN_LIMITS.areaMax)).max(RUN_LIMITS.areasPerRun).optional(),
+    observedBy: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,31}\/[A-Za-z0-9.+_-]{1,31}$/)
+      .optional()
+      .describe('The tool and version that observed the run, for example carcara/0.9.1.'),
+    fixRounds: z.number().int().min(0).max(RUN_LIMITS.fixRoundsMax).optional(),
+    costUsd: z.number().finite().min(0).max(RUN_LIMITS.costUsdMax).optional(),
+    findings: z.string().min(1).max(RUN_LIMITS.findingsInputMax).optional(),
+    probes: z
+      .array(z.object({ item: itemId, note: z.string().min(1).max(RUN_LIMITS.noteInputMax).optional() }).strict())
+      .max(RUN_LIMITS.probesPerCall)
+      .optional()
+      .describe('Items of this run that it checked: the claim holds. Closes external and untested items.'),
+    withdrawn: z
+      .array(itemId)
+      .max(RUN_LIMITS.withdrawnPerCall)
+      .optional()
+      .describe("This run's own external or untested items that no longer apply. They stop counting as open."),
+  })
+  .strict()
+
 // ---------------------------------------------------------------- outputs
 
 const editor = z.object({ username: z.string(), kind: z.enum(['person', 'integration']) }).nullable()
@@ -145,6 +207,9 @@ export const listBoardsOutput = z.object({
   reposWithoutBoard: z.array(z.string()),
 })
 
+const runStatus = z.enum(['running', 'awaiting_approval', 'needs_human', 'budget_exceeded', 'done', 'failed', 'rejected', 'plan_only'])
+const openCounts = z.object({ external: z.number(), normative: z.number(), untested: z.number() })
+
 const card = z.object({
   number: z.number(),
   title: z.string(),
@@ -154,6 +219,16 @@ const card = z.object({
   milestone: z.string().nullable(),
   comments: z.number(),
   updatedAt: z.string(),
+  estimate: z.object({ size: z.enum(['S', 'M', 'L']).nullable(), confidence: z.enum(['sure', 'unsure', 'no-idea']), by: z.string(), at: z.string() }).nullable(),
+  lastRun: z
+    .object({
+      status: runStatus,
+      triageRange: z.enum(['S', 'M', 'L', 'S-M', 'M-L', 'S-L']).nullable(),
+      unverifiedOpen: openCounts,
+      runId: z.string(),
+    })
+    .nullable(),
+  claim: z.object({ runId: z.string(), status: runStatus, since: z.string() }).nullable(),
 })
 
 const bucket = z.object({
@@ -181,6 +256,10 @@ export const getBoardOutput = z.object({
   closedHidden: z.number(),
   cardBudgetReached: z.boolean(),
   bucketsOmitted: z.number(),
+  humanWaitLimit: z.number().nullable(),
+  waitingOnHuman: z.array(
+    z.object({ issue: z.number(), runId: z.string(), status: runStatus, since: z.string(), overLimit: z.boolean() }),
+  ),
   buckets: z.array(bucket),
 })
 
@@ -201,6 +280,22 @@ export const reorderBucketOutput = z.object({
   bucket: z.string(),
   order: z.array(z.number()),
   attempts: z.number(),
+})
+
+export const recordRunOutput = z.object({
+  repo: z.string(),
+  issue: z.number(),
+  runId: z.string(),
+  status: runStatus,
+  created: z.boolean(),
+  statusChanged: z.boolean(),
+  claim: z.object({ held: z.boolean(), leaseUntil: z.string().nullable() }),
+  unverifiedOpen: openCounts,
+  probesApplied: z.number(),
+  probesSkipped: z.number(),
+  withdrawnApplied: z.number(),
+  withdrawnSkipped: z.number(),
+  notified: z.boolean(),
 })
 
 // ---------------------------------------------------------------- tool definitions
@@ -225,6 +320,7 @@ export const TOOL_DEFINITIONS = {
     description: [
       "Returns one Urutau board as JSON: its buckets in board order, and each bucket's cards (GitHub issues) in the order people see them.",
       'Closed issues are left out unless includeClosed is true. One answer holds at most 300 cards; to page through one large bucket, name it alone in buckets and raise offset.',
+      'Each card also has its size estimate, its last agent run and its claim, if any; a card with a claim is being worked on by another run.',
       UNTRUSTED_SENTENCE,
     ].join(' '),
     inputSchema: getBoardInput,
@@ -257,6 +353,21 @@ export const TOOL_DEFINITIONS = {
     outputSchema: reorderBucketOutput,
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   },
+  record_run: {
+    title: 'Record a run',
+    description: [
+      'Records one agent run on a GitHub issue in Urutau: its status, the triage size range, and the claims nothing checked (unverified items).',
+      "Status running claims the issue's card for this run, with a 30-minute lease that every running call renews; awaiting_approval, needs_human and budget_exceeded hold the claim with no lease; done, failed, rejected and plan_only end the run and release its claim.",
+      'A second run on a claimed issue is refused with claimed-by-other-run: stop work on the issue then. An ended run never changes (run-finished); a retry needs a new runId.',
+      "A probe says this run checked one of its external or untested items and the claim holds; it closes the item. withdrawn takes back this run's own external or untested items that no longer apply (reworded, or made untrue by the fix); they stop counting as open. Only a person closes normative items.",
+      'running and the waiting statuses need an Urutau board for the repository (no-board otherwise).',
+      'It changes only Urutau, never GitHub, and does not change the board.',
+      UNTRUSTED_SENTENCE,
+    ].join(' '),
+    inputSchema: recordRunInput,
+    outputSchema: recordRunOutput,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
 } as const
 
 export type ToolName = keyof typeof TOOL_DEFINITIONS
@@ -282,6 +393,9 @@ function failure(code: McpToolErrorCode, extra: ToolErrorExtra = {}): ToolResult
     payload.currentVersion = extra.currentVersion
   }
   if (typeof extra.cardMoved === 'boolean') payload.cardMoved = extra.cardMoved
+  if (extra.runStatus !== undefined && (TERMINAL_STATUSES as readonly string[]).includes(extra.runStatus)) {
+    payload.runStatus = extra.runStatus
+  }
   return { isError: true, content: [{ type: 'text', text: JSON.stringify(payload) }] }
 }
 
@@ -331,7 +445,7 @@ interface HandlerContext {
   mcpReq: { signal: AbortSignal }
 }
 
-/** Registers the four tools on one McpServer instance. */
+/** Registers the five tools on one McpServer instance. */
 export function registerTools(server: McpServer, call: McpCallContext, deps: ToolDeps): void {
   const { principal } = call
 
@@ -426,12 +540,18 @@ export function registerTools(server: McpServer, call: McpCallContext, deps: Too
           closedWindowDays: stored.board.closedWindowDays,
           signal: args.signal,
         })
-        return boardJson(stored, snapshot, ids, {
+        const options: BoardJsonOptions = {
           buckets: wanted,
           limitPerBucket: input.limitPerBucket ?? MCP_LIMITS.defaultLimitPerBucket,
           offset,
           includeClosed: input.includeClosed ?? false,
-        })
+        }
+        const now = deps.now()
+        const [activity, waiting] = await Promise.all([
+          deps.runs.activityFor(key, windowNumbers(stored, snapshot, options), now),
+          deps.runs.waitingClaims(key, now),
+        ])
+        return boardJson(stored, snapshot, ids, options, { ...activity, waiting, now })
       }),
   )
 
@@ -486,6 +606,24 @@ export function registerTools(server: McpServer, call: McpCallContext, deps: Too
           order: input.order,
           expectedVersion: input.expectedVersion ?? null,
         })
+      }),
+  )
+
+  const recordRunDefinition = TOOL_DEFINITIONS.record_run
+  server.registerTool(
+    'record_run',
+    {
+      title: recordRunDefinition.title,
+      description: recordRunDefinition.description,
+      inputSchema: recordRunDefinition.inputSchema,
+      outputSchema: recordRunDefinition.outputSchema,
+      annotations: recordRunDefinition.annotations,
+    },
+    (input, ctx) =>
+      run('record_run', ctx, async (args) => {
+        takeCall(args, ['call'])
+        const key = await allowedKey(args, input.repo)
+        return recordRunTool(deps, principal, args.signal, key, input)
       }),
   )
 }

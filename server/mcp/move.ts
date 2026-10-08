@@ -1,4 +1,5 @@
 /** move_card, and the save loop both move tools share. */
+import { isDeepStrictEqual } from 'node:util'
 import type { StoredBoard } from '../../src/domain/api.ts'
 import {
   bucketNumbers,
@@ -121,6 +122,12 @@ export async function saveWithRetries<R>(
       const shown = bucketNumbers(resolveBuckets(planned.snapshot.issues, final), planned.bucketId)
       if (!sameNumbers(shown, planned.expected)) {
         deps.log.error('mcp move postcondition failed', { integration: principal.userId, repo: repoKey })
+        throw new ToolFailure('server-error')
+      }
+
+      // Estimates and the wait limit are people's settings; a move or reorder must save them as stored.
+      if (!isDeepStrictEqual(final.estimates, stored.board.estimates) || !isDeepStrictEqual(final.humanWaitLimit, stored.board.humanWaitLimit)) {
+        deps.log.error('mcp move changed board settings', { integration: principal.userId, repo: repoKey })
         throw new ToolFailure('server-error')
       }
 

@@ -286,6 +286,41 @@ describe('board export and import', () => {
     expect(boardFromExport(JSON.parse(JSON.stringify(arranged)), 'acme/widgets')?.placements).toEqual({})
   })
 
+  it('imports a version-1 export that has no estimates or wait limit', () => {
+    const old = file()
+    expect('estimates' in old.board).toBe(false)
+    expect('humanWaitLimit' in old.board).toBe(false)
+    expect(boardFromExport(old, 'acme/widgets')).toEqual(arranged)
+    expect(boardFromExport(old, 'acme/gadgets')?.buckets).toEqual(arranged.buckets)
+  })
+
+  describe('with estimates and a wait limit', () => {
+    const estimate = { size: 'M', confidence: 'unsure', by: 'ana', at: '2026-10-08T12:00:00.000Z' } as const
+    const withExtras = { ...arranged, estimates: { 1: estimate }, humanWaitLimit: 24 }
+    const extrasFile = () => JSON.parse(JSON.stringify(toBoardExport(withExtras, 'acme/widgets')))
+
+    it('round-trips for the same repository', () => {
+      expect(boardFromExport(extrasFile(), 'acme/widgets')).toEqual(withExtras)
+    })
+
+    it('drops the estimates but keeps the wait limit for another repository', () => {
+      const imported = boardFromExport(extrasFile(), 'acme/gadgets')
+      expect(imported).not.toBeNull()
+      expect(imported && 'estimates' in imported).toBe(false)
+      expect(imported?.humanWaitLimit).toBe(24)
+      expect(imported?.placements).toEqual({})
+    })
+
+    it('rejects a file whose estimates or wait limit are invalid', () => {
+      const bad = extrasFile()
+      bad.board.estimates = { 1: { ...estimate, size: 'XL' } }
+      expect(boardFromExport(bad, 'acme/widgets')).toBeNull()
+      const badLimit = extrasFile()
+      badLimit.board.humanWaitLimit = 0
+      expect(boardFromExport(badLimit, 'acme/widgets')).toBeNull()
+    })
+  })
+
   it('rejects anything that is not a board', () => {
     expect(boardFromExport({ board: { version: 1 } }, 'acme/widgets')).toBeNull()
     expect(boardFromExport('nope', 'acme/widgets')).toBeNull()

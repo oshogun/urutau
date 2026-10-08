@@ -65,26 +65,62 @@ function snapshotOf(issues: Issue[]): BoardSnapshot {
 const GOLDEN =
   '{"repo":"acme/widgets","fullName":"acme/widgets","private":false,"version":7,"updatedAt":"2026-10-03T12:00:00.000Z",' +
   '"updatedBy":{"username":"ada","kind":"person"},"fetchedAt":"2026-10-03T12:00:05.000Z","truncated":false,' +
-  '"closedWindowDays":14,"closedHidden":0,"cardBudgetReached":false,"bucketsOmitted":0,"buckets":[{"id":"backlog",' +
+  '"closedWindowDays":14,"closedHidden":0,"cardBudgetReached":false,"bucketsOmitted":0,"humanWaitLimit":null,"waitingOnHuman":[],' +
+  '"buckets":[{"id":"backlog",' +
   '"title":"Backlog","wipLimit":null,"collectsClosed":false,"labelRules":[],"total":1,"offset":0,"more":false,' +
   '"cards":[{"number":7,"title":"Crash on save","state":"open","labels":["bug"],"assignees":["octocat"],' +
-  '"milestone":"v1.0","comments":3,"updatedAt":"2026-09-30T00:00:00Z"}]}]}'
+  '"milestone":"v1.0","comments":3,"updatedAt":"2026-09-30T00:00:00Z","estimate":null,"lastRun":null,"claim":null}]}]}'
+const GOLDEN_START = GOLDEN.slice(0, GOLDEN.indexOf('"bucketsOmitted":0,') + '"bucketsOmitted":0,'.length)
+const GOLDEN_END = GOLDEN.slice(GOLDEN.indexOf('"buckets":[{'))
 
-const build = (issue: Issue) =>
-  JSON.stringify(
-    boardJson(STORED, snapshotOf([issue]), bucketIds(BOARD.buckets), {
-      buckets: null,
-      limitPerBucket: 50,
-      offset: 0,
-      includeClosed: false,
-    }),
-  )
+const OPTIONS = { buckets: null, limitPerBucket: 50, offset: 0, includeClosed: false }
+const NOW = new Date('2026-10-08T14:00:00.000Z')
+const NO_ACTIVITY = { claims: new Map(), lastRuns: new Map(), waiting: [], now: NOW }
+
+const build = (issue: Issue) => JSON.stringify(boardJson(STORED, snapshotOf([issue]), bucketIds(BOARD.buckets), OPTIONS, NO_ACTIVITY))
 
 describe('get_board output', () => {
   it('equals one golden string, with no body field, whether or not the issue has a body', () => {
     expect(build(ISSUE)).toBe(GOLDEN)
     expect(build({ ...ISSUE, body: BODY })).toBe(GOLDEN)
     expect(GOLDEN).not.toContain('body')
+  })
+
+  it('puts the new top-level fields before buckets and the new card fields after updatedAt, keeping the old keys and their order', () => {
+    expect(GOLDEN).toContain('"bucketsOmitted":0,"humanWaitLimit":null,"waitingOnHuman":[],"buckets":[')
+    expect(GOLDEN).toContain('"updatedAt":"2026-09-30T00:00:00Z","estimate":null,"lastRun":null,"claim":null}')
+  })
+
+  it('carries an estimate, a last run, a claim and the waiting cards when the board has them', () => {
+    const board: BoardConfig = {
+      ...BOARD,
+      humanWaitLimit: 24,
+      estimates: { 7: { size: 'S', confidence: 'unsure', by: 'ada', at: '2026-10-07T09:00:00.000Z' } },
+    }
+    const answer = boardJson({ ...STORED, board }, snapshotOf([ISSUE]), bucketIds(board.buckets), OPTIONS, {
+      claims: new Map([[7, { runId: 'c-20261008-0001', status: 'awaiting_approval' as const, since: '2026-10-08T12:05:00.000Z' }]]),
+      lastRuns: new Map([
+        [7, { runId: 'c-20261008-0001', status: 'awaiting_approval' as const, triageRange: 'M-L' as const, unverifiedOpen: { external: 1, normative: 1, untested: 0 } }],
+      ]),
+      waiting: [
+        { issue: 3, runId: 'c-20261006-0002', status: 'needs_human', since: '2026-10-07T06:00:00.000Z' },
+        { issue: 7, runId: 'c-20261008-0001', status: 'awaiting_approval', since: '2026-10-08T12:05:00.000Z' },
+      ],
+      now: NOW,
+    })
+    const text = JSON.stringify(answer)
+    expect(text).toBe(
+      GOLDEN_START +
+        '"humanWaitLimit":24,"waitingOnHuman":[' +
+        '{"issue":3,"runId":"c-20261006-0002","status":"needs_human","since":"2026-10-07T06:00:00.000Z","overLimit":true},' +
+        '{"issue":7,"runId":"c-20261008-0001","status":"awaiting_approval","since":"2026-10-08T12:05:00.000Z","overLimit":false}],' +
+        GOLDEN_END.replace(
+          '"estimate":null,"lastRun":null,"claim":null',
+          '"estimate":{"size":"S","confidence":"unsure","by":"ada","at":"2026-10-07T09:00:00.000Z"},' +
+            '"lastRun":{"status":"awaiting_approval","triageRange":"M-L","unverifiedOpen":{"external":1,"normative":1,"untested":0},"runId":"c-20261008-0001"},' +
+            '"claim":{"runId":"c-20261008-0001","status":"awaiting_approval","since":"2026-10-08T12:05:00.000Z"}',
+        ),
+    )
   })
 })
 

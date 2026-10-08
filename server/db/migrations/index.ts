@@ -5,6 +5,7 @@ import type { Tables } from '../schema.ts'
 import { up as m0001 } from './0001_initial.ts'
 import { up as m0002 } from './0002_github_writes.ts'
 import { up as m0003 } from './0003_integrations.ts'
+import { up as m0004 } from './0004_card_runs.ts'
 
 /** Names sort in order and a released migration is never edited; a change is a new numbered entry. */
 function migrations(backend: Backend): Record<string, Migration> {
@@ -12,6 +13,7 @@ function migrations(backend: Backend): Record<string, Migration> {
     '0001_initial': { up: (db) => m0001(db, backend) },
     '0002_github_writes': { up: (db) => m0002(db) },
     '0003_integrations': { up: (db) => m0003(db, backend) },
+    '0004_card_runs': { up: (db) => m0004(db, backend) },
   }
 }
 

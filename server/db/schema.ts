@@ -1,3 +1,5 @@
+import type { RunStatus, TriageRange, UncertaintyKind } from '../../src/domain/types.ts'
+
 /**
  * Column types as the application sees them on every backend: ids are UUID
  * strings, timestamps are ISO 8601 UTC strings from Date.prototype.toISOString(),
@@ -94,6 +96,48 @@ export interface IntegrationReposTable {
   repo_key: string // VARCHAR(200) lower-case owner/name; PK part 2
 }
 
+export interface CardRunsTable {
+  run_id: string // VARCHAR(64) PK; also UNIQUE (repo_key, issue, run_id)
+  repo_key: string // VARCHAR(200) lower-case owner/name
+  issue: number // INTEGER
+  agent_user_id: string // VARCHAR(36), no foreign key: runs never change when an integration is removed
+  status: RunStatus // VARCHAR(24)
+  status_at: string // VARCHAR(24): when status last changed value
+  triage_range: TriageRange | null // VARCHAR(8)
+  uncertainty_kind: UncertaintyKind | null // VARCHAR(16)
+  unverified: string // TEXT (MEDIUMTEXT on MariaDB): JSON UnverifiedItem[] (withdrawnAt on withdrawn items)
+  merge_shas: string // TEXT: JSON string[]
+  files: string // TEXT (MEDIUMTEXT on MariaDB): JSON string[]
+  files_omitted: number // INTEGER, 0 when not given: paths the agent left out of files
+  areas: string // TEXT: JSON string[]
+  observed_by: string | null // VARCHAR(64)
+  fix_rounds: number // INTEGER, 0 when not given
+  cost_usd: number | null // DOUBLE PRECISION
+  findings: string | null // TEXT, plain text up to 1000 code points
+  started_at: string // VARCHAR(24)
+  ended_at: string | null // VARCHAR(24), set with a terminal status
+}
+
+export interface CardClaimsTable {
+  repo_key: string // VARCHAR(200), PK part 1
+  issue: number // INTEGER, PK part 2
+  run_id: string // VARCHAR(64) FK card_runs.run_id
+  holder: string // VARCHAR(36) FK users.id ON DELETE CASCADE, indexed
+  lease_until: string | null // VARCHAR(24); null while waiting on a human
+  claimed_at: string // VARCHAR(24)
+}
+
+export interface RunEventsTable {
+  id: string // VARCHAR(36) PK, crypto.randomUUID()
+  run_id: string // VARCHAR(64) FK card_runs.run_id; UNIQUE (run_id, resolves)
+  kind: 'probe' | 'accepted' // VARCHAR(16); the run store refuses any other kind
+  resolves: string | null // VARCHAR(32): the item id it closes
+  surfaced_at: string // VARCHAR(24); equals at in phase 1
+  detail: string // TEXT: JSON, probe {note}, accepted {note}
+  by: string // VARCHAR(36) users.id, no foreign key
+  at: string // VARCHAR(24)
+}
+
 export interface Tables {
   meta: MetaTable
   users: UsersTable
@@ -106,4 +150,7 @@ export interface Tables {
   api_tokens: ApiTokensTable
   github_tokens: GithubTokensTable
   integration_repos: IntegrationReposTable
+  card_runs: CardRunsTable
+  card_claims: CardClaimsTable
+  run_events: RunEventsTable
 }

@@ -9,6 +9,8 @@ import { listAllIntegrationRepos, listIntegrationRepos, setIntegrationRepos } fr
 import { findUserByIdentity, linkIdentity } from './identities.ts'
 import { createInvite, deleteInvite, getUsableInvite, listUsableInvites, markInviteUsed } from './invites.ts'
 import { getGithubWrites, setGithubWrites } from './settings.ts'
+import { createRunStore } from '../runs/store.ts'
+import type { RecordRunInput } from '../runs/types.ts'
 import { createSession, deleteExpiredSessions, getSession, getSessionWithUser } from './sessions.ts'
 import { createAccount, deleteUser, getUserById, getUserByUsername, isFirstRun, listUsers } from './users.ts'
 
@@ -25,7 +27,7 @@ function isForeignKeyViolation(error: unknown): boolean {
 /** Empties every application table except `meta`, children before parents, and turns the GitHub writes switch off. */
 async function resetData(database: Database): Promise<void> {
   const { db } = database
-  for (const table of ['integration_repos', 'api_tokens', 'github_tokens', 'integrations', 'sessions', 'invites', 'identities', 'boards', 'instance_claim', 'users'] as const) {
+  for (const table of ['run_events', 'card_claims', 'card_runs', 'integration_repos', 'api_tokens', 'github_tokens', 'integrations', 'sessions', 'invites', 'identities', 'boards', 'instance_claim', 'users'] as const) {
     await db.deleteFrom(table).execute()
   }
   await setGithubWrites(db, false)
@@ -78,7 +80,8 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
       it('run 0003_integrations again after its row was deleted, keeping the data', async () => {
         const admin = await seedAdmin()
         const made = await createIntegration(database.db, { username: 'planner-bot', createdBy: admin.id, now: T0 })
-        await database.db.deleteFrom('kysely_migration' as never).where('name' as never, '=', '0003_integrations' as never).execute()
+        // Kysely refuses a gap in the executed list, so the later migration's row goes too.
+        await database.db.deleteFrom('kysely_migration' as never).where('name' as never, 'in', ['0003_integrations', '0004_card_runs'] as never).execute()
         await database.migrate()
         expect(await isIntegration(database.db, made.id)).toBe(true)
       })
@@ -498,6 +501,77 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         expect(await listIntegrationRepos(database.db, other.id)).toEqual(['a/one'])
         expect(await getUserById(database.db, made.id)).toBeNull()
         expect((await getBoard(database.db, 'a/one'))?.updatedBy).toBeNull()
+      })
+    })
+
+    describe('agent runs', () => {
+      async function twoBots() {
+        const admin = await seedAdmin()
+        const a = await createIntegration(database.db, { username: 'bot-a', createdBy: admin.id, now: T0 })
+        const b = await createIntegration(database.db, { username: 'bot-b', createdBy: admin.id, now: T0 })
+        return { admin, a, b }
+      }
+      const call = (agentUserId: string, runId: string, issue: number, extra: Partial<RecordRunInput> = {}): RecordRunInput => ({
+        repoKey: 'acme/widgets',
+        issue,
+        runId,
+        agentUserId,
+        status: 'running',
+        ...extra,
+      })
+
+      it('gives exactly one claim to two concurrent claim attempts on one issue, and the loser leaves no run row', async () => {
+        const { a, b } = await twoBots()
+        const runs = createRunStore(database.db)
+        const results = await Promise.allSettled([runs.recordRun(call(a.id, 'run-a', 7), T0), runs.recordRun(call(b.id, 'run-b', 7), T0)])
+        const won = results.filter((r) => r.status === 'fulfilled')
+        const lost = results.filter((r) => r.status === 'rejected')
+        expect(won).toHaveLength(1)
+        expect(lost).toHaveLength(1)
+        expect((lost[0] as PromiseRejectedResult).reason).toMatchObject({ code: 'claimed-by-other-run' })
+        const claims = await database.db.selectFrom('card_claims').select(['run_id', 'holder']).execute()
+        expect(claims).toHaveLength(1)
+        const runRows = await database.db.selectFrom('card_runs').select('run_id').execute()
+        expect(runRows).toEqual([{ run_id: claims[0].run_id }])
+      })
+
+      it('lets two concurrent first calls of different runs on different issues both succeed', async () => {
+        const { a, b } = await twoBots()
+        const runs = createRunStore(database.db)
+        const results = await Promise.all([runs.recordRun(call(a.id, 'run-a', 7), T0), runs.recordRun(call(b.id, 'run-b', 8), T0)])
+        expect(results.map((r) => r.claim.held)).toEqual([true, true])
+        expect(await database.db.selectFrom('card_claims').select('issue').orderBy('issue').execute()).toEqual([{ issue: 7 }, { issue: 8 }])
+      })
+
+      it('lets two concurrent first calls of one run both succeed with one run row and one claim', async () => {
+        const { a } = await twoBots()
+        const runs = createRunStore(database.db)
+        const results = await Promise.all([runs.recordRun(call(a.id, 'run-a', 7), T0), runs.recordRun(call(a.id, 'run-a', 7), T0)])
+        expect(results.filter((r) => r.created)).toHaveLength(1)
+        expect(await database.db.selectFrom('card_runs').select('run_id').execute()).toEqual([{ run_id: 'run-a' }])
+        expect(await database.db.selectFrom('card_claims').select('run_id').execute()).toEqual([{ run_id: 'run-a' }])
+      })
+
+      it('inserts nothing for a second resolution of one item', async () => {
+        const { a } = await twoBots()
+        const runs = createRunStore(database.db)
+        const items = [{ id: 'U1', kind: 'external' as const, text: 'GitHub sends the header on 403.' }]
+        const first = await runs.recordRun(call(a.id, 'run-a', 7, { unverified: items, probes: [{ item: 'U1', note: null }] }), T0)
+        const second = await runs.recordRun(call(a.id, 'run-a', 7, { probes: [{ item: 'U1', note: 'again' }] }), later(1000))
+        expect([first.probesApplied, second.probesApplied, second.probesSkipped]).toEqual([1, 0, 1])
+        expect(await database.db.selectFrom('run_events').select(['kind', 'resolves']).execute()).toEqual([{ kind: 'probe', resolves: 'U1' }])
+      })
+
+      it('deletes the claim with its holder and keeps the run and event rows', async () => {
+        const { a } = await twoBots()
+        const runs = createRunStore(database.db)
+        const items = [{ id: 'U1', kind: 'external' as const, text: 'GitHub sends the header on 403.' }]
+        await runs.recordRun(call(a.id, 'run-a', 7, { unverified: items, probes: [{ item: 'U1', note: null }] }), T0)
+        expect(await database.db.selectFrom('card_claims').select('run_id').execute()).toHaveLength(1)
+        expect(await deleteIntegration(database.db, a.id)).toBe(true)
+        expect(await database.db.selectFrom('card_claims').select('run_id').execute()).toEqual([])
+        expect(await database.db.selectFrom('card_runs').select('run_id').execute()).toEqual([{ run_id: 'run-a' }])
+        expect(await database.db.selectFrom('run_events').select('run_id').execute()).toEqual([{ run_id: 'run-a' }])
       })
     })
 

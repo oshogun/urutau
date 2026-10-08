@@ -161,6 +161,18 @@ function setup(config: BoardConfig = board(), list: Issue[] = issues()): Setup {
     locks: createRepoLocks(),
     limits: createCallLimiter(now),
     inflight: createInflightRegistry(),
+    runs: {
+      recordRun: vi.fn(async () => {
+        throw new Error('record_run is covered in recordRun.test.ts')
+      }),
+      activityFor: vi.fn(async () => ({ claims: new Map(), lastRuns: new Map() })),
+      waitingClaims: vi.fn(async () => []),
+      boardActivity: vi.fn(),
+      issueActivity: vi.fn(),
+      releaseClaim: vi.fn(),
+      acceptItem: vi.fn(),
+    },
+    publishCardActivity: vi.fn(),
   }
   const tools = new Map<string, Registered>()
   const fake = {
@@ -206,9 +218,9 @@ const NOT_FETCHED = (s: Setup) => {
 }
 
 describe('registration', () => {
-  it('registers the four tools with the frozen titles, descriptions, annotations and result size', () => {
+  it('registers the five tools with the frozen titles, descriptions, annotations and result size', () => {
     const s = setup()
-    expect([...s.tools.keys()]).toEqual(['list_boards', 'get_board', 'move_card', 'reorder_bucket'])
+    expect([...s.tools.keys()]).toEqual(['list_boards', 'get_board', 'move_card', 'reorder_bucket', 'record_run'])
     for (const [name, definition] of Object.entries(TOOL_DEFINITIONS)) {
       const { config } = s.tools.get(name) as Registered
       expect(config.title).toBe(definition.title)
@@ -630,7 +642,7 @@ describe('through the MCP SDK', () => {
   it('publishes the tools and answers a read that satisfies the output schema', async () => {
     const s = setup()
     const listed = await rpc(s, 'tools/list', {})
-    expect(listed.tools.map((tool: { name: string }) => tool.name)).toEqual(['list_boards', 'get_board', 'move_card', 'reorder_bucket'])
+    expect(listed.tools.map((tool: { name: string }) => tool.name)).toEqual(['list_boards', 'get_board', 'move_card', 'reorder_bucket', 'record_run'])
     const byName = Object.fromEntries(listed.tools.map((tool: { name: string; inputSchema: { required?: string[] } }) => [tool.name, tool]))
     expect(byName.get_board.inputSchema.required).toEqual(['repo'])
     expect(byName.move_card.inputSchema.required).toEqual(['repo', 'issue'])

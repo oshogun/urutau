@@ -56,7 +56,7 @@ describe('who may use the proxy', () => {
 describe('the allow-list', () => {
   const refused = [
     '/api/github/user',
-    '/api/github/repos/acme/widgets/issues/1',
+    '/api/github/repos/acme/widgets/issues/1?state=open',
     '/api/github/repos/acme/widgets/contents/README.md',
     '/api/github/repos/acme/widgets/issues/1/comments',
     '/api/github/repos/acme/widgets/labels/bug',
@@ -94,6 +94,7 @@ describe('the allow-list', () => {
 
   test.each([
     '/api/github/repos/acme/widgets',
+    '/api/github/repos/acme/widgets/issues/1',
     '/api/github/repos/acme/widgets/labels?per_page=100',
     '/api/github/repos/acme/widgets/labels?per_page=100&page=2',
     '/api/github/repos/acme/widgets/issues?state=closed&since=2026-01-02T03:04:05Z&per_page=100',

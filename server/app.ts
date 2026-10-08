@@ -29,6 +29,7 @@ import { createCallLimiter, createRepoLocks } from './mcp/locks.ts'
 import { createSnapshotCache } from './mcp/snapshots.ts'
 import { registerTools } from './mcp/tools.ts'
 import { GrantStore } from './oidc/grants.ts'
+import { createRunStore } from './runs/store.ts'
 import { createKeycloak, type Keycloak } from './oidc/keycloak.ts'
 import { authRoutes } from './routes/auth.ts'
 import { boardsRoutes } from './routes/boards.ts'
@@ -136,6 +137,10 @@ export function createAppWithContext(deps: AppDeps): { app: Hono<AppEnv>; ctx: A
     locks: createRepoLocks(),
     limits: callLimits,
     inflight,
+    runs: createRunStore(db),
+    // Card activity goes to the open streams only: the extra receiver in AppDeps.boardEvents records board saves and deletions.
+    publishCardActivity: (event) =>
+      hub.publish({ type: 'card-activity', data: { ...event, clientId: normalizeClientId(event.clientId) } }),
   }
   const bearerFailures = new RateLimiter(deps.now)
   const endpoint = createMcpEndpoint({

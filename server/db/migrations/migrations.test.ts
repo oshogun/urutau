@@ -9,6 +9,7 @@ import { createIntegration } from '../integrations.ts'
 import { createAccount } from '../users.ts'
 import { up as m0001 } from './0001_initial.ts'
 import { up as m0002 } from './0002_github_writes.ts'
+import { up as m0003 } from './0003_integrations.ts'
 
 const NOW = new Date('2026-10-02T12:00:00.000Z')
 
@@ -68,7 +69,7 @@ describe('migration 0002_github_writes', () => {
     await database.migrate()
     await setGithubWrites(database.db, true)
     // Kysely refuses a gap in the executed list, so the later migration's row goes too.
-    await database.db.deleteFrom('kysely_migration' as never).where('name' as never, 'in', ['0002_github_writes', '0003_integrations'] as never).execute()
+    await database.db.deleteFrom('kysely_migration' as never).where('name' as never, 'in', ['0002_github_writes', '0003_integrations', '0004_card_runs'] as never).execute()
     await database.migrate()
     expect(await getGithubWrites(database.db)).toBe(true)
   })
@@ -119,9 +120,71 @@ describe('migration 0003_integrations', () => {
     const admin = await createAccount(database.db, { username: 'ada', displayName: null, passwordHash: null, now: NOW })
     if (!admin.created) throw new Error('account not created')
     const bot = await createIntegration(database.db, { username: 'bot', createdBy: admin.user.id, now: NOW })
-    await database.db.deleteFrom('kysely_migration' as never).where('name' as never, '=', '0003_integrations' as never).execute()
+    // Kysely refuses a gap in the executed list, so the later migration's row goes too.
+    await database.db.deleteFrom('kysely_migration' as never).where('name' as never, 'in', ['0003_integrations', '0004_card_runs'] as never).execute()
     await database.migrate()
     expect(await database.db.selectFrom('integrations').select('user_id').execute()).toEqual([{ user_id: bot.id }])
     expect(await database.db.selectFrom('kysely_migration' as never).select('name' as never).where('name' as never, '=', '0003_integrations' as never).execute()).toHaveLength(1)
+  })
+})
+
+describe('migration 0004_card_runs', () => {
+  const tables = ['card_runs', 'card_claims', 'run_events'] as const
+
+  test('rows written by 0001 to 0003 survive and the new tables start empty', async () => {
+    database = await openDatabase('sqlite::memory:')
+    const upTo0003 = new Migrator({
+      db: database.db,
+      provider: {
+        getMigrations: async () => ({
+          '0001_initial': { up: (db) => m0001(db, 'sqlite') },
+          '0002_github_writes': { up: (db) => m0002(db) },
+          '0003_integrations': { up: (db) => m0003(db, 'sqlite') },
+        }),
+      },
+    })
+    expect((await upTo0003.migrateToLatest()).error).toBeUndefined()
+    const admin = await createAccount(database.db, { username: 'ada', displayName: null, passwordHash: null, now: NOW })
+    if (!admin.created) throw new Error('account not created')
+    const bot = await createIntegration(database.db, { username: 'bot', createdBy: admin.user.id, now: NOW })
+    await createBoard(database.db, { repoKey: 'acme/widgets', fullName: 'Acme/Widgets', config: fixtureBoard(), userId: admin.user.id, now: NOW })
+    await database.db
+      .insertInto('api_tokens')
+      .values({ id: 'tok-1', user_id: bot.id, token_hash: 'a'.repeat(64), label: 'ci', created_by: admin.user.id, created_at: NOW.toISOString(), expires_at: null, last_used_at: null })
+      .execute()
+    await setGithubWrites(database.db, true)
+
+    await database.migrate()
+
+    expect(await database.db.selectFrom('users').select('username').orderBy('username').execute()).toEqual([{ username: 'ada' }, { username: 'bot' }])
+    expect(await database.db.selectFrom('integrations').select('user_id').execute()).toEqual([{ user_id: bot.id }])
+    expect(await database.db.selectFrom('api_tokens').select('id').execute()).toEqual([{ id: 'tok-1' }])
+    expect(await database.db.selectFrom('boards').select(['repo_key', 'version']).execute()).toEqual([{ repo_key: 'acme/widgets', version: 1 }])
+    expect(await getGithubWrites(database.db)).toBe(true)
+    for (const table of tables) expect(await database.db.selectFrom(table).selectAll().execute()).toEqual([])
+  })
+
+  test('running again after its kysely_migration row was deleted succeeds and keeps the rows', async () => {
+    database = await openDatabase('sqlite::memory:')
+    await database.migrate()
+    const admin = await createAccount(database.db, { username: 'ada', displayName: null, passwordHash: null, now: NOW })
+    if (!admin.created) throw new Error('account not created')
+    const bot = await createIntegration(database.db, { username: 'bot', createdBy: admin.user.id, now: NOW })
+    await database.db
+      .insertInto('card_runs')
+      .values({
+        run_id: 'run-1', repo_key: 'acme/widgets', issue: 7, agent_user_id: bot.id, status: 'running', status_at: NOW.toISOString(),
+        triage_range: null, uncertainty_kind: null, unverified: '[]', merge_shas: '[]', files: '[]', files_omitted: 0, areas: '[]',
+        observed_by: null, fix_rounds: 0, cost_usd: null, findings: null, started_at: NOW.toISOString(), ended_at: null,
+      })
+      .execute()
+    await database.db
+      .insertInto('card_claims')
+      .values({ repo_key: 'acme/widgets', issue: 7, run_id: 'run-1', holder: bot.id, lease_until: null, claimed_at: NOW.toISOString() })
+      .execute()
+    await database.db.deleteFrom('kysely_migration' as never).where('name' as never, '=', '0004_card_runs' as never).execute()
+    await database.migrate()
+    expect(await database.db.selectFrom('card_runs').select('run_id').execute()).toEqual([{ run_id: 'run-1' }])
+    expect(await database.db.selectFrom('card_claims').select('run_id').execute()).toEqual([{ run_id: 'run-1' }])
   })
 })

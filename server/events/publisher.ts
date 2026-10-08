@@ -1,4 +1,4 @@
-import type { BoardDeletedEvent, BoardUpdatedEvent } from '../../src/domain/api.ts'
+import type { BoardDeletedEvent, BoardUpdatedEvent, CardActivityEvent } from '../../src/domain/api.ts'
 
 const CLIENT_ID = /^[A-Za-z0-9_-]{1,64}$/
 
@@ -7,7 +7,10 @@ export function normalizeClientId(value: string | null | undefined): string | nu
   return typeof value === 'string' && CLIENT_ID.test(value) ? value : null
 }
 
-export type BoardEvent = { type: 'board-updated'; data: BoardUpdatedEvent } | { type: 'board-deleted'; data: BoardDeletedEvent }
+export type BoardEvent =
+  | { type: 'board-updated'; data: BoardUpdatedEvent }
+  | { type: 'board-deleted'; data: BoardDeletedEvent }
+  | { type: 'card-activity'; data: CardActivityEvent }
 
 /** One open event stream. `send` must not throw for a closed stream; `close` ends it. */
 export interface Subscriber {

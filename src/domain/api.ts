@@ -4,7 +4,17 @@
  * server imports this file directly under Node's type stripping. Relative
  * imports carry the `.ts` extension for the same reason.
  */
-import type { BoardConfig } from './types.ts'
+import type {
+  BoardConfig,
+  EstimateConfidence,
+  EstimateSize,
+  HoldingStatus,
+  ItemKind,
+  RunStatus,
+  TriageRange,
+  UncertaintyKind,
+  UnverifiedCounts,
+} from './types.ts'
 
 /** Header that carries the session's CSRF token on every POST, PUT, PATCH and DELETE. */
 export const CSRF_HEADER = 'X-Urutau-CSRF'
@@ -26,6 +36,8 @@ export type ApiErrorCode =
   | 'keycloak-disabled' // 404: a Keycloak route while Keycloak is not configured
   | 'github-path-not-allowed' // 404: GitHub proxy path or query outside the allow-list
   | 'github-writes-off' // 403: the admin has not turned on GitHub writes (creating and changing issues) for this server
+  | 'claim-changed' // 409: the claim on the issue now belongs to another run (body: ClaimChangedResponse)
+  | 'item-resolved' // 409: the item was already closed by a probe or an accept (body: ItemResolvedResponse)
   | 'already-set-up' // 409: first-run after the first account exists
   | 'username-taken' // 409
   | 'stale-board' // 409: the save's baseVersion is not the stored version (body: StaleBoardResponse)
@@ -227,7 +239,7 @@ export interface AcceptInviteRequest extends CredentialsRequest {
 // ---------------------------------------------------------------- live updates (SSE)
 
 /** Event names on GET /api/events?repo=<repoKey>. */
-export type BoardEventName = 'hello' | 'board-updated' | 'board-deleted'
+export type BoardEventName = 'hello' | 'board-updated' | 'board-deleted' | 'card-activity'
 
 /** Sent first on every (re)connection. */
 export interface HelloEvent {
@@ -248,6 +260,118 @@ export interface BoardUpdatedEvent {
 export interface BoardDeletedEvent {
   repoKey: string
   clientId: string | null
+}
+
+/** A run, claim or accepted item of one issue changed. Carries no board version and no agent text. */
+export interface CardActivityEvent {
+  repoKey: string
+  issue: number
+  /** CLIENT_ID_HEADER of the request that caused it (release, accept); null for record_run. */
+  clientId: string | null
+}
+
+// ---------------------------------------------------------------- run activity
+
+export interface ActorView {
+  username: string
+  kind: EditorKind
+}
+
+export interface ClaimView {
+  runId: string
+  status: HoldingStatus
+  /** The run's status_at: when it entered this status. */
+  since: string
+  claimedAt: string
+  /** null while waiting on a human. */
+  leaseUntil: string | null
+  /** The integration; null when it was removed. */
+  holder: ActorView | null
+}
+
+export interface RunSummaryView {
+  runId: string
+  status: RunStatus
+  statusAt: string
+  startedAt: string
+  endedAt: string | null
+  triageRange: TriageRange | null
+  unverifiedOpen: UnverifiedCounts
+}
+
+export type ItemResolutionView =
+  | { kind: 'probe'; note: string | null; by: ActorView | null; at: string }
+  | { kind: 'accepted'; note: string | null; by: ActorView | null; at: string }
+
+export interface UnverifiedItemView {
+  id: string
+  kind: ItemKind
+  text: string
+  runId: string
+  /** When the agent withdrew it; null otherwise. A withdrawn item has resolution null. */
+  withdrawnAt: string | null
+  resolution: ItemResolutionView | null
+}
+
+export interface RunDetailView extends RunSummaryView {
+  /** The integration that reported it; null when it was removed. */
+  agent: ActorView | null
+  observedBy: string | null
+  uncertaintyKind: UncertaintyKind | null
+  findings: string | null
+  items: UnverifiedItemView[]
+}
+
+export interface CardActivity {
+  issue: number
+  claim: ClaimView | null
+  lastRun: RunSummaryView | null
+}
+
+/** GET /api/boards/:owner/:name/activity */
+export interface BoardActivityResponse {
+  repoKey: string
+  cards: CardActivity[]
+}
+
+/** GET /api/boards/:owner/:name/activity/:number */
+export interface IssueActivityResponse {
+  repoKey: string
+  issue: number
+  claim: ClaimView | null
+  /** Newest status_at first; runs[0] is the last run. At most 20. */
+  runs: RunDetailView[]
+  moreRuns: boolean
+}
+
+/** PUT /api/boards/:owner/:name/estimates/:number (200: StoredBoard). DELETE on the same path clears it. */
+export interface SetEstimateRequest {
+  /** null exactly when confidence is 'no-idea'. */
+  size: EstimateSize | null
+  confidence: EstimateConfidence
+}
+
+/** POST /api/boards/:owner/:name/runs/:runId/items/:itemId/accept */
+export interface AcceptItemRequest {
+  /** At most 1000 UTF-16 units; stored cleaned and cut to 280 code points. */
+  note?: string
+}
+
+/** 201 from the accept route. */
+export interface AcceptItemResponse {
+  item: UnverifiedItemView
+}
+
+/** 409 from DELETE /api/boards/:owner/:name/claims/:number?runId=... */
+export interface ClaimChangedResponse extends ApiErrorBody {
+  error: 'claim-changed'
+  current: ClaimView
+}
+
+/** 409 from the accept route. */
+export interface ItemResolvedResponse extends ApiErrorBody {
+  error: 'item-resolved'
+  item: UnverifiedItemView
 }
 
 // ---------------------------------------------------------------- GitHub proxy

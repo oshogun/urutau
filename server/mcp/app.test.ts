@@ -66,7 +66,7 @@ describe('a bearer token and the /api routes', () => {
     const [row] = await h.database.db.selectFrom('integrations').select('user_id').execute()
     const { secret } = (await (await h.post(`/api/integrations/${row.user_id}/tokens`, { label: 'second', expiresInDays: 30 })).json()) as { secret: string }
     const bot = h.bearerClient(secret)
-    expect((await bot.rpc('tools/list')).result.tools.length).toBe(4)
+    expect((await bot.rpc('tools/list')).result.tools.length).toBe(5)
 
     const session = await bot.request('/api/session')
     expect(session.status).toBe(200)
@@ -107,7 +107,7 @@ describe('a bearer token and the /api routes', () => {
     const [row] = await h.database.db.selectFrom('integrations').select('user_id').execute()
     const issued = await h.post(`/api/integrations/${row.user_id}/tokens`, { label: 'late', expiresInDays: null })
     const { secret } = (await issued.json()) as { secret: string }
-    expect((await h.bearerClient(secret).rpc('tools/list')).result.tools).toHaveLength(4)
+    expect((await h.bearerClient(secret).rpc('tools/list')).result.tools).toHaveLength(5)
   })
 
   test('failed sign-ins do not block the bearer: a live token still passes', async () => {
@@ -115,7 +115,7 @@ describe('a bearer token and the /api routes', () => {
     const visitor = h.newClient()
     for (let i = 0; i < 51; i++) await visitor.post('/api/auth/sign-in', { username: 'admin', password: 'wrong password here' })
     expect((await visitor.post('/api/auth/sign-in', ADMIN_CREDENTIALS)).status).toBe(429)
-    expect((await agent.bearer.rpc('tools/list')).result.tools).toHaveLength(4)
+    expect((await agent.bearer.rpc('tools/list')).result.tools).toHaveLength(5)
   })
 
   test('a database error during the bearer lookup answers a JSON 500 and logs the error name only', async () => {
@@ -144,7 +144,7 @@ describe('end to end', () => {
     const init = await agent.bearer.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } })
     expect(init.result.serverInfo).toMatchObject({ name: 'urutau' })
     const listed = await agent.bearer.rpc('tools/list')
-    expect(listed.result.tools.map((tool: { name: string }) => tool.name).sort()).toEqual(['get_board', 'list_boards', 'move_card', 'reorder_bucket'])
+    expect(listed.result.tools.map((tool: { name: string }) => tool.name).sort()).toEqual(['get_board', 'list_boards', 'move_card', 'record_run', 'reorder_bucket'])
 
     const before = parse<StoredBoard>(await (await h.get(`/api/boards/${REPO}`)).text())
     expect(before.version).toBe(1)

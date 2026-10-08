@@ -3,6 +3,8 @@
 const OWNER = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/
 const NAME = /^[A-Za-z0-9._-]{1,100}$/
 const ID = /^[1-9][0-9]{0,19}$/
+const ISSUE_NUMBER = /^[1-9][0-9]{0,9}$/
+const MAX_ISSUE_NUMBER = 2147483647
 const SINCE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/
 const AFTER = /^[A-Za-z0-9+/=_-]{1,200}$/
 
@@ -56,12 +58,16 @@ export function allowedGitHubPath(rawPath: string, rawQuery: string): string | n
   const parts = rawPath.split('/').map(decode)
   if (parts.some((part) => part === null || part.includes('/'))) return null
   const decoded = parts.join('/')
-  const [first, second, third, fourth] = parts as string[]
+  const [first, second, third, fourth, fifth] = parts as string[]
 
   if (first === 'repos' && parts.length >= 3 && OWNER.test(second) && NAME.test(third) && third !== '.' && third !== '..') {
     if (parts.length === 3) return rawQuery === '' ? decoded : null
     if (parts.length === 4 && fourth === 'labels') return validQuery(rawQuery, LABEL_QUERY) ? decoded : null
     if (parts.length === 4 && fourth === 'issues') return validQuery(rawQuery, ISSUE_QUERY) ? decoded : null
+    // One issue. The path says nothing about the method: both callers send GET only.
+    if (parts.length === 5 && fourth === 'issues' && ISSUE_NUMBER.test(fifth) && Number(fifth) <= MAX_ISSUE_NUMBER) {
+      return rawQuery === '' ? decoded : null
+    }
     return null
   }
   if (first === 'repositories' && parts.length === 3 && ID.test(second)) {

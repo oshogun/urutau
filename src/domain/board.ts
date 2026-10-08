@@ -1,3 +1,4 @@
+import { validOptionalBoardFields } from './estimates.ts'
 import { randomHex } from './ids.ts'
 import type { BoardConfig, Bucket, Issue, Label } from './types.ts'
 
@@ -417,7 +418,10 @@ export function boardFromExport(file: unknown, repository: string): BoardConfig 
   const source: unknown = wrapped ? (file as { repository?: unknown }).repository : undefined
   const sameRepository =
     typeof source === 'string' && source.toLowerCase() === repository.toLowerCase()
-  return sameRepository ? board : { ...board, placements: {}, order: {} }
+  if (sameRepository) return board
+  // Issue numbers mean nothing in another repository, so its estimates go with its placements.
+  const { estimates: _estimates, ...rest } = board
+  return { ...rest, placements: {}, order: {} }
 }
 
 /** Light structural validation for configs coming from storage or an imported file. */
@@ -440,6 +444,7 @@ export function isBoardConfig(value: unknown): value is BoardConfig {
     candidate.placements !== null &&
     typeof candidate.order === 'object' &&
     candidate.order !== null &&
-    typeof candidate.closedWindowDays === 'number'
+    typeof candidate.closedWindowDays === 'number' &&
+    validOptionalBoardFields(value as Record<string, unknown>)
   )
 }

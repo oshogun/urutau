@@ -54,3 +54,15 @@ test('closeSession ends only that session\'s streams; closeAll ends the rest', (
   hub.closeAll()
   expect([b.isClosed(), hub.size()]).toEqual([true, 0])
 })
+
+test('delivers a card-activity event like a board event, only to streams on its repository', () => {
+  const hub = createEventHub()
+  const a = recorder()
+  const b = recorder()
+  hub.subscribe('acme/widgets', 's1', a.subscriber)
+  hub.subscribe('acme/gadgets', 's1', b.subscriber)
+  const event: BoardEvent = { type: 'card-activity', data: { repoKey: 'acme/widgets', issue: 7, clientId: null } }
+  hub.publish(event)
+  expect(a.received).toEqual([event])
+  expect(b.received).toEqual([])
+})
