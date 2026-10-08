@@ -335,6 +335,90 @@ const helpers = {
     }
   },
 
+  /**
+   * Server mode with the launcher, signed in as the admin on the main page. Creates an agent
+   * integration, gives it the fake GitHub token and `repos` (owner/name list), and creates one
+   * MCP bearer token. The token stays inside the returned object's closure: the object has
+   * `username`, `repos` and the function `tool(name, args)`, which calls an MCP tool and returns
+   * `{ status, ...answer }` (`result.structuredContent` holds a tool's JSON). Returning the
+   * object from a script is safe, because functions do not serialize and the token is not a field.
+   */
+  async createAgent(username, repos) {
+    const made = await page.evaluate(
+      async ({ username: name, repos: list, githubToken }) => {
+        const session = await (await fetch('/api/session')).json()
+        const send = async (path, method, body) => {
+          const response = await fetch(`/api/${path}`, {
+            method,
+            headers: { 'content-type': 'application/json', 'X-Urutau-CSRF': session.session.csrfToken },
+            body: JSON.stringify(body),
+          })
+          if (!response.ok) throw new Error(`${method} ${path.replace(/[0-9a-f-]{20,}/g, ':id')} failed with HTTP ${response.status}`)
+          return response.json()
+        }
+        const { integration } = await send('integrations', 'POST', { username: name })
+        await send(`integrations/${integration.id}/github-token`, 'PUT', { token: githubToken })
+        await send(`integrations/${integration.id}/repos`, 'PUT', { repos: list })
+        const created = await send(`integrations/${integration.id}/tokens`, 'POST', { label: 'driver', expiresInDays: 30 })
+        return created.secret
+      },
+      { username, repos, githubToken: FIXTURE_GITHUB_TOKEN },
+    )
+    const token = made
+    return {
+      username,
+      repos,
+      async tool(name, args) {
+        return helpers.mcp('tools/call', { name, arguments: args }, token)
+      },
+    }
+  },
+
+  /**
+   * Seeds agent runs with `record_run` through an agent from createAgent(). The repository needs
+   * an Urutau board first (`openBoard(repo)`), or `running` and the waiting statuses answer
+   * `no-board`. Issue 14 gets a `running` run (a claim with a lease). Issue 12 gets an
+   * `awaiting_approval` run (a claim with no lease, and so a `waitingOnHuman` entry) with one
+   * unverified item of each kind. The default issues exist on `acme/widgets`; `issues` overrides
+   * `{ running, waiting }`. Returns what `get_board` then shows for the seeded cards.
+   */
+  async seedAgentRuns(agent, repo, issues = {}) {
+    const running = issues.running ?? 14
+    const waiting = issues.waiting ?? 12
+    const calls = [
+      { repo, issue: running, runId: 'seed-running', status: 'running', triageRange: 'S-M', observedBy: 'carcara/0.9.1' },
+      {
+        repo,
+        issue: waiting,
+        runId: 'seed-waiting',
+        status: 'awaiting_approval',
+        triageRange: 'M',
+        uncertaintyKind: 'external',
+        unverified: [
+          { id: 'U1', kind: 'external', text: 'The upstream API keeps the field name.' },
+          { id: 'U2', kind: 'normative', text: 'The retention period needs a decision.' },
+          { id: 'U3', kind: 'untested', text: 'The migration was not run on MariaDB.' },
+        ],
+      },
+    ]
+    for (const args of calls) {
+      const answer = await agent.tool('record_run', args)
+      if (answer.status !== 200 || answer.result?.isError) {
+        throw new Error(`record_run ${args.runId} failed: ${answer.result?.content?.[0]?.text ?? answer.raw ?? answer.status}`)
+      }
+    }
+    const board = await agent.tool('get_board', { repo })
+    const json = JSON.parse(board.result.content[0].text)
+    return {
+      humanWaitLimit: json.humanWaitLimit,
+      waitingOnHuman: json.waitingOnHuman,
+      cards: json.buckets
+        .flatMap((bucket) => bucket.cards)
+        .filter((card) => card.claim !== null || card.lastRun !== null)
+        .map(({ number, claim, lastRun }) => ({ number, claim, lastRun })),
+    }
+  },
+
   /** Clears the main page's localStorage (theme and any v1 data) and reloads. Boards live on the server, so this does not delete them or sign out. */
   async resetStorage() {
     await page.evaluate(() => localStorage.clear())

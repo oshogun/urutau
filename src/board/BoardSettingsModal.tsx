@@ -1,7 +1,8 @@
 import { Download, Reset, Upload } from '@carbon/icons-react'
-import { Button, Dropdown, InlineNotification, Modal, Stack } from '@carbon/react'
+import { Button, Dropdown, InlineNotification, Modal, NumberInput, Stack } from '@carbon/react'
 import { useRef, useState, type ChangeEvent } from 'react'
 import { boardFromExport, toBoardExport } from '../domain/board'
+import { HUMAN_WAIT_LIMIT_MAX } from '../domain/estimates'
 import type { BoardConfig } from '../domain/types'
 import { downloadJson } from './downloadJson'
 
@@ -12,6 +13,14 @@ const WINDOWS = [
   { days: 30, text: 'Closed in the last 30 days' },
   { days: 90, text: 'Closed in the last 90 days' },
 ]
+
+/** The hours field as typed: empty means no limit; otherwise a whole number from 1 to 720. */
+function parseWaitHours(text: string): { valid: boolean; value: number | null } {
+  const trimmed = text.trim()
+  if (trimmed === '') return { valid: true, value: null }
+  const value = /^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN
+  return value >= 1 && value <= HUMAN_WAIT_LIMIT_MAX ? { valid: true, value } : { valid: false, value: null }
+}
 
 interface BoardSettingsModalProps {
   repoName: string
@@ -29,6 +38,8 @@ export function BoardSettingsModal({
   onClose,
 }: BoardSettingsModalProps) {
   const [closedWindowDays, setClosedWindowDays] = useState(config.closedWindowDays)
+  const [waitHours, setWaitHours] = useState(config.humanWaitLimit == null ? '' : String(config.humanWaitLimit))
+  const wait = parseWaitHours(waitHours)
   const [importError, setImportError] = useState<string | null>(null)
   const [confirmingReset, setConfirmingReset] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -67,8 +78,10 @@ export function BoardSettingsModal({
       modalHeading="Board settings"
       primaryButtonText="Save"
       secondaryButtonText="Cancel"
+      primaryButtonDisabled={!wait.valid}
       onRequestSubmit={() => {
-        onSave({ ...config, closedWindowDays })
+        if (!wait.valid) return
+        onSave({ ...config, closedWindowDays, humanWaitLimit: wait.value })
         onClose()
       }}
       onRequestClose={onClose}
@@ -84,6 +97,20 @@ export function BoardSettingsModal({
           itemToString={(item) => item?.text ?? ''}
           selectedItem={windows.find((option) => option.days === closedWindowDays) ?? windows[0]}
           onChange={({ selectedItem }) => setClosedWindowDays(selectedItem?.days ?? 0)}
+        />
+
+        <NumberInput
+          id="board-human-wait-limit"
+          label="Hours a card may wait on a human (optional)"
+          helperText="A card that has waited on a person for longer than this many hours turns red. Leave it empty for no limit."
+          allowEmpty
+          min={1}
+          max={HUMAN_WAIT_LIMIT_MAX}
+          step={1}
+          value={waitHours}
+          invalid={!wait.valid}
+          invalidText={`Use a whole number of hours from 1 to ${HUMAN_WAIT_LIMIT_MAX}.`}
+          onChange={(_event, state) => setWaitHours(String(state.value ?? ''))}
         />
 
         <section className="board-settings__section" aria-labelledby="board-settings-transfer">
@@ -132,7 +159,7 @@ export function BoardSettingsModal({
             Start over
           </h3>
           <p className="board-settings__text">
-            Restore the default buckets and forget every card position for this repository.
+            Restore the default buckets and forget every card position for this repository. Estimates are kept.
           </p>
           <div className="board-settings__actions">
             <Button

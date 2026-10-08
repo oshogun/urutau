@@ -11,6 +11,7 @@ import { useCreateIssue } from '../hooks/useCreateIssue'
 import { useServerSettings } from '../hooks/useServerSettings'
 import { useRepoSnapshot } from '../hooks/useRepoSnapshot'
 import { useUpdateIssue } from '../hooks/useUpdateIssue'
+import { useBoards } from '../state/boardStore'
 import { useSession } from '../state/session'
 import { readV1Board } from '../state/v1Import'
 import { Board } from './Board'
@@ -94,6 +95,8 @@ function RepositoryBoard({ repo, onOpenSettings, onChangeRepo }: BoardPageProps)
       <>
         {title}
         <Board
+          repo={repo}
+          onSetEstimate={(issue, request) => useBoards.getState().setEstimate(key, issue, request)}
           snapshot={snapshot}
           config={entry.board}
           onUpdateConfig={entry.update}

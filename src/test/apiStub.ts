@@ -4,7 +4,16 @@ import type {
   AcceptInviteRequest,
   ApiErrorBody,
   ApiErrorCode,
+  AcceptItemResponse,
   AppConfigResponse,
+  BoardActivityResponse,
+  CardActivity,
+  ClaimChangedResponse,
+  ClaimView,
+  IssueActivityResponse,
+  ItemResolvedResponse,
+  RunDetailView,
+  SetEstimateRequest,
   BoardAuthor,
   BoardEditor,
   BoardEventName,
@@ -39,7 +48,8 @@ import type {
 import { isBoardConfig } from '../domain/board'
 import { parseUpdateIssueRequest } from '../domain/issueUpdate'
 import { parseRepoInput, repoKey } from '../domain/repoRef'
-import type { BoardConfig } from '../domain/types'
+import { clearEstimate, isEstimate, setEstimate } from '../domain/estimates'
+import type { BoardConfig, Estimate } from '../domain/types'
 
 /**
  * A typed in-memory fake of the /api contract for App tests. GitHub URLs keep going to whatever
@@ -138,6 +148,10 @@ export interface ApiStub {
   externalSave(fullName: string, board: BoardConfig, by?: BoardEditor | null): StoredBoard
   /** Removes a board as another user would and publishes board-deleted. */
   externalDelete(repoKey: string): void
+  /** Sets the claim and runs the server holds for an issue, without telling open streams. Omitted fields stay. */
+  setActivity(repoKey: string, issue: number, data: { claim?: ClaimView | null; runs?: RunDetailView[] }): void
+  /** setActivity as another client's run would: also sends card-activity to open streams. */
+  externalActivity(repoKey: string, issue: number, data: { claim?: ClaimView | null; runs?: RunDetailView[] }): void
   /** Sends an event to every open fake EventSource for the repository. */
   emitBoardEvent(repoKey: string, name: BoardEventName, data: unknown): void
   /** Answers the next `times` matching requests with an error (or a network failure). */
@@ -408,6 +422,116 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     for (const source of FakeEventSource.instances) {
       if (source.repoKey === key) source.dispatch(name, data)
     }
+  }
+
+  const activity = new Map<string, Map<number, { claim: ClaimView | null; runs: RunDetailView[] }>>()
+  const activityOf = (key: string, issue: number) => activity.get(key)?.get(issue) ?? { claim: null, runs: [] }
+  const setActivity: ApiStub['setActivity'] = (key, issue, data) => {
+    const repo = key.toLowerCase()
+    const previous = activityOf(repo, issue)
+    const issues = activity.get(repo) ?? new Map()
+    issues.set(issue, { claim: data.claim === undefined ? previous.claim : data.claim, runs: data.runs ?? previous.runs })
+    activity.set(repo, issues)
+  }
+  const publishActivity = (key: string, issue: number, clientId: string | null) =>
+    emit(key, 'card-activity', { repoKey: key, issue, clientId })
+  const issueActivity = (key: string, issue: number): IssueActivityResponse => ({
+    repoKey: key,
+    issue,
+    ...activityOf(key, issue),
+    moreRuns: false,
+  })
+  const boardActivity = (key: string): BoardActivityResponse => {
+    const cards: CardActivity[] = []
+    for (const [issue, { claim, runs }] of activity.get(key) ?? []) {
+      if (!claim && runs.length === 0) continue
+      const last = runs[0]
+      cards.push({
+        issue,
+        claim,
+        lastRun: last
+          ? {
+              runId: last.runId,
+              status: last.status,
+              statusAt: last.statusAt,
+              startedAt: last.startedAt,
+              endedAt: last.endedAt,
+              triageRange: last.triageRange,
+              unverifiedOpen: last.unverifiedOpen,
+            }
+          : null,
+      })
+    }
+    return { repoKey: key, cards: cards.sort((a, b) => a.issue - b.issue) }
+  }
+
+  /** The activity, estimate, claim and accept routes under boards/<owner>/<name>/. */
+  function activityRoute(call: ApiCall, key: string, kind: string, rest: string[], url: URL): Response {
+    const { method, body } = call
+    const clientId = call.headers[CLIENT_ID_HEADER.toLowerCase()] ?? null
+    const issueOf = (text: string | undefined) => (/^[1-9][0-9]{0,9}$/.test(text ?? '') ? Number(text) : null)
+    if (kind === 'activity' && method === 'GET') {
+      if (rest.length === 0) return toResponse(200, boardActivity(key))
+      const issue = issueOf(rest[0])
+      return issue === null ? error(400, 'invalid-request', 'Not an issue number.') : toResponse(200, issueActivity(key, issue))
+    }
+    if (kind === 'estimates') {
+      const issue = issueOf(rest[0])
+      if (issue === null) return error(400, 'invalid-request', 'Not an issue number.')
+      const existing = boards.get(key)
+      if (!existing) return error(404, 'not-found', 'No board for this repository.')
+      let next: BoardConfig
+      if (method === 'PUT') {
+        const request = body as Partial<SetEstimateRequest> | null
+        const estimate = { size: request?.size, confidence: request?.confidence, by: current?.user.username, at: new Date(stamp()).toISOString() }
+        if (!isEstimate(estimate)) return error(400, 'invalid-request', 'The estimate is not valid.')
+        const prior = existing.board.estimates?.[issue]
+        if (prior && prior.size === estimate.size && prior.confidence === estimate.confidence) return toResponse(200, existing)
+        next = setEstimate(existing.board, issue, estimate as Estimate)
+      } else if (method === 'DELETE') {
+        next = clearEstimate(existing.board, issue)
+        if (next === existing.board) return toResponse(200, existing)
+      } else {
+        return error(404, 'not-found', 'No such route.')
+      }
+      const saved = store(existing.fullName, next, author())
+      publishUpdate(saved, clientId)
+      return toResponse(200, saved)
+    }
+    if (kind === 'claims' && method === 'DELETE') {
+      const issue = issueOf(rest[0])
+      const runId = url.searchParams.get('runId') ?? ''
+      if (issue === null || !/^[A-Za-z0-9._-]{1,64}$/.test(runId)) return error(400, 'invalid-request', 'Not a valid claim.')
+      const { claim, runs } = activityOf(key, issue)
+      if (!claim) return error(404, 'not-found', 'There is no claim on this issue.')
+      if (claim.runId !== runId) {
+        return toResponse(409, { error: 'claim-changed', message: 'Another run now holds this issue.', current: claim } satisfies ClaimChangedResponse)
+      }
+      setActivity(key, issue, { claim: null, runs })
+      publishActivity(key, issue, clientId)
+      return toResponse(204, null)
+    }
+    if (kind === 'runs' && method === 'POST' && rest[1] === 'items' && rest[3] === 'accept') {
+      const [runId, , itemId] = rest
+      for (const [issue, { claim, runs }] of activity.get(key) ?? []) {
+        const run = runs.find((candidate) => candidate.runId === runId)
+        const item = run?.items.find((candidate) => candidate.id === itemId)
+        if (!run || !item) continue
+        if (item.kind !== 'normative') return error(400, 'invalid-request', 'Only normative items are accepted by a person; a probe closes the others.')
+        if (item.resolution !== null) {
+          return toResponse(409, { error: 'item-resolved', message: 'This item was already closed.', item } satisfies ItemResolvedResponse)
+        }
+        const note = (body as { note?: string } | null)?.note?.trim() || null
+        const accepted = { ...item, resolution: { kind: 'accepted' as const, note, by: { username: current?.user.username ?? '', kind: 'person' as const }, at: stamp() } }
+        const items = run.items.map((candidate) => (candidate === item ? accepted : candidate))
+        const open = { ...run.unverifiedOpen, normative: Math.max(0, run.unverifiedOpen.normative - 1) }
+        setActivity(key, issue, { claim, runs: runs.map((candidate) => (candidate === run ? { ...run, items, unverifiedOpen: open } : candidate)) })
+        publishActivity(key, issue, clientId)
+        return toResponse(201, { item: accepted } satisfies AcceptItemResponse)
+      }
+      return error(404, 'not-found', 'There is no such item on this run.')
+    }
+    return error(404, 'not-found', 'No such route.')
   }
 
   const store = (fullName: string, board: BoardConfig, by: BoardEditor | null): StoredBoard => {
@@ -702,6 +826,14 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
         return toResponse(200, result)
       }
 
+      const activityPath = /^([^/]+\/[^/]+)\/(activity|estimates|claims|runs)(?:\/(.*))?$/.exec(tail)
+      if (activityPath) {
+        const target = validKey(decodeURIComponent(activityPath[1]))
+        if (!target) return error(400, 'invalid-request', 'Not a repository key.')
+        const rest = activityPath[3] === undefined ? [] : activityPath[3].split('/').map(decodeURIComponent)
+        return activityRoute(call, target.key, activityPath[2], rest, url)
+      }
+
       const target = validKey(decodeURIComponent(tail))
       if (!target) return error(400, 'invalid-request', 'Not a repository key.')
       const existing = boards.get(target.key)
@@ -857,6 +989,11 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     externalDelete(key) {
       boards.delete(key.toLowerCase())
       emit(key.toLowerCase(), 'board-deleted', { repoKey: key.toLowerCase(), clientId: null })
+    },
+    setActivity,
+    externalActivity(key, issue, data) {
+      setActivity(key, issue, data)
+      publishActivity(key.toLowerCase(), issue, null)
     },
     emitBoardEvent: emit,
     failNext(matcher, failure, times = 1) {

@@ -1,5 +1,4 @@
 import { Hono } from 'hono'
-import type { BoardDeletedEvent, BoardUpdatedEvent } from '../src/domain/api.ts'
 import { verifyBearer } from './auth/bearer.ts'
 import { csrfGuard, originAllowed } from './auth/csrf.ts'
 import { RateLimiter } from './auth/rateLimit.ts'
@@ -21,7 +20,7 @@ import { requestLog, securityHeaders } from './http/middleware.ts'
 import { isJsonPath } from './http/paths.ts'
 import type { AppEnv } from './http/types.ts'
 import { urlSecrets, type Logger } from './log.ts'
-import { createEventHub, normalizeClientId, type EventHub } from './events/publisher.ts'
+import { createEventHub, normalizeClientId, type BoardEvent, type EventHub } from './events/publisher.ts'
 import type { CallLimiter, InflightRegistry, SnapshotProvider, ToolDeps } from './mcp/contract.ts'
 import { createMcpEndpoint, type McpEndpoint } from './mcp/endpoint.ts'
 import { createInflightRegistry } from './mcp/inflight.ts'
@@ -30,8 +29,10 @@ import { createSnapshotCache } from './mcp/snapshots.ts'
 import { registerTools } from './mcp/tools.ts'
 import { GrantStore } from './oidc/grants.ts'
 import { createRunStore } from './runs/store.ts'
+import type { RunStore } from './runs/types.ts'
 import { createKeycloak, type Keycloak } from './oidc/keycloak.ts'
 import { authRoutes } from './routes/auth.ts'
+import { activityRoutes } from './routes/activity.ts'
 import { boardsRoutes } from './routes/boards.ts'
 import { eventsRoutes } from './routes/events.ts'
 import { githubRoutes } from './routes/github.ts'
@@ -43,7 +44,7 @@ import { settingsRoutes } from './routes/settings.ts'
 import { usersRoutes } from './routes/users.ts'
 
 export interface BoardEventPublisher {
-  publish(event: { type: 'board-updated'; data: BoardUpdatedEvent } | { type: 'board-deleted'; data: BoardDeletedEvent }): void
+  publish(event: BoardEvent): void
 }
 
 export interface AppDeps {
@@ -88,6 +89,7 @@ export interface AppContext extends Omit<AppDeps, 'boardEvents' | 'eventHub' | '
   /** null when TOKEN_ENCRYPTION_KEY is not set. */
   githubTokenSealer: SecretSealer | null
   mcp: McpRuntime
+  runs: RunStore
 }
 
 const closers = new WeakMap<Hono<AppEnv>, () => Promise<void>>()
@@ -124,6 +126,7 @@ export function createAppWithContext(deps: AppDeps): { app: Hono<AppEnv>; ctx: A
   const reader = createGitHubReader({ db, fetch: deps.fetch, now: deps.now, log: deps.log, opener: box?.opener ?? null })
   const snapshots = createSnapshotCache({ fetchSnapshot: reader.fetchSnapshot, now: deps.now })
   const inflight = createInflightRegistry()
+  const runs = createRunStore(db)
   const callLimits = createCallLimiter(deps.now)
   const toolDeps: ToolDeps = {
     log: deps.log,
@@ -137,10 +140,8 @@ export function createAppWithContext(deps: AppDeps): { app: Hono<AppEnv>; ctx: A
     locks: createRepoLocks(),
     limits: callLimits,
     inflight,
-    runs: createRunStore(db),
-    // Card activity goes to the open streams only: the extra receiver in AppDeps.boardEvents records board saves and deletions.
-    publishCardActivity: (event) =>
-      hub.publish({ type: 'card-activity', data: { ...event, clientId: normalizeClientId(event.clientId) } }),
+    runs,
+    publishCardActivity: (event) => boardEvents.publish({ type: 'card-activity', data: event }),
   }
   const bearerFailures = new RateLimiter(deps.now)
   const endpoint = createMcpEndpoint({
@@ -160,6 +161,7 @@ export function createAppWithContext(deps: AppDeps): { app: Hono<AppEnv>; ctx: A
     grants,
     keycloak,
     githubTokenSealer: box?.sealer ?? null,
+    runs,
     mcp: { inflight, snapshots, reader, limits: callLimits, endpoint },
   }
   const app = new Hono<AppEnv>()
@@ -177,6 +179,7 @@ export function createAppWithContext(deps: AppDeps): { app: Hono<AppEnv>; ctx: A
   app.route('/api', usersRoutes(ctx))
   app.route('/api', invitesRoutes(ctx))
   app.route('/api', boardsRoutes(ctx))
+  app.route('/api', activityRoutes(ctx))
   app.route('/api', eventsRoutes(ctx))
   app.route('/api', oidcRoutes(ctx))
   app.route('/api', githubRoutes(ctx))

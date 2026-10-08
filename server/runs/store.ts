@@ -214,6 +214,35 @@ function summaryView(row: RunRow, resolved: ReadonlySet<string> | undefined): Ru
   }
 }
 
+/**
+ * Newest status change first; ties broken by the greater run id in code-unit order.
+ * Sorting here instead of in SQL gives the same order on every database: PostgreSQL
+ * and MariaDB sort run_id by the column's collation, which differs from code-unit order.
+ */
+function newestFirst<T extends { run_id: string; status_at: string }>(rows: T[]): T[] {
+  return rows.sort((a, b) => {
+    if (a.status_at !== b.status_at) return a.status_at < b.status_at ? 1 : -1
+    return a.run_id < b.run_id ? 1 : a.run_id > b.run_id ? -1 : 0
+  })
+}
+
+/**
+ * The newest `limit` rows after newestFirst. The database cuts the list by status_at alone,
+ * so rows that share the cut-off's status_at are read in full and the cut is made here.
+ */
+async function newestRows<T extends { run_id: string; status_at: string }>(
+  limit: number,
+  firstRows: () => Promise<T[]>,
+  sameStatusAt: (statusAt: string) => Promise<T[]>,
+): Promise<T[]> {
+  const rows = await firstRows()
+  if (rows.length >= limit) {
+    const known = new Set(rows.map((row) => row.run_id))
+    for (const row of await sameStatusAt(rows[rows.length - 1].status_at)) if (!known.has(row.run_id)) rows.push(row)
+  }
+  return newestFirst(rows).slice(0, limit)
+}
+
 /** The first run per issue of rows already ordered newest first within each issue. */
 function firstPerIssue(rows: readonly RunRow[]): Map<number, RunRow> {
   const out = new Map<number, RunRow>()
@@ -231,12 +260,10 @@ async function runsOfIssues(db: Kysely<Tables>, repoKey: string, issues: readonl
         .select(RUN_COLUMNS)
         .where('repo_key', '=', repoKey)
         .where('issue', 'in', chunk)
-        .orderBy('status_at', 'desc')
-        .orderBy('run_id', 'desc')
         .execute()),
     )
   }
-  return rows
+  return newestFirst(rows)
 }
 
 type ResolutionRow = {
@@ -319,7 +346,7 @@ export function createRunStore(db: Kysely<Tables>): RunStore {
     }
   }
 
-  /** Inserts the claim, or renews it when this run holds it. Returns true when a row was inserted. */
+  /** Inserts the claim, or renews it when this run holds it. Returns true when a row was inserted or an expired claim of this run was taken again. */
   async function takeOrRenewClaim(
     trx: Kysely<Tables>,
     claim: { repoKey: string; issue: number; runId: string; holder: string; leaseUntil: string | null; now: Date },
@@ -342,6 +369,8 @@ export function createRunStore(db: Kysely<Tables>): RunStore {
       const row = await read.executeTakeFirst()
       if (!row) continue
       if (row.run_id === claim.runId) {
+        // The same run taking its claim again after the lease ran out is a change open boards have not seen.
+        const lapsed = row.lease_until !== null && row.lease_until <= nowIso
         await trx
           .updateTable('card_claims')
           .set({ lease_until: claim.leaseUntil })
@@ -349,7 +378,7 @@ export function createRunStore(db: Kysely<Tables>): RunStore {
           .where('issue', '=', claim.issue)
           .where('run_id', '=', claim.runId)
           .execute()
-        return false
+        return lapsed
       }
       if (row.lease_until !== null && row.lease_until <= nowIso) {
         await trx
@@ -527,14 +556,12 @@ export function createRunStore(db: Kysely<Tables>): RunStore {
 
     async boardActivity(repoKey: string, now: Date): Promise<BoardActivity> {
       const claims = await liveClaims(db, repoKey, now)
-      const rows = await db
-        .selectFrom('card_runs')
-        .select(RUN_COLUMNS)
-        .where('repo_key', '=', repoKey)
-        .orderBy('status_at', 'desc')
-        .orderBy('run_id', 'desc')
-        .limit(BOARD_RUNS_READ)
-        .execute()
+      const repoRuns = () => db.selectFrom('card_runs').select(RUN_COLUMNS).where('repo_key', '=', repoKey)
+      const rows = await newestRows(
+        BOARD_RUNS_READ,
+        () => repoRuns().orderBy('status_at', 'desc').limit(BOARD_RUNS_READ).execute(),
+        (statusAt) => repoRuns().where('status_at', '=', statusAt).execute(),
+      )
       const lastRuns = new Map<number, RunRow>()
       for (const [issue, row] of firstPerIssue(rows)) {
         if (lastRuns.size >= RUN_LIMITS.activityCardsMax) break
@@ -561,7 +588,7 @@ export function createRunStore(db: Kysely<Tables>): RunStore {
 
     async issueActivity(repoKey: string, issue: number, now: Date): Promise<IssueActivity> {
       const claim = (await liveClaims(db, repoKey, now)).find((row) => row.issue === issue)
-      const rows = await db
+      const issueRuns = () => db
         .selectFrom('card_runs')
         .leftJoin('users', 'users.id', 'card_runs.agent_user_id')
         .leftJoin('integrations', 'integrations.user_id', 'card_runs.agent_user_id')
@@ -582,10 +609,11 @@ export function createRunStore(db: Kysely<Tables>): RunStore {
         ])
         .where('card_runs.repo_key', '=', repoKey)
         .where('card_runs.issue', '=', issue)
-        .orderBy('card_runs.status_at', 'desc')
-        .orderBy('card_runs.run_id', 'desc')
-        .limit(RUN_LIMITS.runsPerIssueView + 1)
-        .execute()
+      const rows = await newestRows(
+        RUN_LIMITS.runsPerIssueView + 1,
+        () => issueRuns().orderBy('card_runs.status_at', 'desc').limit(RUN_LIMITS.runsPerIssueView + 1).execute(),
+        (statusAt) => issueRuns().where('card_runs.status_at', '=', statusAt).execute(),
+      )
       const shown = rows.slice(0, RUN_LIMITS.runsPerIssueView)
       const resolutions = await resolutionsOf(db, shown.map((row) => row.run_id))
       const runs: RunDetailView[] = shown.map((row) => {

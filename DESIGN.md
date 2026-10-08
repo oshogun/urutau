@@ -172,7 +172,9 @@ only for a bucket over its limit. Every role has a light (White) and a dark
 
 ### Secondary: status
 - **Over-Limit Red** (#da1e28 / dark #fa4d56): a bucket's top border and count
-  tag when it holds more open issues than its work-in-progress limit. Nothing
+  tag when it holds more open issues than its work-in-progress limit. It is
+  also the claim tag of a card that has waited on a person longer than the
+  board's `humanWaitLimit`, and the header tag that counts such cards. Nothing
   else on the board is red except a label whose GitHub color is red.
 - **Drop Highlight** (#d0e2ff / dark #001d6c): the card list of the bucket a
   dragged card is over.

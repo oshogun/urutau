@@ -4,12 +4,14 @@ import { openBoardEvents } from '../api/events'
 import type {
   BoardDeletedEvent,
   BoardUpdatedEvent,
+  CardActivityEvent,
   EditorKind,
   HelloEvent,
   SessionResponse,
 } from '../domain/api'
 import { repoKey } from '../domain/repoRef'
 import type { RepoRef } from '../domain/types'
+import { useActivity } from '../state/activityStore'
 import { useBoards } from '../state/boardStore'
 import { useSession } from '../state/session'
 
@@ -58,6 +60,10 @@ function parse<T>(event: Event): T | null {
  * another client with a version other than the local one reloads the board, unless a save is in
  * flight or an edit is pending; that save then gets a 409 and the store reconciles it. A
  * `board-deleted` from another client marks the board missing with a 'deleted' conflict.
+ *
+ * A `hello` also loads the board's card activity again, which covers events missed while the
+ * stream was closed. A `card-activity` from another client refreshes that one issue's activity;
+ * it never reloads the board, because runs and claims do not change the board version.
  */
 export function useBoardEvents(repo: RepoRef, enabled = true): BoardEvents {
   const key = repoKey(repo)
@@ -126,6 +132,14 @@ export function useBoardEvents(repo: RepoRef, enabled = true): BoardEvents {
         attempt = 0
         setConnection('live')
         if (hello) void reconcile(hello.version, null)
+        void useActivity.getState().load(key)
+      })
+      next.addEventListener('card-activity', (event) => {
+        const activity = parse<CardActivityEvent>(event)
+        if (!activity || activity.repoKey !== key || activity.clientId === CLIENT_ID) return
+        useActivity.getState().refreshIssue(key, activity.issue).catch(() => {
+          // The next event for the issue or the next hello fetches it again.
+        })
       })
       next.addEventListener('board-updated', (event) => {
         const update = parse<BoardUpdatedEvent>(event)

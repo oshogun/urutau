@@ -85,7 +85,7 @@ export function isWaitingClaim(
   return claim !== null && claimIsLive(claim, nowMs) && isWaitingStatus(claim.status)
 }
 
-/** A waiting claim older than the limit, strictly: the same rule as a bucket's WIP limit. A null limit never trips. */
+/** A waiting claim older than the limit, strictly: the same rule as a bucket's WIP limit. With a null limit no claim is over it. */
 export function isOverWaitLimit(
   claim: { status: RunStatus; leaseUntil: string | null; since: string } | null,
   limitHours: number | null,

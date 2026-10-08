@@ -1,10 +1,14 @@
-import { Chat, Draggable, Maximize, Milestone } from '@carbon/icons-react'
-import { Button, OverflowMenu, OverflowMenuItem, Tag, Tile } from '@carbon/react'
+import { Chat, Draggable, Flag, Maximize, Milestone } from '@carbon/icons-react'
+import { Button, OperationalTag, OverflowMenu, OverflowMenuItem, Tag, Tile } from '@carbon/react'
 import type { HTMLAttributes } from 'react'
+import { claimIsLive, triageFlagText, unverifiedFlagText } from '../domain/activity'
+import { estimateLabel, isEstimate } from '../domain/estimates'
 import { labelFor } from '../domain/labels'
 import type { Bucket, Issue, Label } from '../domain/types'
+import { useCardSignals } from './cardSignals'
 import { avatarSrc, issueStateTag } from './issueDisplay'
 import { LabelTag } from './LabelTag'
+import { CLAIM_TAG_TYPE, claimText, claimTone, estimateDescription, holderName } from './runDisplay'
 
 interface IssueCardProps {
   issue: Issue
@@ -42,6 +46,20 @@ export function IssueCard({
 }: IssueCardProps) {
   const closed = issue.state === 'closed'
   const tag = issueStateTag(issue.state, issue.stateReason)
+  const { estimates, activity, now, humanWaitLimit, onEditEstimate, onReleaseClaim } = useCardSignals()
+  const stored = estimates?.[issue.number]
+  const estimate = isEstimate(stored) ? stored : null
+  const card = activity.get(issue.number)
+  const claim = card?.claim && claimIsLive(card.claim, now) ? card.claim : null
+  const lastRun = card?.lastRun ?? null
+  const triage = triageFlagText(estimate, lastRun?.triageRange ?? null)
+  const unverified = lastRun ? unverifiedFlagText(lastRun.unverifiedOpen) : null
+  const answered = lastRun?.status === 'plan_only' && claim === null
+  const hasSignals = estimate !== null || triage !== null || claim !== null || unverified !== null || answered
+  const tone = claim ? claimTone(claim, humanWaitLimit, now) : 'running'
+  const canMove = !closed && onMoveTo !== undefined && moveTargets.length > 0
+  const canEstimate = onEditEstimate !== undefined
+  const canRelease = claim !== null && onReleaseClaim !== undefined
   const className = ['issue-card', closed && 'issue-card--closed', isOverlay && 'issue-card--overlay']
     .filter(Boolean)
     .join(' ')
@@ -74,20 +92,36 @@ export function IssueCard({
             {tag.short}
           </Tag>
         )}
-        {!closed && onMoveTo && moveTargets.length > 0 && !isOverlay && (
+        {!isOverlay && (canMove || canEstimate || canRelease) && (
           <OverflowMenu
             size="sm"
             flipped
             aria-label={`Actions for issue #${issue.number}`}
             iconDescription={`Actions for issue #${issue.number}`}
           >
-            {moveTargets.map((bucket) => (
+            {canMove &&
+              moveTargets.map((bucket) => (
+                <OverflowMenuItem
+                  key={bucket.id}
+                  itemText={`Move to ${bucket.title}`}
+                  onClick={() => onMoveTo?.(bucket.id)}
+                />
+              ))}
+            {canEstimate && (
               <OverflowMenuItem
-                key={bucket.id}
-                itemText={`Move to ${bucket.title}`}
-                onClick={() => onMoveTo(bucket.id)}
+                itemText={estimate ? 'Change estimate…' : 'Set estimate…'}
+                hasDivider={canMove}
+                onClick={() => onEditEstimate(issue.number, null)}
               />
-            ))}
+            )}
+            {canRelease && (
+              <OverflowMenuItem
+                itemText="Release claim…"
+                isDelete
+                hasDivider
+                onClick={() => onReleaseClaim(issue.number)}
+              />
+            )}
           </OverflowMenu>
         )}
       </div>
@@ -125,6 +159,61 @@ export function IssueCard({
             </li>
           ))}
         </ul>
+      )}
+
+      {hasSignals && (
+        <div className="issue-card__signals">
+          {estimate &&
+            (onEditEstimate && !isOverlay ? (
+              <OperationalTag
+                size="sm"
+                type="cool-gray"
+                text={estimateLabel(estimate)}
+                aria-label={`${estimateDescription(estimate)}. Change estimate`}
+                onClick={(event: React.MouseEvent<HTMLElement>) => onEditEstimate(issue.number, event.currentTarget)}
+              />
+            ) : (
+              <Tag size="sm" type="cool-gray" title={estimateDescription(estimate)}>
+                {estimateLabel(estimate)}
+              </Tag>
+            ))}
+          {triage && (
+            <Tag size="sm" type="outline">
+              {triage}
+            </Tag>
+          )}
+          {claim && (
+            <Tag
+              size="sm"
+              type={CLAIM_TAG_TYPE[tone]}
+            >
+              <span
+                title={`Claimed by ${holderName(claim.holder)} for run ${claim.runId}${
+                  tone === 'over-limit' ? ` · waiting longer than ${humanWaitLimit} h` : ''
+                }`}
+              >
+                {claimText(claim, now)}
+                {tone === 'over-limit' && (
+                  <span className="cds--visually-hidden">
+                    , waiting longer than {humanWaitLimit} {humanWaitLimit === 1 ? 'hour' : 'hours'}
+                  </span>
+                )}
+              </span>
+            </Tag>
+          )}
+          {unverified && (
+            // Carbon draws a tag's icon only on larger tags, so the flag is part of the text here.
+            <Tag size="sm" type="warm-gray">
+              <Flag size={12} className="issue-card__flag" aria-hidden="true" />
+              {unverified}
+            </Tag>
+          )}
+          {answered && (
+            <Tag size="sm" type="teal">
+              Question answered
+            </Tag>
+          )}
+        </div>
       )}
 
       {(issue.milestone || issue.comments > 0 || issue.assignees.length > 0) && (

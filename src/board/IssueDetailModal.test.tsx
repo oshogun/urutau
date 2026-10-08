@@ -7,8 +7,11 @@ import { parseIssueBody } from '../markdown/issueBody'
 import { parseBodyInWorker } from '../markdown/parseBodyInWorker'
 import { UpdateIssueError, updateIssueFailures } from '../github/updateIssue'
 import type { IssueUpdater, UpdateIssueInput } from '../hooks/useUpdateIssue'
+import { useActivity } from '../state/activityStore'
+import { useSession } from '../state/session'
 import { useSettings } from '../state/settings'
-import { makeIssue, makeLabel } from '../test/fixtures'
+import { installApiStub, type ApiStub } from '../test/apiStub'
+import { makeClaim, makeIssue, makeLabel, makeRunDetail } from '../test/fixtures'
 import { IssueCard } from './IssueCard'
 import { IssueDetailModal } from './IssueDetailModal'
 
@@ -85,7 +88,8 @@ describe('IssueDetailModal', () => {
         onClose={() => {}}
       />,
     )
-    expect(container.ownerDocument.querySelector('dl')).toBeNull()
+    const fields = [...container.ownerDocument.querySelectorAll('dl dt')].map((term) => term.textContent)
+    expect(fields).toEqual(['Estimate'])
     expect(screen.getByText('No comments')).toBeInTheDocument()
     expect(screen.getByText('No description provided.')).toBeInTheDocument()
     expect(screen.queryByText(/ by /)).not.toBeInTheDocument()
@@ -678,5 +682,112 @@ describe('IssueCard details button', () => {
     const title = screen.getByRole('link', { name: 'Fix' })
     expect(title).toHaveAttribute('href', 'https://github.com/acme/widgets/issues/7')
     expect(title).toHaveAttribute('rel', 'noreferrer')
+  })
+})
+
+
+describe('IssueDetailModal agent runs', () => {
+  let stub: ApiStub
+  beforeEach(async () => {
+    useActivity.setState({ boards: {}, issues: {} })
+    useSession.setState({ status: 'loading', firstRun: false, session: null, config: null, loadError: null })
+    stub = installApiStub()
+  })
+  afterEach(() => stub.restore())
+
+  const item = (id: string, kind: 'external' | 'normative' | 'untested', text: string) => ({
+    id,
+    kind,
+    text,
+    runId: 'r-1',
+    withdrawnAt: null,
+    resolution: null,
+  })
+
+  it('renders an item text containing markup as text, not HTML', async () => {
+    const markup = '<img src=x onerror=alert(1)> **bold** [a](https://example.com)'
+    stub.setActivity('acme/widgets', 12, {
+      runs: [
+        makeRunDetail('r-1', {
+          status: 'done',
+          unverifiedOpen: { external: 1, normative: 0, untested: 0 },
+          items: [item('i-1', 'external', markup)],
+        }),
+      ],
+    })
+    renderModal(makeIssue(12, { body: '' }))
+    const text = await screen.findByText(markup)
+    expect(text.tagName).toBe('SPAN')
+    expect(text.querySelector('img, strong, a')).toBeNull()
+    expect(document.querySelector('.run-items img')).toBeNull()
+  })
+
+  it('links findings only when the whole value is an https URL', async () => {
+    const cases: Array<[string, boolean]> = [
+      ['The answer is no', false],
+      ['see https://example.com/x', false],
+      ['https://example.com/x', true],
+      ['javascript:alert(1)', false],
+      ['http://example.com', false],
+    ]
+    for (const [findings, isLink] of cases) {
+      useActivity.setState({ boards: {}, issues: {} })
+      stub.setActivity('acme/widgets', 12, {
+        runs: [makeRunDetail('r-1', { status: 'plan_only', findings, endedAt: '2026-10-08T12:10:00.000Z' })],
+      })
+      const { unmount } = render(
+        <IssueDetailModal
+          issue={makeIssue(12, { body: '' })}
+          repoFullName="acme/widgets"
+          labelsByName={new Map()}
+          fetchedAt={0}
+          launcherButtonRef={createRef<HTMLButtonElement>()}
+          onClose={() => {}}
+        />,
+      )
+      await screen.findByText(/^Question answered/, { selector: '.run-block__note' })
+      const note = document.querySelector('.run-block__note') as HTMLElement
+      expect(note.querySelector('a') !== null, findings).toBe(isLink)
+      expect(note).toHaveTextContent(findings)
+      unmount()
+    }
+  })
+
+  it('shows Accept and Release only to a signed-in person', async () => {
+    stub.setActivity('acme/widgets', 12, {
+      claim: makeClaim('r-1', { leaseUntil: null }),
+      runs: [
+        makeRunDetail('r-1', {
+          unverifiedOpen: { external: 0, normative: 1, untested: 0 },
+          items: [item('i-1', 'normative', 'Ship it')],
+        }),
+      ],
+    })
+    // Not signed in: the dialog shows the run and the claim but offers neither action.
+    renderModal(makeIssue(12, { body: '' }))
+    await screen.findByText('Ship it')
+    expect(document.querySelector('.run-item__state')).toHaveTextContent('Open')
+    expect(screen.queryByRole('button', { name: /^Accept/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Release claim/ })).not.toBeInTheDocument()
+  })
+
+  it('accepts a normative item and releases a claim with a second click when signed in', async () => {
+    const user = userEvent.setup()
+    await useSession.getState().load()
+    stub.setActivity('acme/widgets', 12, {
+      claim: makeClaim('r-1', { leaseUntil: null }),
+      runs: [
+        makeRunDetail('r-1', {
+          unverifiedOpen: { external: 0, normative: 1, untested: 0 },
+          items: [item('i-1', 'normative', 'Ship it')],
+        }),
+      ],
+    })
+    renderModal(makeIssue(12, { body: '' }))
+    await user.click(await screen.findByRole('button', { name: 'Accept: Ship it' }))
+    expect(await screen.findByText(/^Accepted by ada/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Release claim' }))
+    await user.click(screen.getByRole('button', { name: 'Click again to release' }))
+    await waitFor(() => expect(screen.queryByText(/^Running for/)).not.toBeInTheDocument())
   })
 })

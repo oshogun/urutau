@@ -58,6 +58,10 @@ $page-gutter: $spacing-07;
   gap: $spacing-02 $spacing-03;
 }
 
+.board-header__meta .cds--tag {
+  margin: 0;
+}
+
 .board-header__counts {
   @include type.type-style('label-01');
 
@@ -449,6 +453,30 @@ $page-gutter: $spacing-07;
   }
 }
 
+.issue-card__signals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-02;
+
+  .cds--tag,
+  .cds--tag-label {
+    max-width: 100%;
+    margin: 0;
+  }
+
+  // Carbon's clickable tag keeps its own margin on the wrapper element.
+  .cds--tag--operational {
+    margin: 0;
+  }
+}
+
+.issue-card__flag {
+  margin-inline-end: $spacing-02;
+  vertical-align: text-bottom;
+  fill: currentcolor;
+}
+
 .issue-card__footer {
   @include type.type-style('label-01');
 
@@ -677,6 +705,125 @@ $page-gutter: $spacing-07;
   @include type.type-style('label-01');
 
   margin-top: $spacing-05;
+  color: $text-secondary;
+}
+
+.issue-detail__release {
+  margin-inline-start: $spacing-04;
+}
+
+.issue-detail__activity-notice.cds--inline-notification {
+  max-inline-size: none;
+  margin-top: $spacing-04;
+}
+
+.issue-detail__activity-loading {
+  margin-top: $spacing-05;
+}
+
+.issue-detail__runs {
+  margin-top: $spacing-05;
+  padding-top: $spacing-05;
+  border-top: 1px solid $border-subtle;
+}
+
+.issue-detail__runs-heading {
+  @include type.type-style('heading-compact-01');
+
+  margin-bottom: $spacing-04;
+}
+
+.run-block + .run-block {
+  margin-top: $spacing-05;
+}
+
+.run-block__line {
+  @include type.type-style('body-compact-01');
+
+  color: $text-primary;
+}
+
+.run-block__note {
+  @include type.type-style('body-compact-01');
+
+  margin-top: $spacing-02;
+  color: $text-secondary;
+  overflow-wrap: anywhere;
+}
+
+.run-items {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+  margin-top: $spacing-04;
+  list-style: none;
+}
+
+.run-item {
+  @include type.type-style('body-compact-01');
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-02 $spacing-04;
+  color: $text-primary;
+
+  .cds--tag {
+    margin: 0;
+  }
+}
+
+.run-item__text {
+  flex: 1 1 16rem;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.run-item__state {
+  @include type.type-style('label-01');
+
+  color: $text-secondary;
+}
+
+.run-item--withdrawn .run-item__text {
+  color: $text-secondary;
+}
+
+.claims-list {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+}
+
+.claims-list__row {
+  @include type.type-style('body-compact-01');
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $spacing-02 $spacing-04;
+  padding-block: $spacing-03;
+  border-bottom: 1px solid $border-subtle;
+
+  .cds--tag {
+    margin: 0;
+  }
+}
+
+.claims-list__issue {
+  @include type.type-style('heading-compact-01');
+
+  min-inline-size: 3rem;
+}
+
+.claims-list__holder {
+  flex: 1 1 8rem;
+  min-inline-size: 0;
+  color: $text-secondary;
+  overflow-wrap: anywhere;
+}
+
+.claims-list__empty {
   color: $text-secondary;
 }
 

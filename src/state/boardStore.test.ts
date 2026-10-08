@@ -274,3 +274,86 @@ it('defaults come from createDefaultBoard for a first save', async () => {
   await useBoards.getState().create(KEY, 'acme/widgets', board)
   expect(stub.board(KEY)?.board).toEqual(board)
 })
+
+describe('setEstimate', () => {
+  const sure = { size: 'M', confidence: 'sure' } as const
+
+  it('is not applied before the server answers, then takes the stored board with the server stamp', async () => {
+    const stub = await signedIn([stored(1, base)])
+    await useBoards.getState().load(KEY)
+    const gate = stub.hold('PUT boards/acme/widgets/estimates/7')
+    const pending = useBoards.getState().setEstimate(KEY, 7, sure)
+    await settle()
+    expect(entry().board?.estimates).toBeUndefined()
+    expect(entry().saving).toBe(true)
+    gate.release()
+    await pending
+    expect(entry()).toMatchObject({ saving: false, dirty: false, conflict: null })
+    expect(entry().stored?.version).toBe(2)
+    expect(entry().board?.estimates?.[7]).toMatchObject({ size: 'M', confidence: 'sure', by: 'ada' })
+    expect(stub.board(KEY)?.board.estimates?.[7]).toBeDefined()
+  })
+
+  it('clears an estimate with null', async () => {
+    const stub = await signedIn([stored(1, base)])
+    await useBoards.getState().load(KEY)
+    await useBoards.getState().setEstimate(KEY, 7, sure)
+    await useBoards.getState().setEstimate(KEY, 7, null)
+    expect(stub.requests('DELETE boards/acme/widgets/estimates/7')).toHaveLength(1)
+    expect(entry().board?.estimates).toBeUndefined()
+    expect(entry().stored?.version).toBe(3)
+  })
+
+  it('stores both an estimate and a card move made while it is in flight, with one move request and no conflict', async () => {
+    const stub = await signedIn([stored(1, base)])
+    await useBoards.getState().load(KEY)
+    const gate = stub.hold('PUT boards/acme/widgets/estimates/7')
+    const pending = useBoards.getState().setEstimate(KEY, 7, sure)
+    await settle()
+    edit('Moved')
+    expect(entry()).toMatchObject({ saving: true, dirty: true })
+    gate.release()
+    await pending
+    await settle()
+    const puts = stub.requests('PUT boards/acme/widgets').filter((call) => call.path === 'boards/acme/widgets')
+    expect(puts).toHaveLength(1)
+    expect((puts[0].body as { baseVersion: number }).baseVersion).toBe(2)
+    expect(entry().conflict).toBeNull()
+    expect(entry()).toMatchObject({ saving: false, dirty: false })
+    const saved = stub.board(KEY)!
+    expect(saved.version).toBe(3)
+    expect(saved.board.buckets[0].title).toBe('Moved')
+    expect(saved.board.estimates?.[7]).toMatchObject({ size: 'M' })
+  })
+
+  it('waits for a board save in flight before it sends', async () => {
+    const stub = await signedIn([stored(1, base)])
+    await useBoards.getState().load(KEY)
+    const gate = stub.hold('PUT boards/acme/widgets')
+    edit('First')
+    await settle()
+    const pending = useBoards.getState().setEstimate(KEY, 7, sure)
+    await settle()
+    expect(stub.requests('PUT boards/acme/widgets/estimates')).toHaveLength(0)
+    gate.release()
+    await pending
+    expect(stub.board(KEY)?.version).toBe(3)
+    expect(stub.board(KEY)?.board.buckets[0].title).toBe('First')
+    expect(entry().conflict).toBeNull()
+  })
+
+  it('adopts the stored board with a notice on a stale board and rejects on other failures, leaving the board unchanged', async () => {
+    const stub = await signedIn([stored(1, base)])
+    await useBoards.getState().load(KEY)
+    stub.putBoard('acme/widgets', renamed(base, 'Theirs'), { id: 'u2', username: 'grace', kind: 'person' })
+    stub.failNext('PUT boards/acme/widgets/estimates/7', { status: 409, error: 'stale-board', body: { error: 'stale-board', message: 'x', current: stub.board(KEY) } })
+    await useBoards.getState().setEstimate(KEY, 7, sure)
+    expect(entry().conflict).toEqual({ kind: 'stale', by: 'grace' })
+    expect(entry().board?.buckets[0].title).toBe('Theirs')
+
+    stub.failNext('PUT boards/acme/widgets/estimates/7', { status: 400, error: 'invalid-request', message: 'No.' })
+    await expect(useBoards.getState().setEstimate(KEY, 7, sure)).rejects.toThrow('No.')
+    expect(entry()).toMatchObject({ saving: false, dirty: false })
+    expect(entry().board?.estimates).toBeUndefined()
+  })
+})

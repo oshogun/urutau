@@ -3,17 +3,19 @@ import {
   ActionableNotification,
   Button,
   InlineLoading,
+  InlineNotification,
   Layer,
   Link,
   ListItem,
   Modal,
+  SkeletonText,
   Stack,
   Tag,
   TextArea,
   TextInput,
   UnorderedList,
 } from '@carbon/react'
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { KeycloakButton } from '../components/auth/KeycloakButton'
 import { NEW_ISSUE_BODY_MAX, NEW_ISSUE_TITLE_MAX } from '../domain/api'
 import {
@@ -30,16 +32,21 @@ import {
   type IssueStateAction,
   type IssueVersion,
 } from '../domain/issueUpdate'
+import { ageText, claimIsLive, statusLabel } from '../domain/activity'
+import { estimateLabel } from '../domain/estimates'
 import { labelFor } from '../domain/labels'
-import type { Issue, Label, User } from '../domain/types'
+import type { Estimate, Issue, Label, User } from '../domain/types'
 import { UpdateIssueError, updateIssueFailures } from '../github/updateIssue'
+import { useIssueActivity } from '../hooks/useCardActivity'
 import type { IssueUpdater } from '../hooks/useUpdateIssue'
 import { useSession } from '../state/session'
 import { useSettings } from '../state/settings'
+import { AgentRuns } from './AgentRuns'
 import { isImeEnter } from './imeEnter'
 import { IssueBody } from './IssueBody'
 import { avatarSrc, issueStateTag } from './issueDisplay'
 import { LabelTag } from './LabelTag'
+import { estimateDescription, holderName, releaseFailure } from './runDisplay'
 
 export interface IssueDetailModalProps {
   issue: Issue
@@ -47,6 +54,10 @@ export interface IssueDetailModalProps {
   labelsByName: ReadonlyMap<string, Label>
   /** `snapshot.fetchedAt`, epoch milliseconds. */
   fetchedAt: number
+  /** The issue's estimate, if it has one. */
+  estimate?: Estimate | null
+  /** Epoch milliseconds for the age of a claim; the dialog reads the clock when it opens if absent. */
+  now?: number
   /** Board's ref to the details button that opened the modal; passed to Carbon's `Modal`. */
   launcherButtonRef: RefObject<HTMLButtonElement | null>
   onClose: () => void
@@ -152,6 +163,8 @@ export function IssueDetailModal({
   repoFullName,
   labelsByName,
   fetchedAt,
+  estimate = null,
+  now: clock,
   launcherButtonRef,
   onClose,
   onUpdate: currentUpdate = null,
@@ -174,6 +187,36 @@ export function IssueDetailModal({
   const titleRef = useRef<HTMLInputElement>(null)
   const serverPath = useSession((state) => state.session?.githubAccess.mode === 'server')
   const token = useSettings((state) => state.token)
+  const signedIn = useSession((state) => state.status === 'signed-in')
+  const repo = useMemo(() => {
+    const [owner = '', name = ''] = repoFullName.split('/')
+    return { owner, name }
+  }, [repoFullName])
+  const activity = useIssueActivity(repo, boardIssue.number)
+  const [openedAt] = useState(() => Date.now())
+  const now = clock ?? openedAt
+  const claim = activity.data?.claim && claimIsLive(activity.data.claim, now) ? activity.data.claim : null
+  const [confirmingRelease, setConfirmingRelease] = useState(false)
+  const [releasing, setReleasing] = useState(false)
+  const [releaseError, setReleaseError] = useState<string | null>(null)
+
+  async function releaseClaim() {
+    if (!claim) return
+    if (!confirmingRelease) {
+      setConfirmingRelease(true)
+      return
+    }
+    setReleasing(true)
+    setReleaseError(null)
+    try {
+      await activity.release(claim.runId)
+    } catch (failure) {
+      setReleaseError(releaseFailure(failure))
+    } finally {
+      setReleasing(false)
+      setConfirmingRelease(false)
+    }
+  }
 
   // Once an action has been started here, the buttons and its notice stay even if the admin turns
   // changes off while the modal is open; the next press then reports the switch as off.
@@ -191,7 +234,6 @@ export function IssueDetailModal({
 
   const label = `${repoFullName} #${issue.number}`
   const tag = issueStateTag(issue.state, issue.stateReason)
-  const hasFields = issue.labels.length > 0 || issue.assignees.length > 0 || issue.milestone !== null
   const loadedAt = new Date(fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
   // Moves focus to a button once it exists, after a change of mode or of the issue's state. The
@@ -594,48 +636,104 @@ export function IssueDetailModal({
         </>
       )}
 
-      {hasFields && (
-        <dl className="issue-detail__fields">
-          {issue.labels.length > 0 && (
-            <div className="issue-detail__field">
-              <dt>Labels</dt>
-              <dd>
-                <ul className="issue-detail__labels">
-                  {issue.labels.map((name) => (
-                    <li key={name}>
-                      <LabelTag label={labelFor(name, labelsByName)} />
-                    </li>
-                  ))}
-                </ul>
-              </dd>
-            </div>
-          )}
-          {issue.assignees.length > 0 && (
-            <div className="issue-detail__field">
-              <dt>Assignees</dt>
-              <dd>
-                <ul className="issue-detail__people">
-                  {issue.assignees.map((assignee) => (
-                    <li key={assignee.login}>
-                      <Person user={assignee} />
-                    </li>
-                  ))}
-                </ul>
-              </dd>
-            </div>
-          )}
-          {issue.milestone !== null && (
-            <div className="issue-detail__field">
-              <dt>Milestone</dt>
-              <dd>
-                <span className="issue-detail__milestone">
-                  <Milestone size={16} aria-hidden="true" />
-                  {issue.milestone}
-                </span>
-              </dd>
-            </div>
-          )}
-        </dl>
+      <dl className="issue-detail__fields">
+        {issue.labels.length > 0 && (
+          <div className="issue-detail__field">
+            <dt>Labels</dt>
+            <dd>
+              <ul className="issue-detail__labels">
+                {issue.labels.map((name) => (
+                  <li key={name}>
+                    <LabelTag label={labelFor(name, labelsByName)} />
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        )}
+        {issue.assignees.length > 0 && (
+          <div className="issue-detail__field">
+            <dt>Assignees</dt>
+            <dd>
+              <ul className="issue-detail__people">
+                {issue.assignees.map((assignee) => (
+                  <li key={assignee.login}>
+                    <Person user={assignee} />
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        )}
+        {issue.milestone !== null && (
+          <div className="issue-detail__field">
+            <dt>Milestone</dt>
+            <dd>
+              <span className="issue-detail__milestone">
+                <Milestone size={16} aria-hidden="true" />
+                {issue.milestone}
+              </span>
+            </dd>
+          </div>
+        )}
+        <div className="issue-detail__field">
+          <dt>Estimate</dt>
+          <dd>
+            {estimate ? (
+              <>
+                <span title={estimateDescription(estimate)}>{estimateLabel(estimate)}</span>
+                {estimate.confidence === 'no-idea' ? ' · no idea' : ` · ${estimate.confidence}`}
+                {' · set by '}
+                {estimate.by} <DateText iso={estimate.at} />
+              </>
+            ) : (
+              'No estimate'
+            )}
+          </dd>
+        </div>
+        {claim && (
+          <div className="issue-detail__field">
+            <dt>Claim</dt>
+            <dd>
+              {statusLabel(claim.status)} for {ageText(claim.since, now)} · run {claim.runId} ·{' '}
+              {holderName(claim.holder)}
+              {signedIn && (
+                <Button
+                  className="issue-detail__release"
+                  kind="danger--ghost"
+                  size="sm"
+                  disabled={releasing}
+                  onClick={() => void releaseClaim()}
+                >
+                  {confirmingRelease ? 'Click again to release' : 'Release claim'}
+                </Button>
+              )}
+            </dd>
+          </div>
+        )}
+      </dl>
+      {releaseError && (
+        <InlineNotification
+          className="issue-detail__activity-notice"
+          kind="warning"
+          lowContrast
+          title="Not released."
+          subtitle={releaseError}
+          onClose={() => {
+            setReleaseError(null)
+            return false
+          }}
+        />
+      )}
+      {activity.status === 'loading' && !editing && (
+        <SkeletonText className="issue-detail__activity-loading" width="12rem" />
+      )}
+      {activity.data && !editing && (
+        <AgentRuns
+          runs={activity.data.runs}
+          moreRuns={activity.data.moreRuns}
+          onAccept={signedIn ? activity.accept : undefined}
+        />
       )}
 
       {editor ? (

@@ -77,6 +77,13 @@ describe('claims', () => {
     expect((await claimRows())[0]).toMatchObject({ lease_until: later(600_000 + RUN_LIMITS.leaseMs).toISOString(), claimed_at: T0.toISOString() })
   })
 
+  it('counts the same run taking its claim again after the lease ran out as a change to publish', async () => {
+    await runs.recordRun(call('run-a'), T0)
+    const again = await runs.recordRun(call('run-a'), later(RUN_LIMITS.leaseMs))
+    expect(again).toMatchObject({ created: false, statusChanged: false, notify: true })
+    expect(await claimRows()).toMatchObject([{ run_id: 'run-a', lease_until: later(2 * RUN_LIMITS.leaseMs).toISOString() }])
+  })
+
   it('refuses a second run on a live claim and leaves the first untouched', async () => {
     await runs.recordRun(call('run-a'), T0)
     expect((await refusal(runs.recordRun(call('run-b', {}, b), later(1000)))).code).toBe('claimed-by-other-run')
@@ -336,6 +343,15 @@ describe('reading activity', () => {
     await runs.recordRun(call('run-a2', { status: 'done', unverified: [item('X', 'untested')] }), later(500))
     expect((await runs.activityFor(REPO, [7], later(2000))).lastRuns.get(7)?.runId).toBe('run-c')
     expect((await runs.issueActivity(REPO, 7, later(2000))).runs.map((r) => r.runId)).toEqual(['run-c', 'run-b', 'run-a2', 'run-a'])
+  })
+
+  it('orders runs that changed status in the same millisecond by run id in code-unit order', async () => {
+    // Under a locale collation 'a-1' sorts before 'B-1'; in code-unit order 'B-1' sorts before 'a-1'.
+    await runs.recordRun(call('B-1', { status: 'done' }), T0)
+    await runs.recordRun(call('a-1', { status: 'done' }, b, 7), T0)
+    expect((await runs.issueActivity(REPO, 7, later(10))).runs.map((r) => r.runId)).toEqual(['a-1', 'B-1'])
+    expect((await runs.activityFor(REPO, [7], later(10))).lastRuns.get(7)?.runId).toBe('a-1')
+    expect((await runs.boardActivity(REPO, later(10))).cards[0].lastRun?.runId).toBe('a-1')
   })
 
   it('makes a resumed run the last run again', async () => {

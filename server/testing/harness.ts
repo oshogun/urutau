@@ -1,15 +1,15 @@
 import type { Hono } from 'hono'
-import { CSRF_HEADER, type BoardDeletedEvent, type BoardUpdatedEvent } from '../../src/domain/api.ts'
+import { CSRF_HEADER } from '../../src/domain/api.ts'
 import { setPasswordCost } from '../auth/password.ts'
 import { closeApp, createAppWithContext, type AppContext, type AppDeps, type BoardEventPublisher } from '../app.ts'
 import { loadConfig, type Config } from '../config.ts'
-import { createEventHub, type EventHub } from '../events/publisher.ts'
+import { createEventHub, type BoardEvent, type EventHub } from '../events/publisher.ts'
 import { GrantStore } from '../oidc/grants.ts'
 import { openDatabase, type Database } from '../db/index.ts'
 import { createLogger } from '../log.ts'
 import type { AppEnv } from '../http/types.ts'
 
-export type PublishedEvent = { type: 'board-updated'; data: BoardUpdatedEvent } | { type: 'board-deleted'; data: BoardDeletedEvent }
+export type PublishedEvent = BoardEvent
 
 export interface TestOverrides {
   config?: Partial<Config>

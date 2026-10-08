@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CLIENT_ID } from '../api/client'
 import type { BoardUpdatedEvent } from '../domain/api'
 import { saveBucket } from '../domain/board'
+import { useActivity } from '../state/activityStore'
 import { useBoards } from '../state/boardStore'
 import { useSession } from '../state/session'
 import { installApiStub } from '../test/apiStub'
 import type { ApiStub } from '../test/apiStub'
-import { makeBoard, makeBucket } from '../test/fixtures'
+import { makeBoard, makeBucket, makeClaim, makeRunDetail } from '../test/fixtures'
 import { reopenDelay, useBoardEvents } from './useBoardEvents'
 
 const REPO = { owner: 'acme', name: 'widgets' }
@@ -15,12 +16,15 @@ const KEY = 'acme/widgets'
 const base = makeBoard([makeBucket('todo'), makeBucket('done')])
 const renamed = (title: string) => saveBucket(base, { ...base.buckets[0], title })
 const tick = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)))
-const gets = (stub: ApiStub) => stub.requests('GET boards/acme/widgets').length
+const gets = (stub: ApiStub) => stub.requests((call) => call.method === 'GET' && call.path === 'boards/acme/widgets').length
+const activityGets = (stub: ApiStub, suffix = 'activity') =>
+  stub.requests((call) => call.method === 'GET' && call.path === `boards/acme/widgets/${suffix}`).length
 
 let stub: ApiStub
 
 beforeEach(async () => {
   useBoards.setState({ entries: {} })
+  useActivity.setState({ boards: {}, issues: {} })
   useSession.setState({ status: 'loading', firstRun: false, session: null, config: null, loadError: null })
   stub = installApiStub()
   stub.putBoard('acme/widgets', base)
@@ -47,6 +51,49 @@ const updated = (version: number, clientId: string | null, repoKey = KEY): Board
 })
 
 describe('useBoardEvents', () => {
+  it('loads the card activity on hello and again on a reconnect', async () => {
+    stub.setActivity(KEY, 3, { claim: makeClaim('r-1'), runs: [makeRunDetail('r-1')] })
+    await mount()
+    expect(activityGets(stub)).toBe(1)
+    expect(useActivity.getState().boards[KEY].cards[3].claim?.runId).toBe('r-1')
+    stub.failStreams('reconnect')
+    await tick()
+    expect(activityGets(stub)).toBe(2)
+  })
+
+  it('applies a claim another client took to the open board without fetching the board', async () => {
+    await mount()
+    expect(useActivity.getState().boards[KEY].cards[3]).toBeUndefined()
+    const boardGets = gets(stub)
+    stub.externalActivity(KEY, 3, { claim: makeClaim('r-1'), runs: [makeRunDetail('r-1')] })
+    await tick()
+    expect(useActivity.getState().boards[KEY].cards[3]).toMatchObject({ claim: { runId: 'r-1' }, lastRun: { runId: 'r-1', status: 'running' } })
+    expect(activityGets(stub, 'activity/3')).toBe(1)
+    expect(gets(stub)).toBe(boardGets)
+    expect(useBoards.getState().entries[KEY].stored?.version).toBe(1)
+    stub.externalActivity(KEY, 3, { claim: null, runs: [makeRunDetail('r-1', { status: 'done', endedAt: '2026-10-08T13:00:00.000Z' })] })
+    await tick()
+    expect(useActivity.getState().boards[KEY].cards[3]).toMatchObject({ claim: null, lastRun: { status: 'done' } })
+    expect(gets(stub)).toBe(boardGets)
+  })
+
+  it('ignores card-activity for its own request or another repository, and coalesces events for one issue', async () => {
+    await mount()
+    stub.emitBoardEvent(KEY, 'card-activity', { repoKey: KEY, issue: 3, clientId: CLIENT_ID })
+    stub.emitBoardEvent(KEY, 'card-activity', { repoKey: 'acme/other', issue: 3, clientId: null })
+    await tick()
+    expect(activityGets(stub, 'activity/3')).toBe(0)
+
+    const gate = stub.hold('GET boards/acme/widgets/activity/4')
+    for (let i = 0; i < 4; i += 1) stub.emitBoardEvent(KEY, 'card-activity', { repoKey: KEY, issue: 4, clientId: null })
+    await tick()
+    expect(activityGets(stub, 'activity/4')).toBe(1)
+    gate.release()
+    await tick()
+    await tick()
+    expect(activityGets(stub, 'activity/4')).toBe(2)
+  })
+
   it('is live after hello and does not reload when the version matches', async () => {
     const { result } = await mount()
     expect(result.current.connection).toBe('live')

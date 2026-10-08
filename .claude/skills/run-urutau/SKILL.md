@@ -87,6 +87,8 @@ Read. Browser state (localStorage) persists between requests until the driver st
 | `liveMove(issue, bucketTitle, other, { limitMs = 2000 })` | main page drags the card; returns `{ elapsedMs }` until `other.page` shows it in that bucket without reload; throws over the limit or on a page error in `other` |
 | `resetStorage()` | clear the main page's localStorage (theme, v1 data), then reload; boards live on the server, so it neither deletes them nor signs out |
 | `mcp(method, params, token)` | server mode with the launcher: sends one JSON-RPC request to `<appUrl>/mcp` with Playwright's request context (full `Accept` header, bearer `token`) and returns `{ status, ...answer }`, reading the `data:` line of an event-stream answer. Keep the token in a variable inside the script; never return, log or write it |
+| `createAgent(username, repos)` | server mode with the launcher, signed in as admin on the main page: creates an agent integration, stores the fake GitHub token, sets its repository list (`['acme/widgets']`) and creates one MCP bearer token. Returns `{ username, repos, tool(name, args) }`; the token lives only in the closure of `tool`, which calls an MCP tool and returns `{ status, result }` (`result.structuredContent` is the tool's JSON). Safe to `return` from a script |
+| `seedAgentRuns(agent, repo, { running = 14, waiting = 12 })` | calls `record_run` for a `running` run (a claim with a lease) and an `awaiting_approval` run (a claim without a lease, so a `waitingOnHuman` entry) with one unverified item each of `external`, `normative` and `untested`, then returns `{ humanWaitLimit, waitingOnHuman, cards }` from `get_board` (`cards` are the ones with a `claim` or `lastRun`). Open the board first (`openBoard(repo)`): `running` and the waiting statuses answer `no-board` for a repository nobody opened. Throws with the error text if a call fails |
 | `fixtureGitHubToken` | the fake GitHub token (`github_pat_urutau_fixture_not_a_real_token`) to type into an integration's GitHub-token modal |
 | `page`, `context`, `browser` | raw Playwright objects; `mode` and `appUrl` describe the setup |
 
@@ -257,6 +259,22 @@ await other.getByRole('status').filter({ hasText: 'Board updated by' }).first().
 
 The 'Board updated by <name>' toast closes after 4 seconds (`ToastNotification timeout={4000}` in `src/board/Board.tsx`), so wait
 for it and take the screenshot in the same driver script as the `move_card` call.
+
+Seeding agent runs and claims (for a check of the card's claim, waiting tag or unverified flag) takes one script. The
+driver creates the integration and its token itself, so no token is typed, printed or returned:
+
+```js
+await goto('/'); await createAdmin('admin', 'correct horse battery')
+await openBoard('acme/widgets')                  // creates the board record record_run needs
+const agent = await createAgent('carcara', ['acme/widgets'])
+const seeded = await seedAgentRuns(agent, 'acme/widgets')   // #14 running, #12 awaiting_approval with 3 unverified
+await page.reload(); await page.locator('.board-header__name').waitFor()
+return { seeded, shot: await shot('seeded-runs') }
+```
+
+`seeded.cards` shows each seeded card's `claim { runId, status, since }` and `lastRun.unverifiedOpen`, and
+`seeded.waitingOnHuman` lists #12. Call `agent.tool('record_run', { … })` for other statuses. Verified on
+2026-10-08: `grep -rl urutau_mcp_ .claude/scratch .claude/skills/run-urutau/shots` finds nothing after the run.
 
 `grep -c 'fixture-github \(POST\|PATCH\|PUT\|DELETE\)' api.log` must print 0.
 Every outbound request of the launched server goes through the launcher's fetch, which only calls `fixtureFetch` and has no

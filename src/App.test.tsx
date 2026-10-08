@@ -13,6 +13,7 @@ import { INTEGRATIONS_QUERY_KEY } from './api/admin'
 import { useSession } from './state/session'
 import { useSettings } from './state/settings'
 import { installApiStub, stubCreatedIssue } from './test/apiStub'
+import { makeClaim, makeRunDetail } from './test/fixtures'
 import type { ApiStub, ApiStubOptions } from './test/apiStub'
 import { parseIssueBody } from './markdown/issueBody'
 import { parseBodyInWorker } from './markdown/parseBodyInWorker'
@@ -460,15 +461,19 @@ describe('App', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
 
+    // The dialog reads the issue's own run activity from Urutau's server; nothing else may be requested.
+    const requestCount = () =>
+      vi.mocked(fetch).mock.calls.filter(([input]) => !/\/activity\/\d+$/.test(String(input))).length
+
     it('makes no request when it opens, with a browser session or a server session', async () => {
       const user = userEvent.setup()
       renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
       await screen.findByText('Crash on save')
-      const browserCalls = vi.mocked(fetch).mock.calls.length
+      const browserCalls = requestCount()
       await user.click(detailsButton(1))
       await screen.findByRole('dialog', { name: 'acme/widgets #1' })
       await screen.findByRole('heading', { level: 4, name: 'Steps' })
-      expect(vi.mocked(fetch).mock.calls.length).toBe(browserCalls)
+      expect(requestCount()).toBe(browserCalls)
     })
 
     it('makes no request when it opens for a Keycloak user whose GitHub is read by the server', async () => {
@@ -485,12 +490,12 @@ describe('App', () => {
         },
       })
       await screen.findByText('Crash on save')
-      const before = vi.mocked(fetch).mock.calls.length
+      const before = requestCount()
       expect(before).toBeGreaterThan(0)
       await user.click(detailsButton(1))
       await screen.findByRole('dialog', { name: 'acme/widgets #1' })
       await screen.findByRole('heading', { level: 4, name: 'Steps' })
-      expect(vi.mocked(fetch).mock.calls.length).toBe(before)
+      expect(requestCount()).toBe(before)
     })
   })
 
@@ -1805,6 +1810,83 @@ describe('App', () => {
       await user.click(screen.getByRole('button', { name: /Account menu for/ }))
       expect(await screen.findByText(/Signed in as/)).toBeInTheDocument()
       expect(screen.queryByText('Server settings')).not.toBeInTheDocument()
+    })
+  })
+  describe('estimates, claims and the wait limit', () => {
+    it('saves the hours a card may wait on a human, empty meaning no limit', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      await screen.findByText('Crash on save')
+      await user.click(screen.getByRole('button', { name: 'Board settings' }))
+      const field = await screen.findByLabelText('Hours a card may wait on a human (optional)')
+      await user.type(field, '24')
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(stub.board('acme/widgets')?.board.humanWaitLimit).toBe(24))
+
+      await user.click(screen.getByRole('button', { name: 'Board settings' }))
+      const again = await screen.findByLabelText('Hours a card may wait on a human (optional)')
+      expect(again).toHaveValue(24)
+      await user.clear(again)
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(stub.board('acme/widgets')?.board.humanWaitLimit).toBeNull())
+    })
+
+    it('sets an estimate from the card menu and shows it on the card', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      await screen.findByText('Crash on save')
+      await user.click(screen.getByRole('button', { name: 'Actions for issue #1' }))
+      await user.click(await screen.findByText('Set estimate…'))
+      const dialog = await screen.findByRole('dialog', { name: /Estimate for #1/ })
+      expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
+      await user.click(within(dialog).getByLabelText('M · Medium'))
+      await user.click(within(dialog).getByLabelText('Unsure'))
+      await user.click(within(dialog).getByRole('button', { name: 'Save' }))
+      expect(await screen.findByRole('button', { name: 'Estimate: medium, unsure. Change estimate' })).toHaveTextContent('M?')
+      expect(stub.board('acme/widgets')?.board.estimates?.[1]).toMatchObject({ size: 'M', confidence: 'unsure' })
+    })
+
+    it('shows the claim, the waiting count and Release to a signed-in person, and releases with confirmation', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      const waitingSince = new Date(Date.now() - 5 * 3_600_000).toISOString()
+      stub.setActivity('acme/widgets', 2, {
+        claim: makeClaim('r-9', { status: 'needs_human', since: waitingSince, leaseUntil: null }),
+        runs: [makeRunDetail('r-9', { status: 'needs_human', statusAt: waitingSince })],
+      })
+      await screen.findByText('Dark mode')
+      expect(await screen.findByText('1 waiting on a human')).toBeInTheDocument()
+      expect(screen.getByText('Needs a human · 5 h')).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Actions for issue #2' }))
+      await user.click(await screen.findByText('Release claim…'))
+      const dialog = await screen.findByRole('dialog', { name: /Release the claim on #2/ })
+      await user.click(within(dialog).getByRole('button', { name: 'Release' }))
+      await waitFor(() => expect(screen.queryByText('Needs a human · 5 h')).not.toBeInTheDocument())
+      expect(screen.queryByText('1 waiting on a human')).not.toBeInTheDocument()
+    })
+
+    it('keeps estimates when the board is reset, and clears the wait limit', async () => {
+      const user = userEvent.setup()
+      const base = stubBoard('acme/widgets', 1)
+      const estimate = { size: 'L' as const, confidence: 'sure' as const, by: 'ada', at: '2026-10-08T10:00:00.000Z' }
+      renderApp('?repo=acme/widgets', {
+        boards: [{ ...base, board: { ...base.board, estimates: { 1: estimate }, humanWaitLimit: 12 } }],
+      })
+      await screen.findByText('Crash on save')
+      await user.click(screen.getByRole('button', { name: 'Board settings' }))
+      expect(await screen.findByText(/Estimates are kept\./)).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Reset board' }))
+      await user.click(screen.getByRole('button', { name: 'Click again to reset' }))
+      await waitFor(() => expect(stub.board('acme/widgets')?.board.humanWaitLimit).toBeUndefined())
+      expect(stub.board('acme/widgets')?.board.estimates).toEqual({ 1: estimate })
+    })
+
+    it('shows no board, and so no Release or Accept, to a signed-out visitor', async () => {
+      renderApp('?repo=acme/widgets', { session: 'signed-out' })
+      expect(await screen.findByRole('heading', { name: 'Sign in to Urutau' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Release/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /^Accept/ })).not.toBeInTheDocument()
+      expect(screen.queryByText(/waiting on a human/)).not.toBeInTheDocument()
     })
   })
 })

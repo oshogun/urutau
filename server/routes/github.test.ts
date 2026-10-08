@@ -51,6 +51,15 @@ describe('who may use the proxy', () => {
     }
     expect(githubRequests()).toEqual([])
   })
+
+  test('a single issue path takes only GET: other methods are 405 and nothing is sent', async () => {
+    await signedIn()
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']) {
+      const response = await t.h.send(method, `${REPO}/issues/1`)
+      expect({ method, status: response.status }).toEqual({ method, status: 405 })
+    }
+    expect(githubRequests()).toEqual([])
+  })
 })
 
 describe('the allow-list', () => {

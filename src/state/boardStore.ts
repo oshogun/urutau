@@ -1,7 +1,8 @@
 import { create } from 'zustand'
+import { deleteEstimate, putEstimate } from '../api/activity'
 import { ApiError, CLIENT_ID, apiRequest } from '../api/client'
 import { CLIENT_ID_HEADER } from '../domain/api'
-import type { SaveBoardRequest, StaleBoardResponse, StoredBoard } from '../domain/api'
+import type { SaveBoardRequest, SetEstimateRequest, StaleBoardResponse, StoredBoard } from '../domain/api'
 import type { BoardConfig } from '../domain/types'
 import { onSessionChange } from './session'
 
@@ -36,6 +37,13 @@ export interface BoardsState {
   /** Optimistic edit; saves follow the queue: one request in flight, the latest edit queued. */
   update(repoKey: string, fullName: string, recipe: (current: BoardConfig) => BoardConfig): void
   retrySave(repoKey: string): void
+  /**
+   * Sets (or, with null, clears) the estimate of an issue through its own server route, after any
+   * pending board save. The board on screen changes only when the server answers, so the author
+   * and time on an estimate are always the server's. Rejects with the server's error; a stale
+   * board is adopted with a notice and resolves.
+   */
+  setEstimate(repoKey: string, issue: number, request: SetEstimateRequest | null): Promise<void>
   /** Called by the live-updates hook for a newer version from another tab. */
   /** Resolves to the newer stored board it adopted, or null when it changed nothing. */
   reloadIfIdle(repoKey: string): Promise<StoredBoard | null>
@@ -71,11 +79,19 @@ const fullNames = new Map<string, string>()
 /** The board each key's first save started from; a 409 on it is adopted silently only if unedited. */
 const createdBoards = new Map<string, BoardConfig>()
 
+/** The estimate requests of each board run one after another. */
+const estimateQueues = new Map<string, Promise<void>>()
+
 const boardPath = (repoKey: string) => `boards/${repoKey.split('/').map(encodeURIComponent).join('/')}`
 
 function staleCurrent(error: ApiError): StoredBoard | null {
   const body = error.body as Partial<StaleBoardResponse> | null
   return body?.current ?? null
+}
+
+function withEstimates(board: BoardConfig, estimates: BoardConfig['estimates']): BoardConfig {
+  const { estimates: _previous, ...rest } = board
+  return estimates ? { ...rest, estimates } : rest
 }
 
 export const useBoards = create<BoardsState>()((set, get) => {
@@ -134,6 +150,24 @@ export const useBoards = create<BoardsState>()((set, get) => {
         saving: false,
         dirty: true,
         saveError: error instanceof Error ? error.message : 'The board could not be saved.',
+      })
+    }
+  }
+
+  const busy = (key: string) => {
+    const entry = get().entries[key]
+    return !!entry && (entry.saving || (entry.dirty && entry.saveError === null))
+  }
+
+  /** Resolves when the board has no save on the wire and no edit waiting for one (a failed save waiting for Retry does not hold it). */
+  async function whenSettled(key: string): Promise<void> {
+    while (busy(key)) {
+      await new Promise<void>((resolve) => {
+        const unsubscribe = useBoards.subscribe(() => {
+          if (busy(key)) return
+          unsubscribe()
+          resolve()
+        })
       })
     }
   }
@@ -201,6 +235,45 @@ export const useBoards = create<BoardsState>()((set, get) => {
       void send(key)
     },
 
+    setEstimate(key, issue, request) {
+      const startedIn = epoch
+      const run = async () => {
+        await whenSettled(key)
+        if (epoch !== startedIn) return
+        const entry = get().entries[key]
+        if (!entry?.stored) throw new Error('The board is not loaded.')
+        const before = entry.stored.board.estimates
+        patch(key, { saving: true, saveError: null })
+        try {
+          const response = request ? await putEstimate(key, issue, request) : await deleteEstimate(key, issue)
+          if (epoch !== startedIn) return
+          const now = get().entries[key]
+          if (now?.dirty && now.board) {
+            // The pending edit did not touch estimates in the usual case, so it takes the server's.
+            const board =
+              now.board.estimates === before ? withEstimates(now.board, response.board.estimates) : now.board
+            patch(key, { stored: response, board, saving: false, status: 'ready' })
+            void send(key)
+          } else {
+            patch(key, { stored: response, board: response.board, saving: false, status: 'ready' })
+          }
+        } catch (error) {
+          if (epoch !== startedIn) return
+          if (error instanceof ApiError && error.status === 409 && error.code === 'stale-board') {
+            const current = staleCurrent(error)
+            adopt(key, current, { kind: current ? 'stale' : 'deleted', by: current?.updatedBy?.username ?? null })
+            return
+          }
+          patch(key, { saving: false })
+          if (get().entries[key]?.dirty) void send(key)
+          throw error
+        }
+      }
+      const queued = (estimateQueues.get(key) ?? Promise.resolve()).then(run)
+      estimateQueues.set(key, queued.catch(() => {}))
+      return queued
+    },
+
     async reloadIfIdle(key) {
       const startedIn = epoch
       const before = get().entries[key]
@@ -243,5 +316,6 @@ onSessionChange(() => {
   epoch += 1
   fullNames.clear()
   createdBoards.clear()
+  estimateQueues.clear()
   useBoards.setState({ entries: {} })
 })

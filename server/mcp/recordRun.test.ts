@@ -62,7 +62,7 @@ describe('record_run', () => {
   test('claims the card, never touches the board version and publishes one card-activity event', async () => {
     const { agent, events, stub } = await setUp()
     const before = await storedBoard()
-    const boardEvents = h.events.length
+    h.events.length = 0
     const out = await ok(agent)
     expect(out).toMatchObject({
       repo: REPO,
@@ -77,7 +77,7 @@ describe('record_run', () => {
     })
     expect(await storedBoard()).toEqual(before)
     expect(events).toEqual([{ type: 'card-activity', data: { repoKey: REPO, issue: 2, clientId: null } }])
-    expect(h.events).toHaveLength(boardEvents)
+    expect(h.events).toEqual([{ type: 'card-activity', data: { repoKey: REPO, issue: 2, clientId: null } }])
     expect(stub.calls).toHaveLength(0)
   })
 
