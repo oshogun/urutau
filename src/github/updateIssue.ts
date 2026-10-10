@@ -394,10 +394,7 @@ export async function updateIssue(call: UpdateIssueCall): Promise<Issue> {
         }
         throw error
       }
-      if (wasStopped()) throw stoppedAfterSend()
-      if (controller.signal.aborted) {
-        throw unknownOutcome(`No answer came from the Urutau server, so the change may have been applied. ${REFRESH_TO_SEE}`)
-      }
+      // Resolving means the route answered 2xx, so the change was applied even when a stop or the time limit cut its body off.
       const issue = parseCreatedIssue(isRecord(answer) ? answer.issue : null)
       if (!issue) throw appliedUnreadable()
       return issue
@@ -409,9 +406,12 @@ export async function updateIssue(call: UpdateIssueCall): Promise<Issue> {
   const url = `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${number}`
   const headers = githubHeaders(token ?? '')
 
-  /** One request's answer, with its body already read: a refused answer carries its detail, an accepted one its JSON. */
+  /**
+   * One request's answer, with its body already read: a refused answer carries its detail, an accepted one its JSON.
+   * `cutOff` is set when a 2xx's headers arrived but a stop or the time limit ended its body.
+   */
   type Sent =
-    | { failed: 'stopped' | 'no-answer' }
+    | { failed: 'stopped' | 'no-answer'; cutOff?: true }
     | { refused: GitHubFailureDetail }
     | { accepted: unknown }
 
@@ -436,7 +436,7 @@ export async function updateIssue(call: UpdateIssueCall): Promise<Issue> {
       } catch {
         // An unreadable body is reported by the caller; an aborted read is detected below.
       }
-      return controller.signal.aborted ? { failed: wasStopped() ? 'stopped' : 'no-answer' } : { accepted: body }
+      return controller.signal.aborted ? { failed: wasStopped() ? 'stopped' : 'no-answer', cutOff: true } : { accepted: body }
     } catch {
       return { failed: wasStopped() ? 'stopped' : 'no-answer' }
     } finally {
@@ -468,6 +468,8 @@ export async function updateIssue(call: UpdateIssueCall): Promise<Issue> {
     WRITE_TIMEOUT_MS,
   )
   if ('failed' in write) {
+    // A 2xx means GitHub applied the change, even if its body was cut off.
+    if (write.cutOff) throw appliedUnreadable()
     if (write.failed === 'stopped') throw stoppedAfterSend()
     throw unknownOutcome(
       offline()

@@ -257,7 +257,7 @@ describe('updateIssue on the browser path', () => {
     expect(methods(fetchMock)).toEqual(['GET', 'GET'])
   })
 
-  it('a stop or the time limit ends a PATCH body that never finishes as an unknown outcome', async () => {
+  it('a stop or the time limit ends a 200 PATCH body that never finishes as applied but unreadable', async () => {
     const stalled = (init?: RequestInit) => {
       const stream = new ReadableStream({
         start(controller) {
@@ -273,12 +273,13 @@ describe('updateIssue on the browser path', () => {
     const first = failure(browser({ signal: stop.signal }))
     await vi.waitFor(() => expect(methods(fetchMock)).toEqual(['GET', 'PATCH']))
     stop.abort()
-    expect(await first).toMatchObject({ kind: 'stopped', outcome: 'unknown' })
+    expect(await first).toMatchObject({ kind: 'applied-unreadable', outcome: 'applied', action: 'refresh' })
 
     vi.useFakeTimers()
     const second = failure(browser())
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(await second).toMatchObject({ kind: 'outcome-unknown', outcome: 'unknown' })
+    expect(await second).toMatchObject({ kind: 'applied-unreadable', outcome: 'applied', action: 'refresh' })
+    expect(methods(fetchMock)).toEqual(['GET', 'PATCH', 'GET', 'PATCH'])
   })
 
   it('encodes the owner and name into both paths', async () => {
@@ -417,23 +418,23 @@ describe('updateIssue on the server path', () => {
     expect(await failure(server())).toMatchObject({ kind: 'applied-unreadable', outcome: 'applied' })
   })
 
-  it('a stop during a 200 body is stopped with an unknown outcome', async () => {
+  it('a stop during a 200 body is applied but unreadable', async () => {
     await start()
     stallBodyOf200()
     const stop = new AbortController()
     const pending = failure(server({ signal: stop.signal }))
     await new Promise((resolve) => setTimeout(resolve, 20))
     stop.abort()
-    expect(await pending).toMatchObject({ kind: 'stopped', outcome: 'unknown', action: 'refresh' })
+    expect(await pending).toMatchObject({ kind: 'applied-unreadable', outcome: 'applied', action: 'refresh' })
   })
 
-  it('the 90 s limit during a 200 body is an unknown outcome', async () => {
+  it('the 90 s limit during a 200 body is applied but unreadable', async () => {
     await start()
     stallBodyOf200()
     vi.useFakeTimers()
     const pending = failure(server())
     await vi.advanceTimersByTimeAsync(90_000)
-    expect(await pending).toMatchObject({ kind: 'outcome-unknown', outcome: 'unknown', action: 'refresh' })
+    expect(await pending).toMatchObject({ kind: 'applied-unreadable', outcome: 'applied', action: 'refresh' })
   })
 
   it('times out after 90 s as an unknown outcome', async () => {
