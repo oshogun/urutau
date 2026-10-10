@@ -368,6 +368,9 @@ export function IssueDetailModal({
     const fields = draftFields
     const stop = new AbortController()
     controller.current = stop
+    // The pressed button is about to be disabled; the title input is only read-only while
+    // sending, so focus waits there.
+    titleRef.current?.focus()
     setSending('edit')
     setNotice(null)
     try {
@@ -393,6 +396,7 @@ export function IssueDetailModal({
       focusTarget.current = 'issue-edit-button'
     } catch (error) {
       const failure = fail(error)
+      focusTarget.current = 'issue-edit-title'
       if (failure.kind === 'stale' && failure.current) {
         const { current } = failure
         remember(current)

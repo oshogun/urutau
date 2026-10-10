@@ -1541,6 +1541,45 @@ describe('App', () => {
       expect(screen.getByRole('button', { name: 'Create issue' })).toBeEnabled()
     })
 
+    it('keeps focus on the title while sending and after GitHub refuses', async () => {
+      const user = userEvent.setup()
+      let release: () => void = () => undefined
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      stubGitHubPost(async () => {
+        await gate
+        return new Response(JSON.stringify({ message: 'Resource not accessible by personal access token' }), { status: 403 })
+      })
+      open()
+      const dialog = await openDialog(user)
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('Fix the build')
+      await user.click(screen.getByRole('button', { name: 'Create issue' }))
+
+      // The pressed button is disabled while the request is out.
+      expect(await screen.findByRole('button', { name: /Creating issue/ })).toBeDisabled()
+      expect(screen.getByLabelText('Title')).toHaveFocus()
+
+      release()
+      expect(await screen.findByText("Couldn't create the issue.")).toBeInTheDocument()
+      await waitFor(() => expect(screen.getByLabelText('Title')).toHaveFocus())
+      expect(dialog).toContainElement(document.activeElement as HTMLElement)
+    })
+
+    it('focuses the title when the issue was created but its answer could not be read', async () => {
+      const user = userEvent.setup()
+      stubGitHubPost(() => new Response('created', { status: 201 }))
+      open()
+      const dialog = await openDialog(user)
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('Fix the build')
+      await user.click(screen.getByRole('button', { name: 'Create issue' }))
+
+      expect(await screen.findByText('The issue was created.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Create issue' })).toBeDisabled()
+      await waitFor(() => expect(screen.getByLabelText('Title')).toHaveFocus())
+      expect(dialog).toContainElement(document.activeElement as HTMLElement)
+    })
+
     it.each([
       ['isComposing', { key: 'Enter', isComposing: true }],
       ['keyCode 229', { key: 'Enter', keyCode: 229 }],

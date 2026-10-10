@@ -1,5 +1,5 @@
 import { ActionableNotification, Modal, Stack, TextArea, TextInput } from '@carbon/react'
-import { useRef, useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { KeycloakButton } from '../components/auth/KeycloakButton'
 import { NEW_ISSUE_BODY_MAX, NEW_ISSUE_TITLE_MAX } from '../domain/api'
 import type { Bucket, Issue } from '../domain/types'
@@ -56,6 +56,8 @@ export function CreateIssueModal({
   const [failure, setFailure] = useState<CreateIssueError | null>(null)
   const inFlight = useRef(false)
   const controller = useRef<AbortController | null>(null)
+  const titleRef = useRef<HTMLInputElement>(null)
+  const refocusTitle = useRef(false)
   const serverPath = useSession((state) => state.session?.githubAccess.mode === 'server')
   const token = useSettings((state) => state.token)
   const noToken = !serverPath && token.trim() === ''
@@ -71,6 +73,9 @@ export function CreateIssueModal({
     inFlight.current = true
     const stop = new AbortController()
     controller.current = stop
+    // The primary button is about to be disabled; the title input is only read-only while
+    // sending, so focus waits there.
+    titleRef.current?.focus()
     setSending(true)
     setFailure(null)
     try {
@@ -82,6 +87,7 @@ export function CreateIssueModal({
       })
       onCreated(issue)
     } catch (error) {
+      refocusTitle.current = true
       setFailure(
         error instanceof CreateIssueError
           ? error
@@ -96,6 +102,14 @@ export function CreateIssueModal({
       setSending(false)
     }
   }
+
+  // After a failure, focus returns to the title input: the primary button may stay disabled, and
+  // focus must not be left on it.
+  useEffect(() => {
+    if (sending || !refocusTitle.current) return
+    refocusTitle.current = false
+    titleRef.current?.focus()
+  }, [sending, failure])
 
   // While a request is out, Esc and the close button stop waiting for it; the dialog stays open
   // to say what is known. Otherwise they close the dialog.
@@ -171,6 +185,7 @@ export function CreateIssueModal({
         )}
         <TextInput
           id="create-issue-title"
+          ref={titleRef}
           labelText="Title"
           value={draft.title}
           readOnly={sending}

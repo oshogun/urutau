@@ -400,6 +400,44 @@ describe('IssueDetailModal changes', () => {
     expect(await screen.findByText('Description changed.')).toBeInTheDocument()
   })
 
+  it('keeps focus on the title while a save is out and after it fails', async () => {
+    let release: (error: Error) => void = () => {}
+    const update = vi.fn(
+      () =>
+        new Promise<Issue>((_resolve, reject) => {
+          release = reject
+        }),
+    )
+    const user = renderModal(update)
+    await user.click(screen.getByRole('button', { name: 'Edit' }))
+    const body = screen.getByRole('textbox', { name: 'Description' })
+    await user.clear(body)
+    await user.type(body, 'New body')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    // The pressed Save button is disabled while the request is out.
+    expect(document.getElementById('issue-edit-title')).toHaveFocus()
+    release(new UpdateIssueError({ kind: 'unreachable', message: 'GitHub could not be reached.' }))
+    expect(await screen.findByText("Couldn't change the issue.")).toBeInTheDocument()
+    await waitFor(() => expect(document.getElementById('issue-edit-title')).toHaveFocus())
+    expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement)
+  })
+
+  it('focuses the title after a save is refused as stale', async () => {
+    const current = makeIssue(1, { title: 'Crash (renamed)', body: 'New body', updatedAt: '2026-01-05T00:00:00Z' })
+    const update = vi.fn().mockRejectedValueOnce(staleError(current))
+    const user = renderModal(update)
+    await user.click(screen.getByRole('button', { name: 'Edit' }))
+    const body = screen.getByRole('textbox', { name: 'Description' })
+    await user.clear(body)
+    await user.type(body, 'My body')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(
+      await screen.findByText('This issue changed on GitHub since you started editing. Nothing was sent.'),
+    ).toBeInTheDocument()
+    await waitFor(() => expect(document.getElementById('issue-edit-title')).toHaveFocus())
+    expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement)
+  })
+
   it('says it is already closed when a state change is refused as stale and the issue moved', async () => {
     const current = makeIssue(1, { state: 'closed', stateReason: 'duplicate', updatedAt: '2026-01-05T00:00:00Z' })
     const update = vi.fn().mockRejectedValueOnce(staleError(current))
