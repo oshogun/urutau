@@ -363,7 +363,7 @@ export interface UpdateIssueCall {
   via: 'browser' | 'server'
   /** The pasted token, browser path only; must be non-empty there. */
   token?: string
-  /** Aborting it ends the wait with kind 'stopped'. */
+  /** Aborting it ends the wait with kind 'stopped', or 'applied-unreadable' when a 2xx answer to the change had already arrived. */
   signal?: AbortSignal
 }
 
