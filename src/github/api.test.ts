@@ -173,6 +173,50 @@ describe('fetchRepoSnapshotDetailed over a fake transport', () => {
     expect(result.closedTruncated).toBe(false)
     expect(result.snapshot.truncated).toBe(true)
   })
+
+  const bothLists = (open: Record<string, unknown>, closed: Record<string, unknown>) =>
+    fakeTransport({
+      '/repos/acme/widgets': () => ok(REPO_BODY),
+      '/repos/acme/widgets/issues': (url) =>
+        ok(url.searchParams.get('state') === 'open' ? [ghIssue(1), ghIssue(5, open)] : [ghIssue(5, closed)]),
+    }).transport
+
+  it('keeps an issue on both lists once, the closed copy when it is newer', async () => {
+    const transport = bothLists(
+      { updated_at: '2026-10-01T00:00:00Z' },
+      { state: 'closed', closed_at: '2026-10-02T11:00:00Z', updated_at: '2026-10-02T11:00:00Z' },
+    )
+    const result = await fetchRepoSnapshotDetailed(
+      { owner: 'acme', name: 'widgets' },
+      { closedWindowDays: 14, transport, labels: false, now: () => NOW },
+    )
+    expect(result.snapshot.issues.map((issue) => [issue.number, issue.state])).toEqual([
+      [1, 'open'],
+      [5, 'closed'],
+    ])
+  })
+
+  it('keeps the closed copy on a tie and the open copy when it is newer', async () => {
+    const closed = { state: 'closed', closed_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z' }
+    const options = { closedWindowDays: 14, labels: false, now: () => NOW }
+    const tie = await fetchRepoSnapshotDetailed(
+      { owner: 'acme', name: 'widgets' },
+      { ...options, transport: bothLists({ updated_at: '2026-10-01T00:00:00Z' }, closed) },
+    )
+    expect(tie.snapshot.issues.map((issue) => [issue.number, issue.state])).toEqual([
+      [1, 'open'],
+      [5, 'closed'],
+    ])
+
+    const reopened = await fetchRepoSnapshotDetailed(
+      { owner: 'acme', name: 'widgets' },
+      { ...options, transport: bothLists({ updated_at: '2026-10-02T11:00:00Z' }, closed) },
+    )
+    expect(reopened.snapshot.issues.map((issue) => [issue.number, issue.state])).toEqual([
+      [1, 'open'],
+      [5, 'open'],
+    ])
+  })
 })
 
 describe('toIssue and the issue body', () => {

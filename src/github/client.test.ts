@@ -48,6 +48,19 @@ describe('getJson', () => {
     expect(headersOf(fetchMock).Authorization).toBe('Bearer secret')
   })
 
+  it('asks the browser to check its cached copy with GitHub on every read', async () => {
+    const fetchMock = mockFetch(json({ ok: true }))
+    await getJson('/repos/a/b', { token: 'secret' })
+    expect(fetchMock.mock.calls[0][1]?.cache).toBe('no-cache')
+  })
+
+  it('leaves the cache option off the request to the Urutau server', async () => {
+    const fetchMock = mockFetch(json({ ok: true }))
+    await getJson('/repos/a/b', { via: 'server' })
+    expect(fetchMock.mock.calls[0][1]?.cache).toBeUndefined()
+    expect(fetchMock.mock.calls[0][1]?.credentials).toBe('same-origin')
+  })
+
   it('omits the authorization header without a token', async () => {
     const fetchMock = mockFetch(json({ ok: true }))
     await getJson('/repos/a/b', {})

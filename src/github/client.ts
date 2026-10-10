@@ -78,7 +78,12 @@ async function request(url: string, { token, signal, via }: RequestOptions): Pro
 
   let response: Response
   try {
-    response = await fetch(url, server ? { headers, signal, credentials: 'same-origin' } : { headers, signal })
+    // GitHub sends `max-age=60` on issue lists. On the browser path, `no-cache` makes the browser ask GitHub
+    // every time (with its stored ETag) instead of answering from its HTTP cache.
+    response = await fetch(
+      url,
+      server ? { headers, signal, credentials: 'same-origin' } : { headers, signal, cache: 'no-cache' },
+    )
   } catch (error) {
     if (signal?.aborted) throw error
     throw new GitHubError('network', 0, 'Could not reach GitHub. Check your connection and try again.')

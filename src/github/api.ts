@@ -105,7 +105,7 @@ export async function fetchRepoSnapshotDetailed(
     snapshot: {
       repository: toRepository(repository),
       labels: labels.items.map(toLabel).sort((a, b) => a.name.localeCompare(b.name)),
-      issues: [...open.items, ...recentlyClosed].filter(isIssue).map((item) => toIssue(item, withBodies)),
+      issues: withoutDuplicates(open.items, recentlyClosed).filter(isIssue).map((item) => toIssue(item, withBodies)),
       truncated: open.truncated || closed.truncated,
       fetchedAt: now(),
     },
@@ -118,6 +118,23 @@ export async function fetchRepoSnapshotDetailed(
 
 export async function fetchRepoSnapshot(repo: RepoRef, options: SnapshotOptions): Promise<RepoSnapshot> {
   return (await fetchRepoSnapshotDetailed(repo, options)).snapshot
+}
+
+/**
+ * Open items followed by closed items, with each number kept once. The two lists are read in parallel, so an
+ * issue closed or reopened between the two requests is on both. The copy with the later `updated_at` is kept;
+ * on a tie, the closed copy is kept.
+ */
+function withoutDuplicates(open: GhIssue[], closed: GhIssue[]): GhIssue[] {
+  const closedByNumber = new Map(closed.map((item) => [item.number, item]))
+  const openNumbers = new Set<number>()
+  const keptOpen = open.filter((item) => {
+    const other = closedByNumber.get(item.number)
+    if (other && Date.parse(other.updated_at) >= Date.parse(item.updated_at)) return false
+    openNumbers.add(item.number)
+    return true
+  })
+  return [...keptOpen, ...closed.filter((item) => !openNumbers.has(item.number))]
 }
 
 function isIssue(item: GhIssue): boolean {
