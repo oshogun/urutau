@@ -964,6 +964,66 @@ describe('App', () => {
       expect(screen.queryByText(/It is shown only now/)).not.toBeInTheDocument()
     })
 
+    it('drops the token of an integration removed elsewhere, and does not show it above a later list error', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner, second] })
+      const secret = (await issueToken(user)).textContent ?? ''
+      await waitFor(() => expect(stub.requests('GET integrations')).toHaveLength(2))
+
+      stub.integrations.splice(stub.integrations.findIndex((i) => i.username === 'planner-bot'), 1)
+      await queryClient.invalidateQueries({ queryKey: INTEGRATIONS_QUERY_KEY })
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Show details of planner-bot' })).not.toBeInTheDocument())
+      expect(screen.queryByText(secret)).not.toBeInTheDocument()
+      expect(screen.queryByText(/It is shown only now/)).not.toBeInTheDocument()
+      await waitFor(() => expect(document.activeElement).not.toBe(document.body))
+
+      stub.failNext('GET integrations', listDown)
+      await queryClient.invalidateQueries({ queryKey: INTEGRATIONS_QUERY_KEY })
+      await screen.findByText('Could not load the integrations.')
+      expect(screen.queryByText(secret)).not.toBeInTheDocument()
+      expect(screen.queryByText(/It is shown only now/)).not.toBeInTheDocument()
+      expect(document.activeElement).not.toBe(document.body)
+    })
+
+    it('drops the shown token when it is revoked elsewhere', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      const secret = (await issueToken(user)).textContent ?? ''
+      await waitFor(() => expect(stub.requests('GET integrations')).toHaveLength(2))
+      // The next list must be fetched in a later millisecond than the create.
+      await new Promise((resolve) => setTimeout(resolve, 5))
+
+      stub.integrations[0].tokens.splice(0, 1)
+      await queryClient.invalidateQueries({ queryKey: INTEGRATIONS_QUERY_KEY })
+      await waitFor(() => expect(screen.queryByText(secret)).not.toBeInTheDocument())
+      expect(screen.queryByText(/It is shown only now/)).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Show details of planner-bot' })).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByLabelText('Token name')).toBeInTheDocument()
+      expect(document.activeElement).not.toBe(document.body)
+    })
+
+    it('keeps a fresh token through its own reload, while that reload is pending and after', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+      await user.type(await screen.findByLabelText('Token name'), 'laptop')
+      const gate = stub.hold('GET integrations')
+      await user.click(screen.getByRole('button', { name: 'Create token' }))
+
+      const secret = await screen.findByText(/^urutau_mcp_A+\d$/)
+      const text = secret.textContent ?? ''
+      await waitFor(() => expect(secret.closest('.users__link')).toHaveFocus())
+      await waitFor(() => expect(stub.requests('GET integrations')).toHaveLength(2))
+      expect(screen.getByText(text)).toBeInTheDocument()
+
+      gate.release()
+      await waitFor(() => expect(screen.getByRole('button', { name: /^Revoke token laptop/ })).toBeInTheDocument())
+      await act(async () => {})
+      const tile = screen.getByText(text).closest('.users__link')
+      expect(tile).toHaveFocus()
+      expect(screen.getAllByText(/It is shown only now/)).toHaveLength(1)
+    })
+
     it('does not bring the shown token back after a new integration opens its own row', { timeout: 15_000 }, async () => {
       const user = userEvent.setup()
       renderApp('?view=users', { integrations: [planner] })

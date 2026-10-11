@@ -263,6 +263,8 @@ interface IssuedToken {
   tokenId: string
   label: string
   secret: string
+  /** Date.now() when the create call answered, compared with the list's dataUpdatedAt. */
+  createdAt: number
 }
 
 interface IssuedTileProps {
@@ -310,8 +312,10 @@ interface DetailsProps {
 /**
  * The expanded row: tokens, GitHub token and repositories. The shown-once secret lives only in
  * the section's state (passed in as `issued`). The section discards it when its row closes, when
- * another row or a new integration opens, when the token is revoked or its integration removed,
- * when a newer create starts (the answer to an older create is then dropped, by request number),
+ * another row or a new integration opens, when the token is revoked or its integration removed
+ * from this page, when a newer create starts (the answer to an older create is then dropped, by
+ * request number), when a successful list no longer contains its integration (the row closes
+ * too), when a successful list fetched after the token was created no longer contains the token,
  * and when the page is left. The call that creates the token is made directly instead of through
  * a mutation, because a mutation keeps its response in the query client's mutation cache.
  */
@@ -356,6 +360,7 @@ function IntegrationDetails({
         tokenId: response.token.id,
         label: response.token.label,
         secret: response.secret,
+        createdAt: Date.now(),
       })
       setLabel('')
       onChanged()
@@ -838,6 +843,34 @@ export function IntegrationsSection() {
     document.addEventListener('focusin', track)
     return () => document.removeEventListener('focusin', track)
   }, [])
+  // A successful list that no longer contains the shown token's integration (removed elsewhere)
+  // discards the secret and closes the row. A successful list fetched after the token was created
+  // that no longer contains the token (revoked elsewhere) discards the secret and leaves the row
+  // open. A list fetched before the create, or one being replaced by a fetch, is not compared.
+  // The state is set during render, so the tile is never committed with a list that lacks it.
+  const [dropped, setDropped] = useState<{ rowRemoved: boolean } | null>(null)
+  const owner = issued ? list.find((item) => item.id === issued.integrationId) : undefined
+  if (
+    issued &&
+    integrations.isSuccess &&
+    !integrations.isFetching &&
+    (!owner ||
+      (!owner.tokens.some((token) => token.id === issued.tokenId) &&
+        integrations.dataUpdatedAt > issued.createdAt))
+  ) {
+    setIssued(null)
+    if (!owner) setExpanded(null)
+    setDropped({ rowRemoved: !owner })
+  }
+  // After a drop, a token request for the removed row is no longer accepted. If focus was in the
+  // tile, or has fallen to the page, it goes to the heading.
+  useEffect(() => {
+    if (!dropped) return
+    if (dropped.rowRemoved) openRow.current = null
+    const active = document.activeElement
+    if (tileFocused.current || !active || active === document.body) heading.current?.focus()
+    tileFocused.current = false
+  }, [dropped])
   // When the list recovers, the tile moves from above the error notice into its details row, a
   // new element. If focus was in the tile, it goes to the tile in its new place.
   const wasError = useRef(false)
