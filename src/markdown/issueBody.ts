@@ -51,24 +51,32 @@ const DASH_RUN = /-+/g
 
 /**
  * An upper bound on the table cells (header and body cells) markdown-it emits for `source`,
- * computed without parsing, in one pass over its lines. Never smaller than the real count.
- * Each line that could be a table's delimiter row (only `|`, `-`, `:`, spaces and tabs after its
- * container prefix, preceded by a line with `|`) counts its columns times the rows that may
- * follow it, up to the next blank line.
+ * computed without parsing, in one pass over its lines. Never smaller than the real count, and
+ * at most the number of lines times the widest delimiter row. A line that could be a table's
+ * delimiter row has only `|`, `-`, `:`, spaces and tabs after its container prefix, and follows a
+ * line with `|`; its columns are its runs of `-`. A table ends at a blank line, every line is a
+ * row of at most one table, and a row has as many cells as its table's delimiter row has columns.
+ * So each line counts the widest delimiter row seen since the last blank line, and each delimiter
+ * row also counts its own columns once, for the header line above it.
  */
 export function estimateTableCells(source: string): number {
   const lines = source.split(LINE_BREAK)
   let total = 0
-  // Number of consecutive lines after line i whose trim() is not empty.
-  let rowsAfter = 0
-  for (let i = lines.length - 1; i >= 1; i--) {
+  // Columns of the widest delimiter row since the last line whose trim() is empty.
+  let width = 0
+  for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    const rest = line.replace(CONTAINER_PREFIX, '')
-    if (rest.includes('-') && DELIMITER_ROW.test(rest) && lines[i - 1].includes('|')) {
-      const columns = (rest.match(DASH_RUN) ?? []).length
-      total += columns * (1 + rowsAfter)
+    if (line.trim() === '') {
+      width = 0
+      continue
     }
-    rowsAfter = line.trim() === '' ? 0 : rowsAfter + 1
+    total += width
+    const rest = line.replace(CONTAINER_PREFIX, '')
+    if (i >= 1 && rest.includes('-') && DELIMITER_ROW.test(rest) && lines[i - 1].includes('|')) {
+      const columns = (rest.match(DASH_RUN) ?? []).length
+      total += columns
+      width = Math.max(width, columns)
+    }
   }
   return total
 }
@@ -86,9 +94,52 @@ function cutPoint(text: string, room: number): number {
   return isHighSurrogate(text.charCodeAt(room - 1)) ? room - 1 : room
 }
 
+// Decodes the character references (`&amp;`, `&#38;`, `&#x26;`) in `text` and nothing else: the
+// text is split at backslashes so that unescapeAll never sees a backslash escape.
+function decodeEntities(text: string): string {
+  return text.split('\\').map(md.utils.unescapeAll).join('\\')
+}
+
+const isTagSpace = (char: string): boolean =>
+  char === ' ' || char === '\t' || char === '\n' || char === '\r' || char === '\f'
+
+// The value of the attribute `name` (any case) in the start tag `tag`, with its character
+// references decoded, or null when the tag has no such attribute. The attributes are read in
+// order, so text inside a quoted value is never read as an attribute name. A value with no closing
+// quote runs to the end of the tag.
 function attr(tag: string, name: string): string | null {
-  const match = new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\`]+))`, 'i').exec(tag)
-  return match ? (match[1] ?? match[2] ?? match[3] ?? '') : null
+  const wanted = name.toLowerCase()
+  let i = 1
+  while (i < tag.length && !isTagSpace(tag[i]) && tag[i] !== '/' && tag[i] !== '>') i++
+  while (i < tag.length) {
+    if (isTagSpace(tag[i]) || tag[i] === '/') {
+      i++
+      continue
+    }
+    if (tag[i] === '>') break
+    const nameStart = i
+    while (i < tag.length && !isTagSpace(tag[i]) && tag[i] !== '=' && tag[i] !== '>' && tag[i] !== '/') i++
+    const found = tag.slice(nameStart, i).toLowerCase()
+    while (i < tag.length && isTagSpace(tag[i])) i++
+    let value = ''
+    if (tag[i] === '=') {
+      i++
+      while (i < tag.length && isTagSpace(tag[i])) i++
+      const quote = tag[i]
+      if (quote === '"' || quote === "'") {
+        const close = tag.indexOf(quote, i + 1)
+        const end = close === -1 ? tag.length : close
+        value = tag.slice(i + 1, end)
+        i = end + 1
+      } else {
+        const valueStart = i
+        while (i < tag.length && !isTagSpace(tag[i]) && tag[i] !== '>') i++
+        value = tag.slice(valueStart, i)
+      }
+    }
+    if (found === wanted) return decodeEntities(value)
+  }
+  return null
 }
 
 // The index of the `>` that ends a tag starting before `from`, or -1 when a `<` or the end of the
@@ -101,9 +152,10 @@ function tagEndFrom(html: string, from: number): number {
   return -1
 }
 
-// The text of an HTML fragment with its comments and tags removed. One left-to-right pass: an
-// unterminated comment ends the text, a tag end is searched only up to the next `<`, and a `<`
-// with no tag end is kept as text.
+// The text of an HTML fragment with its comments and tags removed and its character references
+// decoded. One left-to-right pass: an unterminated comment ends the text, a tag end is searched
+// only up to the next `<`, and a `<` with no tag end is kept as text. The references are decoded
+// after the tags are removed, so `&lt;b&gt;` stays as text.
 function visibleText(html: string): string {
   let out = ''
   let at = 0
@@ -128,7 +180,7 @@ function visibleText(html: string): string {
       }
     }
   }
-  return out
+  return decodeEntities(out)
 }
 
 type HtmlEvent = { kind: 'summary'; text: string } | { kind: 'img'; tag: string }
@@ -200,8 +252,33 @@ function cutAlt(text: string): string {
 
 type ImageNode = Extract<BodyInline, { type: 'image' }>
 
+// An image with no address, or a blank one, gets no href: resolving '' would give the issue's own address.
 function imageNode(src: string | null, alt: string | null, insideLink: boolean, base: string): ImageNode {
-  return { type: 'image', alt: cutAlt(alt ?? ''), href: insideLink ? null : safeHref(src ?? '', base) }
+  const href = insideLink || src === null || src.trim() === '' ? null : safeHref(src, base)
+  return { type: 'image', alt: cutAlt(alt ?? ''), href }
+}
+
+// A Markdown image's alt text built from its label's tokens, as markdown-it's renderInlineAsText
+// builds it: the text without the emphasis and code marks, with character references decoded.
+function imageAltText(tokens: Token[]): string {
+  let out = ''
+  for (const token of tokens) {
+    switch (token.type) {
+      case 'text':
+      case 'text_special':
+      case 'code_inline':
+      case 'html_inline':
+        out += token.content
+        break
+      case 'image':
+        out += imageAltText(token.children ?? [])
+        break
+      case 'softbreak':
+      case 'hardbreak':
+        out += '\n'
+    }
+  }
+  return out
 }
 
 function tokenAttr(token: Token, name: string): string | null {
@@ -358,7 +435,7 @@ function inlineNodes(tokens: Token[], base: string, writer: InlineWriter, nodes:
         linkDepth = Math.max(0, linkDepth - 1)
         break
       case 'image':
-        writer.image(imageNode(tokenAttr(token, 'src'), token.content, linkDepth > 0, base))
+        writer.image(imageNode(tokenAttr(token, 'src'), imageAltText(token.children ?? []), linkDepth > 0, base))
         break
       case 'html_inline': {
         const value = token.content.trim()
@@ -380,6 +457,8 @@ const ALIGN: Record<string, BodyTableCell['align']> = {
   'text-align:right': 'right',
 }
 const TASK = /^\[([ xX])\](?: |$)/
+// TASK for a paragraph's raw Markdown, where the marker can be followed by a line break (`[x]\nfoo`).
+const TASK_SOURCE = /^\[[ xX]\](?:\s|$)/
 
 // The plain-text fallback, under its own node budget: one paragraph of the source's lines.
 function plainText(source: string): { blocks: BodyBlock[]; stopped: boolean } {
@@ -419,6 +498,9 @@ function convert(tokens: Token[], issueUrl: string, nodes: Budget): { blocks: Bo
     return true
   }
   let pending: InlineTarget | null = null
+  // The paragraphs whose raw Markdown starts with a task marker. The raw text keeps the backslash
+  // of an escaped `\[x]`, which the paragraph's first text node no longer has.
+  const taskSources = new WeakSet<InlineTarget>()
   for (const token of tokens) {
     if (nodes.stopped) break
     switch (token.type) {
@@ -457,6 +539,7 @@ function convert(tokens: Token[], issueUrl: string, nodes: Budget): { blocks: Bo
         break
       }
       case 'inline':
+        if (pending && TASK_SOURCE.test(token.content)) taskSources.add(pending)
         if (pending) inlineNodes(token.children ?? [], issueUrl, inlineWriter(pending, nodes), nodes)
         pending = null
         break
@@ -501,7 +584,7 @@ function convert(tokens: Token[], issueUrl: string, nodes: Budget): { blocks: Bo
         if (frame?.kind !== 'item') break
         const first = frame.item.children[0]
         const firstInline = first?.type === 'paragraph' ? first.children[0] : undefined
-        if (first?.type === 'paragraph' && firstInline?.type === 'text') {
+        if (first?.type === 'paragraph' && taskSources.has(first) && firstInline?.type === 'text') {
           const match = TASK.exec(firstInline.text)
           if (match) {
             frame.item.task = match[1] === ' ' ? 'open' : 'done'
@@ -602,8 +685,11 @@ export function parseIssueBody(body: string, issueUrl: string): ParsedBody {
     const tablesAsText = estimateTableCells(source) > TABLE_CELLS_MAX
     const nodes = budget(BODY_NODES_MAX)
     const tokens = (tablesAsText ? mdNoTables : md).parse(source, {})
+    // When it reaches maxNesting inside a list item, markdown-it stops reading the item's range,
+    // which runs to the end of the body, so every block after the list is missing.
+    const listCut = tokens.some((token) => token.type === 'list_item_open' && token.level >= BLOCK_NESTING_MAX - 1)
     const { blocks, omittedHtml } = convert(tokens, issueUrl, nodes)
-    return { blocks, omittedHtml, truncated: cutShort || nodes.stopped, tablesAsText }
+    return { blocks, omittedHtml, truncated: cutShort || nodes.stopped || listCut, tablesAsText }
   } catch {
     const fallback = plainText(source)
     return { blocks: fallback.blocks, omittedHtml: false, truncated: cutShort || fallback.stopped, tablesAsText: false }

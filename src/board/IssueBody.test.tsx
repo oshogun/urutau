@@ -134,6 +134,19 @@ describe('IssueBody', () => {
       expect(container.querySelector('img')).toBeNull()
     })
 
+    it('shows an image with no address as its label, and links an img by its real src', async () => {
+      renderBody(
+        ['![x]()', '<img alt="y src=https://evil.example/e.png" src="https://good.example/g.png">'].join('\n\n'),
+      )
+      const label = await screen.findByText('Image: x')
+      expect(label.tagName).toBe('SPAN')
+      expect(label.closest('a')).toBeNull()
+      expect(screen.getByRole('link', { name: 'Image: y src=https://evil.example/e.png' })).toHaveAttribute(
+        'href',
+        'https://good.example/g.png',
+      )
+    })
+
     it('renders unsafe link forms as text with no anchor', async () => {
       const { container } = renderBody(
         [
@@ -213,6 +226,27 @@ describe('IssueBody', () => {
       expect(open.closest('p.issue-body__tight')).toHaveTextContent('todo')
       expect(screen.getByLabelText('Done').closest('li')).toHaveClass('issue-body__task')
       expect(container.querySelectorAll('li')).toHaveLength(2)
+    })
+
+    it('gives a list that starts at 0 start="0", and one that starts at 1 no start', async () => {
+      const { container } = renderBody('0. a\n1. b\n\ntext\n\n1. c\n2. d')
+      await screen.findByText('c')
+      const lists = container.querySelectorAll('ol')
+      expect(lists[0]).toHaveAttribute('start', '0')
+      expect(lists[1]).not.toHaveAttribute('start')
+    })
+
+    it('shows a task icon for a task marker followed by a line break', async () => {
+      renderBody('- [x]\n  foo\n- [ ]\n  bar')
+      expect((await screen.findByLabelText('Done')).closest('li')).toHaveTextContent('foo')
+      expect(screen.getByLabelText('Not done').closest('li')).toHaveTextContent('bar')
+    })
+
+    it('shows an escaped \\[x] as text, with no task icon', async () => {
+      renderBody('- \\[x] foo')
+      expect(await screen.findByText('[x] foo')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Done')).toBeNull()
+      expect(screen.queryByLabelText('Not done')).toBeNull()
     })
 
     it('keeps the paragraphs of a tight item on separate lines', async () => {

@@ -11,7 +11,12 @@ export const HREF_MAX = 2_048
 /** Image descriptions longer than this many code points are cut and end with an ellipsis (U+2026). */
 export const ALT_MAX = 100
 
-/** Passed to markdown-it as `maxNesting`: block content nested deeper than this (lists, quotes) is not read. */
+/**
+ * Passed to markdown-it as `maxNesting`: block content nested deeper than this (lists, quotes) is
+ * not read. A quote nested this deep loses only its own deeper content. Each list level takes two
+ * levels (the list and its item), and when a list item's content reaches this depth markdown-it skips
+ * the rest of the enclosing range, which is the rest of the body; `truncated` is then set.
+ */
 export const BLOCK_NESTING_MAX = 20
 
 /** Inside one paragraph, heading or cell, emphasis, strong, strikethrough and links nested deeper than this keep their text and lose their formatting. */
@@ -100,7 +105,9 @@ export interface ParsedBody {
   omittedHtml: boolean
   /**
    * True when only the start of the body is in `blocks`: the body was longer than
-   * BODY_RENDER_LIMIT, or the converter reached BODY_NODES_MAX.
+   * BODY_RENDER_LIMIT, the converter reached BODY_NODES_MAX, or a list was nested
+   * BLOCK_NESTING_MAX / 2 levels deep, so markdown-it did not read the rest of the body (for a
+   * list inside a quote, only the rest of the quote is missing).
    */
   truncated: boolean
   /** True when the body was parsed with tables turned off because its estimate passed TABLE_CELLS_MAX. */

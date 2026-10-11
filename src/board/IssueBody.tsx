@@ -195,7 +195,7 @@ function renderBlock(block: BodyBlock, key: number, tight = false, lead?: ReactN
     case 'list': {
       const items = block.items.map((item, index) => renderListItem(item, index, block.tight))
       return block.ordered ? (
-        <ol key={key} start={block.start && block.start !== 1 ? block.start : undefined}>
+        <ol key={key} start={block.start !== null && block.start !== 1 ? block.start : undefined}>
           {items}
         </ol>
       ) : (

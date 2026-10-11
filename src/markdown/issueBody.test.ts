@@ -17,6 +17,14 @@ const parse = (body: string) => parseIssueBody(body, ISSUE_URL)
 
 const isHigh = (code: number) => code >= 0xd800 && code <= 0xdbff
 
+// A 2-column table whose 100 body rows are all `-`; markdown-it emits 202 cells for it.
+const DASH_ROWS_TABLE = '| a | b |\n| - | - |\n' + '| - | - |\n'.repeat(100)
+
+// A list with `marker` items nested `levels` deep, followed by a paragraph and a heading.
+const nestedList = (levels: number, marker: string) =>
+  Array.from({ length: levels }, (_, i) => ' '.repeat(3 * i) + marker + ' level ' + i).join('\n') +
+  '\n\nAFTER THE LIST\n\n# Heading after\n'
+
 // Repeats `unit` to `length` code units, dropping a last unit that would leave half a surrogate pair.
 function fit(unit: string, length: number): string {
   const text = unit.repeat(Math.ceil(length / unit.length)).slice(0, length)
@@ -217,6 +225,9 @@ describe('estimateTableCells', () => {
     'delimiter rows as body rows': 'a|b\n-|-\n-|-\n-|-\n-|-',
     'fence holding a table': '```\na|b\n-|-\n1|2\n```',
     'alignment row': '|a|b|c|\n|:-|:-:|-:|\n|1|2|3|',
+    'body rows of dashes': DASH_ROWS_TABLE,
+    'delimiter-shaped row every tenth row': '|a|b|c|d|e|\n|-|-|-|-|-|\n' +
+      Array.from({ length: 200 }, (_, i) => (i % 10 === 9 ? '|---|---|---|---|---|' : '|1|2|3|4|5|')).join('\n'),
   }
   const reference = new MarkdownIt('default', { html: true, linkify: true, typographer: false, maxNesting: 20 })
   const cells = (body: string) =>
@@ -232,6 +243,11 @@ describe('estimateTableCells', () => {
     expect(estimateTableCells(REVIEW_TABLE)).toBe(69_300)
     expect(estimateTableCells(TABLE_CASES['plain table'])).toBe(6)
     expect(estimateTableCells(TABLE_CASES['fence holding a table'])).toBe(6)
+  })
+
+  it('grows with the number of rows, not their square, for body rows of dashes (402)', () => {
+    expect(estimateTableCells(DASH_ROWS_TABLE)).toBe(402)
+    expect(estimateTableCells(DASH_ROWS_TABLE)).toBeLessThanOrEqual(TABLE_CELLS_MAX)
   })
 
   it('is 0 for text with no table', () => {
@@ -312,6 +328,43 @@ describe('parseIssueBody: untrusted input', () => {
     ])
   })
 
+  it('reads img attributes in order, so src= inside another quoted value is not the address', () => {
+    const tag = '<img alt="x src=https://evil.example/e.png" src="https://good.example/g.png">'
+    expect(firstParagraph(parse(tag))).toEqual([
+      { type: 'image', alt: 'x src=https://evil.example/e.png', href: 'https://good.example/g.png' },
+    ])
+    expect(firstParagraph(parse(`a ${tag} b`))[1]).toEqual({
+      type: 'image',
+      alt: 'x src=https://evil.example/e.png',
+      href: 'https://good.example/g.png',
+    })
+    expect(firstParagraph(parse("<img title='src=https://evil.example/' SRC=https://good.example/u.png>"))).toEqual([
+      { type: 'image', alt: '', href: 'https://good.example/u.png' },
+    ])
+  })
+
+  it('decodes character references in img attributes and keeps backslashes', () => {
+    const tag = '<img alt="Tom &amp; Jerry &#38; &#x26; a\\b" src="https://a.example/i.png?x=1&amp;y=2">'
+    expect(firstParagraph(parse(tag))).toEqual([
+      { type: 'image', alt: 'Tom & Jerry & & a\\b', href: 'https://a.example/i.png?x=1&y=2' },
+    ])
+  })
+
+  it('gives an image with no address or a blank one no href', () => {
+    expect(firstParagraph(parse('![x]()'))).toEqual([{ type: 'image', alt: 'x', href: null }])
+    expect(firstParagraph(parse('<img alt="pic">'))).toEqual([{ type: 'image', alt: 'pic', href: null }])
+    expect(firstParagraph(parse('<img src="  " alt="pic">'))).toEqual([{ type: 'image', alt: 'pic', href: null }])
+  })
+
+  it("builds a Markdown image's alt from the text of its label, like markdown-it's renderer", () => {
+    expect(firstParagraph(parse('![**bold** &amp; `code`](x.png)'))).toEqual([
+      { type: 'image', alt: 'bold & code', href: 'https://github.com/acme/widgets/issues/x.png' },
+    ])
+    expect(firstParagraph(parse('![Tom &amp; Jerry](x.png)'))).toEqual([
+      { type: 'image', alt: 'Tom & Jerry', href: 'https://github.com/acme/widgets/issues/x.png' },
+    ])
+  })
+
   it('does not nest an image address inside a link', () => {
     const children = firstParagraph(parse('[![build](https://img.shields.io/badge/x.svg)](https://ci.example.com/run/1)'))
     expect(children).toEqual([
@@ -345,6 +398,14 @@ describe('parseIssueBody: untrusted input', () => {
     expect(summaryText('a < b <i>c</i>')).toEqual({ type: 'text', text: 'a < b c' })
   })
 
+  it('decodes character references in a summary after cutting its tags', () => {
+    const block = parse('<details><summary>Logs &amp; traces &lt;b&gt;</summary>\n\nbody\n\n</details>').blocks[0]
+    expect(block).toEqual({
+      type: 'paragraph',
+      children: [{ type: 'strong', children: [{ type: 'text', text: 'Logs & traces <b>' }] }],
+    })
+  })
+
   it('resolves relative links like the issue page', () => {
     const hrefs = (body: string) => links(firstParagraph(parse(body))).map((link) => link.href)
     expect(hrefs('[docs](../wiki/Install)')).toEqual(['https://github.com/acme/widgets/wiki/Install'])
@@ -360,6 +421,21 @@ describe('parseIssueBody: untrusted input', () => {
     expect(list.items.map((item) => item.task)).toEqual(['open', 'done', 'done', null, 'open'])
     expect(list.items[0].children[0]).toEqual({ type: 'paragraph', children: [{ type: 'text', text: 'todo' }] })
     expect(list.items[4].children[0]).toEqual({ type: 'paragraph', children: [] })
+  })
+
+  it('reads a task marker followed by a line break', () => {
+    const list = parse('- [x]\n  foo\n- [ ]\n  bar').blocks[0]
+    if (list?.type !== 'list') throw new Error('expected a list')
+    expect(list.items.map((item) => item.task)).toEqual(['done', 'open'])
+  })
+
+  it('does not read an escaped \\[x] as a task', () => {
+    const list = parse('- \\[x] foo\n- \\[ ] bar').blocks[0]
+    if (list?.type !== 'list') throw new Error('expected a list')
+    expect(list.items).toEqual([
+      { task: null, children: [{ type: 'paragraph', children: [{ type: 'text', text: '[x] foo' }] }] },
+      { task: null, children: [{ type: 'paragraph', children: [{ type: 'text', text: '[ ] bar' }] }] },
+    ])
   })
 
   it('keeps the paragraphs of a tight list item apart (6 nodes)', () => {
@@ -387,6 +463,7 @@ describe('parseIssueBody: untrusted input', () => {
   it('reads the start of an ordered list', () => {
     const list = parse('3. three\n\n4. four').blocks[0]
     expect(list).toMatchObject({ type: 'list', ordered: true, start: 3, tight: false })
+    expect(parse('0. a\n1. b').blocks[0]).toMatchObject({ type: 'list', ordered: true, start: 0 })
   })
 
   it('renders a body of 100,000 characters whole, without the truncated flag', () => {
@@ -411,6 +488,26 @@ describe('parseIssueBody: untrusted input', () => {
     }
     expect(depth).toBeLessThanOrEqual(20)
     expect(depth).toBeGreaterThan(10)
+  })
+
+  it('reads the blocks after a list nested 9 deep, and sets truncated when the list is nested 10 deep', () => {
+    const nine = parse(nestedList(9, '-'))
+    expect(nine.blocks.map((block) => block.type)).toEqual(['list', 'paragraph', 'heading'])
+    expect(nine.truncated).toBe(false)
+    for (const marker of ['-', '1.']) {
+      const ten = parse(nestedList(10, marker))
+      expect(ten.blocks.map((block) => block.type)).toEqual(['list'])
+      expect(ten.truncated).toBe(true)
+    }
+  })
+
+  it('parses a table whose body rows are all dashes as a table', () => {
+    const parsed = parse(DASH_ROWS_TABLE)
+    expect(parsed.tablesAsText).toBe(false)
+    expect(parsed.truncated).toBe(false)
+    const table = parsed.blocks[0]
+    if (table?.type !== 'table') throw new Error('expected a table')
+    expect(table.body).toHaveLength(100)
   })
 
   it('parses an ordinary table with its alignment', () => {
