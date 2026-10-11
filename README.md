@@ -163,8 +163,9 @@ rest of `src/github` is browser code.)
 Or with Docker: `docker compose up -d --build` builds the image and runs it with a SQLite database
 in a named volume (`<project>_urutau-data`, `urutau_urutau-data` by default), published on
 `127.0.0.1:8787` (`URUTAU_HOST_PORT` changes the host port). The image listens on `0.0.0.0:8080`
-inside the container and runs as the `node` user. `TOKEN_ENCRYPTION_KEY` is passed through to the
-container if it is set in the shell or in a `.env` file.
+inside the container and runs as the `node` user. `TOKEN_ENCRYPTION_KEY` and `DATABASE_URL` are passed
+through to the container if they are set in the shell or in a `.env` file; without `DATABASE_URL`
+the container uses SQLite in the `/data` volume.
 
 Released images are published at `ghcr.io/oshogun/urutau`, tagged with the version (`X.Y.Z`):
 
@@ -378,7 +379,7 @@ export and is kept when the file is imported into another repository.
 Urutau serves a [Model Context Protocol](https://modelcontextprotocol.io/) endpoint at
 `<PUBLIC_URL>/mcp` (`http://127.0.0.1:8787/mcp` on a default local start).
 It takes JSON-RPC requests over HTTP `POST`; a request it accepts is answered as a
-`text/event-stream`, and a refused one (400, 401, 403, 405, 406, 413, 415, 429, 503) as JSON. It offers five tools:
+`text/event-stream`, and a refused one (400, 401, 403, 405, 406, 413, 415, 429, 503) or a server error (500) as JSON. It offers five tools:
 
 | Tool | What it does |
 | --- | --- |

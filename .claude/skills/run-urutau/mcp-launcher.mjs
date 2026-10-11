@@ -5,21 +5,19 @@
 //   PORT=8788 node .claude/skills/run-urutau/mcp-launcher.mjs
 //   URUTAU_LAUNCHER_NO_KEY=1 PORT=8788 node .claude/skills/run-urutau/mcp-launcher.mjs   # no key
 //
-// Run it from the repository root (Node 24). It reads no real token or key. Every outbound
-// request is written to stdout as `fixture-github <METHOD> <path><query> auth=<present|absent>`;
-// header values are never written.
+// Run it from the repository root (Node 24). The server gets only PORT from the shell; every
+// other shell variable (PUBLIC_URL, ALLOWED_HOSTS, TRUST_PROXY, KEYCLOAK_*, TOKEN_ENCRYPTION_KEY
+// among them) is left out, so it reads no real token or key and accepts the driver's origin.
+// Every outbound request is written to stdout as
+// `fixture-github <METHOD> <path><query> auth=<present|absent>`; header values are never written.
 import { start } from '../../../server/main.ts'
 import { fixtureFetch } from './fixtures.mjs'
 
 // A development value that protects nothing: Buffer.alloc(32, 0x75), base64.
 const DEVELOPMENT_KEY = Buffer.alloc(32, 0x75).toString('base64')
 
-const env = { ...process.env, DATABASE_URL: 'sqlite::memory:', HOST: '127.0.0.1' }
-if (process.env.URUTAU_LAUNCHER_NO_KEY === '1') {
-  delete env.TOKEN_ENCRYPTION_KEY
-} else {
-  env.TOKEN_ENCRYPTION_KEY = DEVELOPMENT_KEY
-}
+const env = { PORT: process.env.PORT, DATABASE_URL: 'sqlite::memory:', HOST: '127.0.0.1' }
+if (process.env.URUTAU_LAUNCHER_NO_KEY !== '1') env.TOKEN_ENCRYPTION_KEY = DEVELOPMENT_KEY
 
 async function loggingFetch(input, init) {
   const request = new Request(input, init)

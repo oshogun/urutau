@@ -1,7 +1,8 @@
 # Runs the Urutau image with a SQLite database in a named volume.
 #   docker compose up -d --build
 # Open http://localhost:8787. A DNS name needs PUBLIC_URL (see README.md).
-# Environment variables set in the shell or in a .env file are passed through.
+# Only the variables listed under environment: reach the container; the shell or a .env file
+# fills in their values.
 services:
   urutau:
     build: .
@@ -11,6 +12,7 @@ services:
     volumes:
       - urutau-data:/data
     environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:/data/urutau.db}
       PUBLIC_URL: ${PUBLIC_URL:-}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
       TRUST_PROXY: ${TRUST_PROXY:-false}

@@ -34,7 +34,7 @@
 // https://api.github.com/) answer the same data for a server-side caller such as the MCP launcher;
 // routeGitHubFixtures wraps answerGitHub for Playwright. Any method other than GET, HEAD, POST, PATCH
 // and OPTIONS on acme/widgets, acme/empty or acme/readonly answers 405; acme/limited answers 403 to
-// every method.
+// every method except OPTIONS, which gets 204.
 
 const DAY = 86_400_000
 const AVATAR_HOST = 'https://fixtures.urutau.test'
