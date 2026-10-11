@@ -350,6 +350,24 @@ describe('parseIssueBody: untrusted input', () => {
     ])
   })
 
+  it('decodes legacy references without ; in img attributes unless a letter, digit or = follows', () => {
+    expect(firstParagraph(parse('<img alt="Tom &amp Jerry">'))).toEqual([
+      { type: 'image', alt: 'Tom & Jerry', href: null },
+    ])
+    expect(firstParagraph(parse('<img alt="&copy 2026 &lt;b&gt" src="https://a.example/i.png?x=1&amp y=2">'))).toEqual([
+      { type: 'image', alt: '© 2026 <b>', href: 'https://a.example/i.png?x=1&%20y=2' },
+    ])
+    expect(firstParagraph(parse('<img alt="&amp= &ampx &amp; &amp#38;" src="https://a.example/i.png?a=1&ampx=2">'))).toEqual([
+      { type: 'image', alt: '&amp= &ampx & &#38;', href: 'https://a.example/i.png?a=1&ampx=2' },
+    ])
+  })
+
+  it('keeps a reference without ; as typed in Markdown text', () => {
+    expect(firstParagraph(parse('![Tom &amp Jerry](x.png)'))).toEqual([
+      { type: 'image', alt: 'Tom &amp Jerry', href: 'https://github.com/acme/widgets/issues/x.png' },
+    ])
+  })
+
   it('gives an image with no address or a blank one no href', () => {
     expect(firstParagraph(parse('![x]()'))).toEqual([{ type: 'image', alt: 'x', href: null }])
     expect(firstParagraph(parse('<img alt="pic">'))).toEqual([{ type: 'image', alt: 'pic', href: null }])

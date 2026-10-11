@@ -100,6 +100,35 @@ function decodeEntities(text: string): string {
   return text.split('\\').map(md.utils.unescapeAll).join('\\')
 }
 
+// The HTML spec's named references that may be written without their `;`, longest first so the
+// regular expression below takes the longest one, as the spec's tokenizer does.
+const LEGACY_NAMES = (
+  'AElig AMP Aacute Acirc Agrave Aring Atilde Auml COPY Ccedil ETH Eacute Ecirc Egrave Euml GT ' +
+  'Iacute Icirc Igrave Iuml LT Ntilde Oacute Ocirc Ograve Oslash Otilde Ouml QUOT REG THORN Uacute ' +
+  'Ucirc Ugrave Uuml Yacute aacute acirc acute aelig agrave amp aring atilde auml brvbar ccedil ' +
+  'cedil cent copy curren deg divide eacute ecirc egrave eth euml frac12 frac14 frac34 gt iacute ' +
+  'icirc iexcl igrave iquest iuml laquo lt macr micro middot nbsp not ntilde oacute ocirc ograve ' +
+  'ordf ordm oslash otilde ouml para plusmn pound quot raquo reg sect shy sup1 sup2 sup3 szlig ' +
+  'thorn times uacute ucirc ugrave uml uuml yacute yen yuml'
+)
+  .split(' ')
+  .sort((a, b) => b.length - a.length)
+// A reference that ends in `;` (decoded by unescapeAll when it is one), or else a legacy name.
+const ATTR_REFERENCE = new RegExp(`&(?:[A-Za-z#][A-Za-z0-9]{1,31};|(${LEGACY_NAMES.join('|')}))`, 'g')
+const LEGACY_BLOCKER = /[A-Za-z0-9=]/
+
+// Decodes the character references in an HTML attribute value as a browser does: like
+// decodeEntities, and also the legacy named references written without `;` unless an ASCII letter,
+// a digit or `=` follows them (so `?a=1&ampx=2` stays as typed). One pass, so a decoded `&` never
+// starts another reference.
+function decodeAttribute(value: string): string {
+  return value.replace(ATTR_REFERENCE, (ref: string, legacy: string | undefined, offset: number) => {
+    if (legacy === undefined) return md.utils.unescapeAll(ref)
+    if (LEGACY_BLOCKER.test(value.charAt(offset + ref.length))) return ref
+    return md.utils.unescapeAll(`&${legacy};`)
+  })
+}
+
 const isTagSpace = (char: string): boolean =>
   char === ' ' || char === '\t' || char === '\n' || char === '\r' || char === '\f'
 
@@ -137,7 +166,7 @@ function attr(tag: string, name: string): string | null {
         value = tag.slice(valueStart, i)
       }
     }
-    if (found === wanted) return decodeEntities(value)
+    if (found === wanted) return decodeAttribute(value)
   }
   return null
 }
