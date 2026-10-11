@@ -78,7 +78,7 @@ function Install-Urutau {
         WantHost = ''; WantPublicUrl = ''; RemovePublicUrl = $false
         Probe = ''; DbBackupDir = ''; DbPath = ''
         AppSwapped = $false; NodeSwapped = $false; ConfigSwapped = $false
-        BundlePath = ''; DlCode = 0
+        BundlePath = ''; DlCode = 0; FirstRun = $false
     }
 
     # ---- output ------------------------------------------------------------------------------------
@@ -1497,6 +1497,10 @@ try {
         $reply = Invoke-HttpGet -Url "$($S.Probe)/api/session" -TimeoutMs 5000 -NoRedirect $false -NoProxy $true
         # A failed request prints N1 as well; only a known "firstRun":false prints nothing.
         if ($reply.Body.Contains('"firstRun":false')) { return }
+        $S.FirstRun = $true
+        # With no service the trial start is stopped before the summary, so Write-Summary
+        # prints the notice after the start command instead.
+        if ($S.Autostart -eq 'none') { return }
         $config = Join-Path $S.Root 'urutau.env'
         $public = Get-EnvValue $config 'PUBLIC_URL'
         $hostName = Get-EnvValue $config 'HOST'
@@ -1535,6 +1539,14 @@ try {
             Say "Urutau $SummaryVersion is installed in $($S.Root). It is not registered as a service, and it is not running."
             Say 'Start it with:'
             Say "  $(Get-StartCommand)"
+            if ($S.FirstRun) {
+                Say ''
+                Say "After you start it, open $url to create the admin account."
+                if ($public -and (-not (Test-HostLoopback (Get-EnvValue (Join-Path $S.Root 'urutau.env') 'HOST')))) {
+                    Say "Urutau is then reachable from other computers at $url, and whoever opens it first becomes the admin."
+                    Say 'Use that address on this computer too: Urutau refuses sign-ins that come from any other address.'
+                }
+            }
             Say ''
             Say "  Configuration      $($S.Root)\urutau.env"
             Say "  Database           $(Get-DatabaseLabel)"

@@ -920,6 +920,10 @@ print_first_run_notice() {
   case "$body" in
     *'"firstRun":false'*) return 0 ;;
   esac
+  FIRST_RUN=1
+  # With no service the trial start is stopped before the summary, so print_summary
+  # prints the notice after the start command instead.
+  [ "$AUTOSTART" = systemd-user ] || return 0
   public="$(env_get "$ROOT/urutau.env" PUBLIC_URL)"
   host="$(env_get "$ROOT/urutau.env" HOST)"
   url="${public:-$PROBE_URL}"
@@ -952,9 +956,9 @@ uninstall_command() {
 }
 
 print_summary() {
-  local url
-  url="$(env_get "$ROOT/urutau.env" PUBLIC_URL)"
-  [ -n "$url" ] || url="$PROBE_URL"
+  local url public host
+  public="$(env_get "$ROOT/urutau.env" PUBLIC_URL)"
+  url="${public:-$PROBE_URL}"
   say ""
   if [ "$AUTOSTART" = systemd-user ]; then
     say "Urutau $1 is running at $url"
@@ -969,6 +973,16 @@ print_summary() {
     say "Urutau $1 is installed in $ROOT. It is not registered as a service, and it is not running."
     say "Start it with:"
     say "  $(start_command)"
+    if [ "$FIRST_RUN" = 1 ]; then
+      say ""
+      say "After you start it, open $url to create the admin account."
+      host="$(env_get "$ROOT/urutau.env" HOST)"
+      case "$host" in ""|127.*|localhost|"::1") host=loopback ;; esac
+      if [ -n "$public" ] && [ "$host" != loopback ]; then
+        say "Urutau is then reachable from other computers at $url, and whoever opens it first becomes the admin."
+        say "Use that address on this computer too: Urutau refuses sign-ins that come from any other address."
+      fi
+    fi
     say ""
     say "  Configuration      $ROOT/urutau.env"
     say "  Database           $(database_label)"
@@ -1252,6 +1266,7 @@ main() {
   NODE_REPLACED=0
   NODE_VERSION=""
   CONFIG_CHANGED=0
+  FIRST_RUN=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
