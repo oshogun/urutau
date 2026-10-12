@@ -338,7 +338,7 @@ describe('reading activity', () => {
     await runs.recordRun(call('run-b', { status: 'done', triageRange: 'M', unverified: [item('U1', 'external'), item('U2', 'normative')], withdrawn: ['U1'] }), later(1000))
     await runs.recordRun(call('run-c', { status: 'done', triageRange: 'L' }), later(1000))
     const found = await runs.activityFor(REPO, [7, 8], later(2000))
-    expect(found.lastRuns.get(7)).toEqual({ runId: 'run-c', status: 'done', triageRange: 'L', unverifiedOpen: { external: 0, normative: 0, untested: 0 } })
+    expect(found.lastRuns.get(7)).toEqual({ runId: 'run-c', status: 'done', triageRange: 'L', unverifiedOpen: { external: 0, normative: 0, untested: 0 }, statusAt: later(1000).toISOString(), endedAt: later(1000).toISOString() })
     expect(found.lastRuns.has(8)).toBe(false)
     await runs.recordRun(call('run-a2', { status: 'done', unverified: [item('X', 'untested')] }), later(500))
     expect((await runs.activityFor(REPO, [7], later(2000))).lastRuns.get(7)?.runId).toBe('run-c')

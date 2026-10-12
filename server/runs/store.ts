@@ -662,6 +662,8 @@ export function createRunStore(db: Kysely<Tables>): RunStore {
             status: row.status,
             triageRange: row.triage_range,
             unverifiedOpen: openCounts(items, new Set(byItem.keys())),
+            statusAt: row.status_at,
+            endedAt: row.ended_at,
             unverifiedItems: items
               .filter((item) => item.withdrawnAt === undefined)
               .map((item) => ({ id: item.id, kind: item.kind, text: item.text, status: boardItemStatus(byItem.get(item.id)) })),
@@ -676,6 +678,8 @@ export function createRunStore(db: Kysely<Tables>): RunStore {
           status: row.status,
           triageRange: row.triage_range,
           unverifiedOpen: openCounts(parseItems(row.unverified), resolved.get(row.run_id) ?? new Set()),
+          statusAt: row.status_at,
+          endedAt: row.ended_at,
         })
       }
       return { claims, lastRuns }

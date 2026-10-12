@@ -77,6 +77,8 @@ function cardJson(issue: Issue, config: BoardConfig, activity: BoardActivityInpu
           triageRange: lastRun.triageRange,
           unverifiedOpen: lastRun.unverifiedOpen,
           runId: lastRun.runId,
+          statusAt: cleanText(lastRun.statusAt, DISPLAY_CAPS.timestamp),
+          endedAt: lastRun.endedAt === null ? null : cleanText(lastRun.endedAt, DISPLAY_CAPS.timestamp),
           ...(withItems
             ? {
                 unverifiedItems: (lastRun.unverifiedItems ?? []).map((item) => ({

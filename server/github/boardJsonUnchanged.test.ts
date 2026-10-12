@@ -100,7 +100,7 @@ describe('get_board output', () => {
     const answer = boardJson({ ...STORED, board }, snapshotOf([ISSUE]), bucketIds(board.buckets), OPTIONS, {
       claims: new Map([[7, { runId: 'c-20261008-0001', status: 'awaiting_approval' as const, since: '2026-10-08T12:05:00.000Z' }]]),
       lastRuns: new Map([
-        [7, { runId: 'c-20261008-0001', status: 'awaiting_approval' as const, triageRange: 'M-L' as const, unverifiedOpen: { external: 1, normative: 1, untested: 0 } }],
+        [7, { runId: 'c-20261008-0001', status: 'awaiting_approval' as const, triageRange: 'M-L' as const, unverifiedOpen: { external: 1, normative: 1, untested: 0 }, statusAt: '2026-10-08T12:05:00.000Z', endedAt: null }],
       ]),
       waiting: [
         { issue: 3, runId: 'c-20261006-0002', status: 'needs_human', since: '2026-10-07T06:00:00.000Z' },
@@ -117,7 +117,7 @@ describe('get_board output', () => {
         GOLDEN_END.replace(
           '"estimate":null,"lastRun":null,"claim":null',
           '"estimate":{"size":"S","confidence":"unsure","by":"ada","at":"2026-10-07T09:00:00.000Z"},' +
-            '"lastRun":{"status":"awaiting_approval","triageRange":"M-L","unverifiedOpen":{"external":1,"normative":1,"untested":0},"runId":"c-20261008-0001"},' +
+            '"lastRun":{"status":"awaiting_approval","triageRange":"M-L","unverifiedOpen":{"external":1,"normative":1,"untested":0},"runId":"c-20261008-0001","statusAt":"2026-10-08T12:05:00.000Z","endedAt":null},' +
             '"claim":{"runId":"c-20261008-0001","status":"awaiting_approval","since":"2026-10-08T12:05:00.000Z"}',
         ),
     )

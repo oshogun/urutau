@@ -281,7 +281,7 @@ describe('boardJson run activity', () => {
   it('gives every card its estimate, last run and claim, null when absent, with the author cleaned', () => {
     const answer = build(stored(board), snapshot(issues), {}, {
       claims: new Map([[3, { runId: 'r3', status: 'running', since: hoursAgo(1) }]]),
-      lastRuns: new Map([[3, { runId: 'r3', status: 'running', triageRange: null, unverifiedOpen: { external: 0, normative: 0, untested: 2 } }]]),
+      lastRuns: new Map([[3, { runId: 'r3', status: 'running', triageRange: null, unverifiedOpen: { external: 0, normative: 0, untested: 2 }, statusAt: hoursAgo(1), endedAt: null }]]),
       waiting: [],
       now: NOW,
     })
@@ -291,7 +291,7 @@ describe('boardJson run activity', () => {
     expect(two.estimate).toEqual({ size: null, confidence: 'no-idea', by: 'ada', at: '2026-10-07T09:00:00.000Z' })
     expect(three).toMatchObject({
       estimate: null,
-      lastRun: { runId: 'r3', status: 'running', triageRange: null, unverifiedOpen: { external: 0, normative: 0, untested: 2 } },
+      lastRun: { runId: 'r3', status: 'running', triageRange: null, unverifiedOpen: { external: 0, normative: 0, untested: 2 }, statusAt: hoursAgo(1), endedAt: null },
       claim: { runId: 'r3', status: 'running', since: hoursAgo(1) },
     })
   })
@@ -338,7 +338,7 @@ describe('boardJson run activity', () => {
     ]
     const activity = (unverifiedItems?: BoardUnverifiedItem[]): BoardActivityInput => ({
       claims: new Map(),
-      lastRuns: new Map([[3, { runId: 'r3', status: 'done', triageRange: 'S', unverifiedOpen: counts, unverifiedItems }]]),
+      lastRuns: new Map([[3, { runId: 'r3', status: 'done', triageRange: 'S', unverifiedOpen: counts, statusAt: hoursAgo(2), endedAt: hoursAgo(2), unverifiedItems }]]),
       waiting: [],
       now: NOW,
     })
@@ -346,12 +346,12 @@ describe('boardJson run activity', () => {
 
     it('lists open, resolved and accepted items in order when asked', () => {
       const answer = build(stored(board), snapshot(issues), { includeUnverifiedItems: true }, activity(items))
-      expect(three(answer).lastRun).toEqual({ status: 'done', triageRange: 'S', unverifiedOpen: counts, runId: 'r3', unverifiedItems: items })
+      expect(three(answer).lastRun).toEqual({ status: 'done', triageRange: 'S', unverifiedOpen: counts, runId: 'r3', statusAt: hoursAgo(2), endedAt: hoursAgo(2), unverifiedItems: items })
     })
 
     it('leaves the key out when not asked, keeping the counts', () => {
       const answer = build(stored(board), snapshot(issues), {}, activity(items))
-      expect(three(answer).lastRun).toEqual({ status: 'done', triageRange: 'S', unverifiedOpen: counts, runId: 'r3' })
+      expect(three(answer).lastRun).toEqual({ status: 'done', triageRange: 'S', unverifiedOpen: counts, runId: 'r3', statusAt: hoursAgo(2), endedAt: hoursAgo(2) })
       expect(JSON.stringify(answer)).not.toContain('unverifiedItems')
     })
 

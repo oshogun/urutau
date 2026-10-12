@@ -240,6 +240,8 @@ const card = z.object({
       triageRange: z.enum(['S', 'M', 'L', 'S-M', 'M-L', 'S-L']).nullable(),
       unverifiedOpen: openCounts,
       runId: z.string(),
+      statusAt: z.string(),
+      endedAt: z.string().nullable(),
       unverifiedItems: z
         .array(
           z

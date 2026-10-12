@@ -321,6 +321,10 @@ export interface CardJson {
     triageRange: TriageRange | null
     unverifiedOpen: UnverifiedCounts
     runId: string
+    /** ISO 8601: when the run reached its current status. */
+    statusAt: string
+    /** ISO 8601: when the run ended; null while it has not. */
+    endedAt: string | null
     /**
      * Present only when get_board is called with includeUnverifiedItems: true; [] when the run has none.
      * The latest run's items in the order record_run sent them; id and text are record_run's values.

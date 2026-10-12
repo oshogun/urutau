@@ -478,6 +478,9 @@ a terminal status.
 other statuses end the run and delete its claim. A run that has ended never changes. The tool's own
 schema lists every limit.
 
+Each card's `lastRun` in `get_board` carries `statusAt`, when the run reached its current status, and
+`endedAt`, when it ended (`null` while it has not), both ISO 8601, so a client need not parse the run id.
+
 `get_board` called with `includeUnverifiedItems: true` echoes the items back on each card as
 `lastRun.unverifiedItems`, a list of `{ id, kind, text, status }` for the card's latest run, in the
 order they were sent. `id` and `text` are what `record_run` sent. `status` is `open`, `resolved`

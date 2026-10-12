@@ -262,7 +262,7 @@ describe('get_board with runs', () => {
     const card2 = cards.find((card) => card.number === 2)
     expect(card2).toMatchObject({
       estimate,
-      lastRun: { runId: 'r-1', status: 'needs_human', triageRange: 'M-L', unverifiedOpen: { external: 1, normative: 0, untested: 0 } },
+      lastRun: { runId: 'r-1', status: 'needs_human', triageRange: 'M-L', unverifiedOpen: { external: 1, normative: 0, untested: 0 }, statusAt: h.clock.now.toISOString(), endedAt: null },
       claim: { runId: 'r-1', status: 'needs_human', since: h.clock.now.toISOString() },
     })
     expect(cards.find((card) => card.number === 1)).toMatchObject({ estimate: null, lastRun: null, claim: null })

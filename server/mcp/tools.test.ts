@@ -364,7 +364,7 @@ describe('get_board', () => {
 
   it('asks the run store for items only with includeUnverifiedItems and shows them on the card', async () => {
     const s = setup()
-    const lastRun = { runId: 'r1', status: 'done' as const, triageRange: null, unverifiedOpen: { external: 0, normative: 0, untested: 1 } }
+    const lastRun = { runId: 'r1', status: 'done' as const, triageRange: null, unverifiedOpen: { external: 0, normative: 0, untested: 1 }, statusAt: '2026-10-08T12:00:00.000Z', endedAt: null }
     const unverifiedItems = [
       { id: 'U1', kind: 'untested' as const, text: 'one', status: 'open' as const },
       { id: 'U3', kind: 'normative' as const, text: 'three', status: 'accepted' as const },

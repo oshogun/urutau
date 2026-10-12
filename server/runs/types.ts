@@ -128,6 +128,8 @@ export interface ActivityForCards {
       status: RunStatus
       triageRange: TriageRange | null
       unverifiedOpen: UnverifiedCounts
+      statusAt: string
+      endedAt: string | null
       /** Present only when activityFor was asked for items, in stored order. */
       unverifiedItems?: BoardUnverifiedItem[]
     }
