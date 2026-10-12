@@ -1,5 +1,6 @@
 /** Urutau MCP tokens: format, creation and lookup. */
 import type { Kysely } from 'kysely'
+import type { IntegrationPermissions } from '../../src/domain/api.ts'
 import { findLiveToken, touchApiToken } from '../db/apiTokens.ts'
 import type { Tables } from '../db/schema.ts'
 import { randomToken, sha256Hex } from './tokens.ts'
@@ -22,11 +23,12 @@ export function bearerFromHeader(header: string | undefined): string | null {
   return token !== undefined && BEARER_PATTERN.test(token) ? token : null
 }
 
-/** Structurally the same as McpPrincipal in server/mcp/contract.ts. */
+/** Structurally the same as McpVerifiedBearer in server/mcp/contract.ts: McpPrincipal plus the integration's permissions. */
 export interface BearerPrincipal {
   userId: string
   username: string
   tokenId: string
+  permissions: IntegrationPermissions
 }
 
 /** Looks the token's hash up (live tokens of integrations only) and updates last_used_at at most once an hour. */
@@ -36,5 +38,10 @@ export async function verifyBearer(db: Kysely<Tables>, token: string, now: Date)
   if (!found) return null
   const stale = found.last_used_at === null || Date.parse(found.last_used_at) < now.getTime() - 60 * 60 * 1000
   if (stale) await touchApiToken(db, found.id, now)
-  return { userId: found.user_id, username: found.username, tokenId: found.id }
+  return {
+    userId: found.user_id,
+    username: found.username,
+    tokenId: found.id,
+    permissions: { moveCards: found.move_cards === 1 },
+  }
 }

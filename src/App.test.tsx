@@ -1500,6 +1500,59 @@ describe('App', () => {
       await expand(user)
       expect(await screen.findByRole('button', { name: 'Set GitHub token for planner-bot' })).toBeDisabled()
     })
+
+    it('creates an integration with the chosen permission and shows it in the table', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      const table = await screen.findByRole('table', { name: 'Agent integrations' })
+      expect(within(table).getByRole('columnheader', { name: 'Permission' })).toBeInTheDocument()
+      expect(within(table).getByRole('cell', { name: 'Read and move cards' })).toBeInTheDocument()
+      expect(screen.getByLabelText('Permission')).toHaveValue('move')
+
+      await user.type(screen.getByLabelText('Integration name'), 'report-bot')
+      await user.selectOptions(screen.getByLabelText('Permission'), 'Read')
+      await user.click(screen.getByRole('button', { name: 'Create integration' }))
+
+      await waitFor(() => expect(stub.requests('POST integrations')).toHaveLength(1))
+      expect(stub.requests('POST integrations')[0].body).toEqual({
+        username: 'report-bot',
+        permissions: { moveCards: false },
+      })
+      const row = (await screen.findByRole('button', { name: 'Show details of report-bot' })).closest('tr')
+      expect(row).not.toBeNull()
+      expect(within(row as HTMLElement).getByRole('cell', { name: 'Read' })).toBeInTheDocument()
+      expect(screen.getByRole('combobox', { name: 'Permission' })).toHaveValue('move')
+    })
+
+    it('changes the permission from the details row', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [planner] })
+      await expand(user)
+
+      const select = await screen.findByLabelText('Permission of planner-bot')
+      expect(select).toHaveValue('move')
+      await user.selectOptions(select, 'Read')
+
+      await waitFor(() => expect(stub.integrations[0].permissions).toEqual({ moveCards: false }))
+      const [request] = stub.requests(`PATCH integrations/${stub.integrations[0].id}`)
+      expect(request.body).toEqual({ permissions: { moveCards: false } })
+      const table = screen.getByRole('table', { name: 'Agent integrations' })
+      expect(await within(table).findByRole('cell', { name: 'Read' })).toBeInTheDocument()
+      expect(screen.getByLabelText('Permission of planner-bot')).toHaveValue('read')
+    })
+
+    it('shows a failed permission change at the field and keeps the saved permission', async () => {
+      const user = userEvent.setup()
+      renderApp('?view=users', { integrations: [{ ...planner, moveCards: false }] })
+      await expand(user)
+
+      stub.failNext(`PATCH integrations/${stub.integrations[0].id}`, listDown)
+      await user.selectOptions(await screen.findByLabelText('Permission of planner-bot'), 'Read and move cards')
+
+      expect(await screen.findByText('The database is down.')).toBeInTheDocument()
+      expect(screen.getByLabelText('Permission of planner-bot')).toHaveValue('read')
+      expect(stub.integrations[0].permissions).toEqual({ moveCards: false })
+    })
   })
   describe('creating issues', () => {
     type PostHandler = (init: RequestInit) => Response | Promise<Response>

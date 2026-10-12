@@ -5,7 +5,7 @@ import { migrateTo } from './migrations/index.ts'
 import { createApiToken, deleteApiToken, deleteExpiredApiTokens, findLiveToken, listApiTokens, touchApiToken, apiTokenIsLive } from './apiTokens.ts'
 import { createBoard, deleteBoard, getBoard, listBoards, listBoardsByKeys, saveBoard } from './boards.ts'
 import { deleteGithubToken, getGithubToken, listGithubTokenInfo, putGithubToken, setGithubTokenStatus } from './githubTokens.ts'
-import { createIntegration, deleteIntegration, isIntegration, listIntegrations } from './integrations.ts'
+import { createIntegration, deleteIntegration, isIntegration, listIntegrations, setIntegrationPermissions } from './integrations.ts'
 import { listAllIntegrationRepos, listIntegrationRepos, setIntegrationRepos } from './integrationRepos.ts'
 import { findUserByIdentity, linkIdentity } from './identities.ts'
 import { createInvite, deleteInvite, getUsableInvite, listUsableInvites, markInviteUsed } from './invites.ts'
@@ -103,7 +103,7 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         const admin = await seedAdmin()
         const made = await createIntegration(database.db, { username: 'planner-bot', createdBy: admin.id, now: T0 })
         // Kysely refuses a gap in the executed list, so the later migration's row goes too.
-        await database.db.deleteFrom('kysely_migration' as never).where('name' as never, 'in', ['0003_integrations', '0004_card_runs', '0005_github_write_kinds'] as never).execute()
+        await database.db.deleteFrom('kysely_migration' as never).where('name' as never, 'in', ['0003_integrations', '0004_card_runs', '0005_github_write_kinds', '0006_integration_permissions'] as never).execute()
         await database.migrate()
         expect(await isIntegration(database.db, made.id)).toBe(true)
       })
@@ -266,6 +266,32 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         expect(await metaValue('github_writes_edit_issues')).toBe(old)
         expect(await metaValue('github_writes')).toBeUndefined()
         expect(await getGithubWrites(database.db)).toEqual({ createIssues: on, editIssues: on })
+      })
+
+      it('rows written at 0005_github_write_kinds survive the upgrade to latest, and existing integrations keep moving cards', async () => {
+        await dropSchema(database)
+        await migrateTo(database.db, database.backend, '0005_github_write_kinds')
+        const admin = await seedAdmin()
+        const made = await createIntegration(database.db, { username: 'bot', createdBy: admin.id, now: T0 })
+        await createBoard(database.db, { repoKey: 'acme/widgets', fullName: 'Acme/Widgets', config: fixtureBoard(), userId: admin.id, now: T0 })
+        await database.db
+          .insertInto('api_tokens')
+          .values({ id: 'tok-1', user_id: made.id, token_hash: 'b'.repeat(64), label: 'ci', created_by: admin.id, created_at: T0.toISOString(), expires_at: null, last_used_at: null })
+          .execute()
+
+        await database.migrate()
+
+        expect(await database.db.selectFrom('users').select('username').orderBy('username').execute()).toEqual([{ username: 'bot' }, { username: admin.username }])
+        expect(await database.db.selectFrom('api_tokens').select('id').execute()).toEqual([{ id: 'tok-1' }])
+        expect(await database.db.selectFrom('boards').select('repo_key').execute()).toEqual([{ repo_key: 'acme/widgets' }])
+        expect((await listIntegrations(database.db)).map((i) => [i.id, i.move_cards])).toEqual([[made.id, 1]])
+        expect(await findLiveToken(database.db, 'b'.repeat(64), T0)).toEqual({ id: 'tok-1', user_id: made.id, username: 'bot', last_used_at: null, move_cards: 1 })
+
+        // A re-run after its kysely_migration row was deleted finds the column and keeps the stored permission.
+        await setIntegrationPermissions(database.db, made.id, { moveCards: false })
+        await database.db.deleteFrom('kysely_migration' as never).where('name' as never, '=', '0006_integration_permissions' as never).execute()
+        await database.migrate()
+        expect((await listIntegrations(database.db)).map((i) => [i.id, i.move_cards])).toEqual([[made.id, 0]])
       })
     })
 
@@ -559,8 +585,24 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         expect(await isIntegration(database.db, admin.id)).toBe(false)
         await expect(createIntegration(database.db, { username: 'PLANNER-bot', createdBy: made.id, now: T0 })).rejects.toSatisfy(isUniqueViolation)
         expect(await listIntegrations(database.db)).toEqual([
-          { id: made.id, username: 'Planner-Bot', created_at: T0.toISOString(), created_by: expect.any(String), created_by_username: 'seed' },
+          { id: made.id, username: 'Planner-Bot', created_at: T0.toISOString(), created_by: expect.any(String), created_by_username: 'seed', move_cards: 1 },
         ])
+      })
+
+      it('creates an integration with or without the move permission and changes only the permissions given', async () => {
+        const { admin, bot: mover } = await bot()
+        const reader = await createIntegration(database.db, { username: 'reader-bot', createdBy: admin.id, now: T0, moveCards: false })
+        // Both share created_at, so listIntegrations orders them by their random ids.
+        const moves = async () => (await listIntegrations(database.db)).map((i) => [i.username, i.move_cards]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+        expect(await moves()).toEqual([['planner-bot', 1], ['reader-bot', 0]])
+        expect(await setIntegrationPermissions(database.db, mover.id, { moveCards: false })).toBe(true)
+        expect(await setIntegrationPermissions(database.db, mover.id, { moveCards: false })).toBe(true)
+        expect(await setIntegrationPermissions(database.db, reader.id, {})).toBe(true)
+        expect(await moves()).toEqual([['planner-bot', 0], ['reader-bot', 0]])
+        expect(await setIntegrationPermissions(database.db, reader.id, { moveCards: true })).toBe(true)
+        expect(await moves()).toEqual([['planner-bot', 0], ['reader-bot', 1]])
+        expect(await setIntegrationPermissions(database.db, admin.id, { moveCards: true })).toBe(false)
+        expect(await setIntegrationPermissions(database.db, 'missing', {})).toBe(false)
       })
 
       it('leaves integrations out of the people list', async () => {
@@ -599,7 +641,7 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
       it('creates and finds a token; a duplicate hash is a unique violation; an unknown owner is a foreign-key error', async () => {
         const { admin, bot: made } = await bot()
         const row = await createApiToken(database.db, { userId: made.id, tokenHash: HASH, label: 'laptop', createdBy: admin.id, now: T0, expiresAt: later(1000) })
-        expect(await findLiveToken(database.db, HASH, T0)).toEqual({ id: row.id, user_id: made.id, username: 'planner-bot', last_used_at: null })
+        expect(await findLiveToken(database.db, HASH, T0)).toEqual({ id: row.id, user_id: made.id, username: 'planner-bot', last_used_at: null, move_cards: 1 })
         expect(await findLiveToken(database.db, HASH, later(1000))).toBeNull()
         expect(await apiTokenIsLive(database.db, row.id, T0)).toBe(true)
         expect(await apiTokenIsLive(database.db, row.id, later(1000))).toBe(false)

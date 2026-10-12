@@ -1,4 +1,5 @@
 import type { Kysely } from 'kysely'
+import type { IntegrationPermissions } from '../../src/domain/api.ts'
 import { iso } from './helpers.ts'
 import type { Tables } from './schema.ts'
 import type { UserRow } from './users.ts'
@@ -8,6 +9,8 @@ export interface NewIntegration {
   /** The admin's user id. */
   createdBy: string
   now: Date
+  /** Whether it may move cards; absent means granted. */
+  moveCards?: boolean
 }
 
 export interface IntegrationRow {
@@ -17,6 +20,8 @@ export interface IntegrationRow {
   created_by: string | null
   /** The creator's username; null when that account was removed. */
   created_by_username: string | null
+  /** INTEGER 0 | 1. */
+  move_cards: number
 }
 
 /**
@@ -37,7 +42,13 @@ export async function createIntegration(db: Kysely<Tables>, integration: NewInte
       created_at: createdAt,
     }
     await trx.insertInto('users').values(user).execute()
-    await trx.insertInto('integrations').values({ user_id: user.id, created_by: integration.createdBy, created_at: createdAt }).execute()
+    await trx.insertInto('integrations').values({
+      user_id: user.id,
+      created_by: integration.createdBy,
+      created_at: createdAt,
+      // Absent: the column's default (1) applies, so this also runs on a schema before 0006.
+      ...(integration.moveCards === undefined ? {} : { move_cards: integration.moveCards ? 1 : 0 }),
+    }).execute()
     return user
   }
   return db.isTransaction ? run(db) : db.transaction().execute(run)
@@ -60,10 +71,26 @@ export async function listIntegrations(db: Kysely<Tables>): Promise<IntegrationR
       'integrations.created_at as created_at',
       'integrations.created_by as created_by',
       'creator.username as created_by_username',
+      'integrations.move_cards as move_cards',
     ])
     .orderBy('integrations.created_at', 'asc')
     .orderBy('integrations.user_id', 'asc')
     .execute()
+}
+
+/** Sets only the permissions given; false when the id is not an integration. */
+export async function setIntegrationPermissions(
+  db: Kysely<Tables>,
+  userId: string,
+  permissions: Partial<IntegrationPermissions>,
+): Promise<boolean> {
+  if (permissions.moveCards === undefined) return isIntegration(db, userId)
+  const result = await db
+    .updateTable('integrations')
+    .set({ move_cards: permissions.moveCards ? 1 : 0 })
+    .where('user_id', '=', userId)
+    .executeTakeFirst()
+  return result.numUpdatedRows === 1n
 }
 
 /** Deletes the integration's users row (cascades to its tokens, GitHub token and repositories); false when the id is not an integration. */

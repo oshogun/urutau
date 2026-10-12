@@ -24,12 +24,14 @@ export interface ApiTokenRow {
   last_used_at: string | null
 }
 
-/** A live token found by hash, with its integration's username. */
+/** A live token found by hash, with its integration's username and permissions. */
 export interface LiveTokenRow {
   id: string
   user_id: string
   username: string
   last_used_at: string | null
+  /** INTEGER 0 | 1. */
+  move_cards: number
 }
 
 const publicColumns = ['id', 'user_id', 'label', 'created_at', 'expires_at', 'last_used_at'] as const
@@ -66,7 +68,13 @@ export async function findLiveToken(db: Kysely<Tables>, tokenHash: string, now: 
     .selectFrom('api_tokens')
     .innerJoin('integrations', 'integrations.user_id', 'api_tokens.user_id')
     .innerJoin('users', 'users.id', 'integrations.user_id')
-    .select(['api_tokens.id as id', 'api_tokens.user_id as user_id', 'users.username as username', 'api_tokens.last_used_at as last_used_at'])
+    .select([
+      'api_tokens.id as id',
+      'api_tokens.user_id as user_id',
+      'users.username as username',
+      'api_tokens.last_used_at as last_used_at',
+      'integrations.move_cards as move_cards',
+    ])
     .where('api_tokens.token_hash', '=', tokenHash)
     .where((eb) => eb.or([eb('api_tokens.expires_at', 'is', null), eb('api_tokens.expires_at', '>', iso(now))]))
     .executeTakeFirst()

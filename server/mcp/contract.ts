@@ -5,7 +5,7 @@
  * error class only. It imports no MCP SDK module, no reader, no save function
  * and no database module, so every other MCP module can depend on it.
  */
-import type { BoardSummary, StoredBoard } from '../../src/domain/api.ts'
+import type { BoardSummary, IntegrationPermissions, StoredBoard } from '../../src/domain/api.ts'
 import type {
   BoardConfig,
   EstimateConfidence,
@@ -35,9 +35,16 @@ export interface McpPrincipal {
   tokenId: string
 }
 
+/** A verified token's principal and what its integration may do, read on every request. */
+export interface McpVerifiedBearer extends McpPrincipal {
+  permissions: IntegrationPermissions
+}
+
 /** What the endpoint hands to the tool registration for one HTTP request. */
 export interface McpCallContext {
   principal: McpPrincipal
+  /** The integration's permissions as stored when this request was verified. Read is always granted. */
+  permissions: IntegrationPermissions
 }
 
 export const MCP_SERVER_INFO = { name: 'urutau', title: 'Urutau', version: '0.1.0' } as const
@@ -165,7 +172,7 @@ export const TOOL_ERROR_TEXT: Record<McpToolErrorCode, string> = {
   'board-deleted': 'The board was deleted while this change was being saved. Nothing was saved.',
   'board-busy': 'The board kept changing while this change was being saved. Nothing was saved. Try again.',
   'call-stopped':
-    'This call was stopped: its Urutau MCP token was revoked, its integration was removed, the repository was taken off its list, or the client closed the connection.',
+    'This call was stopped: its Urutau MCP token was revoked, its integration was removed, its permission was reduced, the repository was taken off its list, or the client closed the connection.',
   'claimed-by-other-run':
     'Another run holds the claim on this issue. Nothing was recorded. Stop work on this issue; a person can release the claim from the card in Urutau.',
   'run-finished':

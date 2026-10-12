@@ -507,6 +507,16 @@ export interface IssueUpdateRejectedError extends GitHubRejectedError {
 
 // ---------------------------------------------------------------- agent integrations (admin)
 
+/**
+ * What an integration may do beyond reading. Read (list_boards, get_board) is always granted;
+ * `moveCards` adds move_card, reorder_bucket and record_run. A new permission is one more entry
+ * here and a migration column, and ships turned off for existing rows unless decided otherwise.
+ */
+export const INTEGRATION_PERMISSIONS = ['moveCards'] as const
+export type IntegrationPermission = (typeof INTEGRATION_PERMISSIONS)[number]
+/** One switch per permission: true when the integration has it. */
+export type IntegrationPermissions = Record<IntegrationPermission, boolean>
+
 export type ApiTokenExpiryDays = 30 | 90 | 365
 
 export interface ApiTokenSummary {
@@ -541,6 +551,7 @@ export interface IntegrationSummary {
   githubToken: GitHubTokenStatus
   /** Repository keys (lower-case owner/name) it may read, sorted. */
   repos: string[]
+  permissions: IntegrationPermissions
 }
 
 /** GET /api/integrations. */
@@ -553,9 +564,23 @@ export interface IntegrationListResponse {
 /** POST /api/integrations. */
 export interface CreateIntegrationRequest {
   username: string
+  /** Permissions left out are granted, so `moveCards` defaults to true. Unknown keys are refused with 400. */
+  permissions?: Partial<IntegrationPermissions>
 }
 
 export interface CreateIntegrationResponse {
+  integration: IntegrationSummary
+}
+
+/**
+ * PATCH /api/integrations/:id (admin only): `permissions` with at least one known key, each a
+ * boolean; keys left out keep their value. Unknown keys are refused with 400.
+ */
+export interface UpdateIntegrationRequest {
+  permissions: Partial<IntegrationPermissions>
+}
+
+export interface UpdateIntegrationResponse {
   integration: IntegrationSummary
 }
 

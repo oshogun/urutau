@@ -42,12 +42,14 @@ import {
   revokeApiToken,
   setGitHubToken,
   setIntegrationRepos,
+  updateIntegration,
 } from '../../api/admin'
 import { ApiError } from '../../api/client'
 import type {
   ApiTokenExpiryDays,
   ApiTokenSummary,
   GitHubTokenStatus,
+  IntegrationPermissions,
   IntegrationSummary,
 } from '../../domain/api'
 import { formatDateTime } from './format'
@@ -61,6 +63,25 @@ const TOKEN_EXPIRY_CHOICES: { value: string; days: ApiTokenExpiryDays | null; la
   { value: '365', days: 365, label: '365 days' },
   { value: 'never', days: null, label: 'Never' },
 ]
+
+type PermissionChoice = 'move' | 'read'
+
+/** The label and explanation of each permission an admin can give an integration. */
+const PERMISSION_TEXT: Record<PermissionChoice, { label: string; description: string }> = {
+  move: {
+    label: 'Read and move cards',
+    description:
+      'The agent can read boards, move cards between buckets, reorder buckets and record its runs on cards.',
+  },
+  read: {
+    label: 'Read',
+    description: 'The agent can only read boards. It changes nothing.',
+  },
+}
+const PERMISSION_CHOICES: PermissionChoice[] = ['move', 'read']
+
+const choiceOf = (permissions: IntegrationPermissions): PermissionChoice => (permissions.moveCards ? 'move' : 'read')
+const permissionsOf = (choice: PermissionChoice): IntegrationPermissions => ({ moveCards: choice === 'move' })
 
 const isPlainHttp = () => window.location.protocol !== 'https:'
 
@@ -337,6 +358,13 @@ function IntegrationDetails({
   const [creating, setCreating] = useState(false)
   const labelInput = useRef<HTMLInputElement>(null)
   const tokenNames = describeTokens(integration.tokens)
+  const permission = useMutation({
+    mutationFn: (choice: PermissionChoice) =>
+      updateIntegration(integration.id, { permissions: permissionsOf(choice) }),
+    onSuccess: onChanged,
+  })
+  // The chosen value shows while the change is saved; after a failure the saved one shows again.
+  const shownChoice = permission.isPending && permission.variables ? permission.variables : choiceOf(integration.permissions)
 
   // The create button is disabled while the request runs, so focus has left it. After a failure it
   // goes to the name field, once the field has rendered as invalid.
@@ -377,6 +405,26 @@ function IntegrationDetails({
 
   return (
     <div className="integrations__details">
+      <section aria-labelledby={`${idPrefix}-permission`}>
+        <h3 id={`${idPrefix}-permission`} className="integrations__subheading">
+          Permission
+        </h3>
+        <Select
+          id={`${idPrefix}-permission-select`}
+          labelText={`Permission of ${name}`}
+          helperText={`${PERMISSION_TEXT[shownChoice].description} Lowering the permission stops the agent's calls in progress.`}
+          value={shownChoice}
+          disabled={permission.isPending}
+          invalid={permission.isError}
+          invalidText={permission.error ? errorText(permission.error) : ''}
+          onChange={(event) => permission.mutate(event.target.value as PermissionChoice)}
+        >
+          {PERMISSION_CHOICES.map((choice) => (
+            <SelectItem key={choice} value={choice} text={PERMISSION_TEXT[choice].label} />
+          ))}
+        </Select>
+      </section>
+
       <section aria-labelledby={`${idPrefix}-tokens`}>
         <h3 id={`${idPrefix}-tokens`} className="integrations__subheading">
           Urutau MCP tokens
@@ -672,6 +720,7 @@ export function IntegrationsSection() {
   })
 
   const [name, setName] = useState('')
+  const [newPermission, setNewPermission] = useState<PermissionChoice>('move')
   const [nameError, setNameError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [dialog, setDialog] = useState<Dialog | null>(null)
@@ -741,10 +790,11 @@ export function IntegrationsSection() {
   const refresh = () => queryClient.invalidateQueries({ queryKey: INTEGRATIONS_QUERY_KEY })
 
   const create = useMutation({
-    mutationFn: () => createIntegration({ username: name.trim() }),
+    mutationFn: () => createIntegration({ username: name.trim(), permissions: permissionsOf(newPermission) }),
     onSuccess: ({ integration }) => {
       focusNewRow.current = integration.username
       setName('')
+      setNewPermission('move')
       setNameError(null)
       setActionError(null)
       expandRow(integration.id)
@@ -887,6 +937,7 @@ export function IntegrationsSection() {
   const rows = list.map((integration) => ({
     id: integration.id,
     username: integration.username,
+    permission: PERMISSION_TEXT[choiceOf(integration.permissions)].label,
     github: '',
     repos: String(integration.repos.length),
     tokens: String(integration.tokens.length),
@@ -899,8 +950,8 @@ export function IntegrationsSection() {
         Agent integrations
       </h2>
       <p className="users__lead">
-        An agent integration lets an AI agent read boards and move cards through Urutau&apos;s MCP
-        server. It is an account of its own: it cannot sign in, it is never the admin, and its changes
+        An agent integration lets an AI agent read boards, and move cards if its permission allows,
+        through Urutau&apos;s MCP server. It is an account of its own: it cannot sign in, it is never the admin, and its changes
         show as &quot;Agent&quot; on boards.
       </p>
 
@@ -946,13 +997,24 @@ export function IntegrationsSection() {
             setNameError(null)
           }}
         />
+        <Select
+          id="integration-permission"
+          labelText="Permission"
+          helperText={PERMISSION_TEXT[newPermission].description}
+          value={newPermission}
+          onChange={(event) => setNewPermission(event.target.value as PermissionChoice)}
+        >
+          {PERMISSION_CHOICES.map((choice) => (
+            <SelectItem key={choice} value={choice} text={PERMISSION_TEXT[choice].label} />
+          ))}
+        </Select>
         <Button type="submit" renderIcon={Add} disabled={create.isPending || name.trim() === ''}>
           Create integration
         </Button>
       </form>
 
       {integrations.isPending ? (
-        <DataTableSkeleton columnCount={5} rowCount={2} showHeader={false} showToolbar={false} />
+        <DataTableSkeleton columnCount={6} rowCount={2} showHeader={false} showToolbar={false} />
       ) : integrations.isError ? (
         <Stack gap={5}>
           {issued && <IssuedTile issued={issued} withIntegration tileRef={issuedTile} />}
@@ -974,6 +1036,7 @@ export function IntegrationsSection() {
           rows={rows}
           headers={[
             { key: 'username', header: 'Name' },
+            { key: 'permission', header: 'Permission' },
             { key: 'github', header: 'GitHub token' },
             { key: 'repos', header: 'Repositories' },
             { key: 'tokens', header: 'Tokens' },
@@ -1015,6 +1078,7 @@ export function IntegrationsSection() {
                         )}
                         <AgentName name={integration.username} />
                       </TableCell>
+                      <TableCell>{PERMISSION_TEXT[choiceOf(integration.permissions)].label}</TableCell>
                       <TableCell>
                         <GitHubTokenTag status={integration.githubToken} />
                       </TableCell>

@@ -1,11 +1,12 @@
 import { createCipheriv, createHmac, hkdfSync, randomBytes } from 'node:crypto'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import type {
   CreateApiTokenResponse,
   CreateIntegrationResponse,
   IntegrationListResponse,
   SetGitHubTokenResponse,
   SetIntegrationReposResponse,
+  UpdateIntegrationResponse,
 } from '../../src/domain/api.ts'
 import { sha256Hex } from '../auth/tokens.ts'
 import {
@@ -55,7 +56,7 @@ function sealV1(rawKey: Buffer, plain: string, owner: string): string {
 }
 
 describe('who may use the integration routes', () => {
-  test('exactly eight routes exist, each 403 forbidden for a member and each mutating one 403 csrf-rejected without the header', async () => {
+  test('exactly nine routes exist, each 403 forbidden for a member and each mutating one 403 csrf-rejected without the header', async () => {
     await setUp()
     const agent = await setUpAgent(h)
     const browser = await member()
@@ -67,6 +68,7 @@ describe('who may use the integration routes', () => {
       'DELETE /api/integrations/:id/github-token',
       'DELETE /api/integrations/:id/tokens/:tokenId',
       'GET /api/integrations',
+      'PATCH /api/integrations/:id',
       'POST /api/integrations',
       'POST /api/integrations/:id/tokens',
       'PUT /api/integrations/:id/github-token',
@@ -97,6 +99,7 @@ describe('who may use the integration routes', () => {
     await setUp()
     const calls: [string, string, unknown?][] = [
       ['DELETE', `/api/integrations/${ID}`],
+      ['PATCH', `/api/integrations/${ID}`, { permissions: { moveCards: false } }],
       ['POST', `/api/integrations/${ID}/tokens`, { label: 'x', expiresInDays: 30 }],
       ['DELETE', `/api/integrations/${ID}/tokens/${ID}`],
       ['PUT', `/api/integrations/${ID}/github-token`, { token: FIXTURE_GITHUB_TOKEN }],
@@ -111,6 +114,7 @@ describe('who may use the integration routes', () => {
     const person = await h.get('/api/users')
     const admin = ((await person.json()) as { users: { id: string }[] }).users[0]
     expect((await h.delete(`/api/integrations/${admin.id}`)).status).toBe(404)
+    expect((await h.send('PATCH', `/api/integrations/${admin.id}`, { permissions: { moveCards: false } })).status).toBe(404)
   })
 })
 
@@ -126,6 +130,7 @@ describe('creating and removing integrations', () => {
       repos: [],
       githubToken: { set: false, readable: false, status: null, updatedAt: null },
       createdBy: { username: 'admin' },
+      permissions: { moveCards: true },
     })
     const taken = await h.post('/api/integrations', { username: 'planner-bot' })
     expect(taken.status).toBe(409)
@@ -174,6 +179,75 @@ describe('creating and removing integrations', () => {
     expect((await agent.bearer.mcp({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).status).toBe(401)
     expect((await h.delete(`/api/integrations/${agent.id}`)).status).toBe(404)
     expect(h.logs.some((line) => line.includes('"msg":"integration removed"'))).toBe(true)
+  })
+})
+
+describe('permissions', () => {
+  test('create grants moving cards unless told otherwise, and refuses unknown keys or non-boolean values', async () => {
+    await setUp()
+    const created = async (body: unknown) => ((await (await h.post('/api/integrations', body)).json()) as CreateIntegrationResponse).integration
+    expect((await created({ username: 'default-bot' })).permissions).toEqual({ moveCards: true })
+    expect((await created({ username: 'empty-bot', permissions: {} })).permissions).toEqual({ moveCards: true })
+    expect((await created({ username: 'reader-bot', permissions: { moveCards: false } })).permissions).toEqual({ moveCards: false })
+    expect((await created({ username: 'mover-bot', permissions: { moveCards: true } })).permissions).toEqual({ moveCards: true })
+    for (const permissions of [{ writeGithub: true }, { moveCards: 'yes' }, [], 'read', null]) {
+      const response = await h.post('/api/integrations', { username: 'bad-bot', permissions })
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({ error: 'invalid-request' })
+    }
+    const listed = Object.fromEntries((await list()).integrations.map((integration) => [integration.username, integration.permissions.moveCards]))
+    expect(listed).toEqual({ 'default-bot': true, 'empty-bot': true, 'reader-bot': false, 'mover-bot': true })
+  })
+
+  test('PATCH changes the permission, answers the full integration, and the list and MCP tool list follow', async () => {
+    await setUp()
+    const agent = await setUpAgent(h, { repos: ['acme/widgets'] })
+    const path = `/api/integrations/${agent.id}`
+    const response = await h.send('PATCH', path, { permissions: { moveCards: false } })
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as UpdateIntegrationResponse
+    expect(body.integration).toMatchObject({
+      id: agent.id,
+      permissions: { moveCards: false },
+      repos: ['acme/widgets'],
+      tokens: [{ id: agent.tokenId }],
+      githubToken: { set: true },
+    })
+    expect((await list()).integrations[0].permissions).toEqual({ moveCards: false })
+    const tools = (await (await agent.bearer.mcp({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).text())
+    expect(tools).not.toContain('move_card')
+    expect((await h.send('PATCH', path, { permissions: { moveCards: true } })).status).toBe(200)
+    expect((await list()).integrations[0].permissions).toEqual({ moveCards: true })
+  })
+
+  test('PATCH refuses a body that is not exactly permissions with known boolean keys', async () => {
+    await setUp()
+    const agent = await setUpAgent(h, { githubToken: false })
+    const path = `/api/integrations/${agent.id}`
+    for (const body of [{}, [], { permissions: {} }, { permissions: { writeGithub: true } }, { permissions: { moveCards: 1 } }, { permissions: { moveCards: false }, username: 'x' }]) {
+      const response = await h.send('PATCH', path, body)
+      expect({ body, status: response.status }).toEqual({ body, status: 400 })
+      expect(await response.json()).toMatchObject({ error: 'invalid-request' })
+    }
+    expect((await list()).integrations[0].permissions).toEqual({ moveCards: true })
+  })
+
+  test('lowering the permission stops calls in flight and writes an audit line; raising it does not stop them', async () => {
+    await setUp()
+    const agent = await setUpAgent(h, { githubToken: false })
+    const abort = vi.spyOn(h.ctx.mcp.inflight, 'abortIntegration')
+    const path = `/api/integrations/${agent.id}`
+    h.logs.length = 0
+    await h.send('PATCH', path, { permissions: { moveCards: true } })
+    expect(abort).not.toHaveBeenCalled()
+    await h.send('PATCH', path, { permissions: { moveCards: false } })
+    expect(abort).toHaveBeenCalledExactlyOnceWith(agent.id)
+    await h.send('PATCH', path, { permissions: { moveCards: false } })
+    expect(abort).toHaveBeenCalledOnce()
+    const admin = ((await (await h.get('/api/session')).json()) as { session: { user: { id: string } } }).session.user.id
+    const audit = h.logs.map((line) => JSON.parse(line) as Record<string, unknown>).filter((line) => line.msg === 'integration permissions changed')
+    expect(audit).toHaveLength(3)
+    expect(audit[1]).toMatchObject({ level: 'info', integration: agent.id, user: admin, moveCards: false })
   })
 })
 

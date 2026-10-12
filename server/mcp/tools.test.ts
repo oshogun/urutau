@@ -16,7 +16,7 @@ import {
 } from './contract.ts'
 import { createInflightRegistry } from './inflight.ts'
 import { createCallLimiter, createRepoLocks } from './locks.ts'
-import { registerTools, SERVER_INSTRUCTIONS, TOOL_DEFINITIONS, UNTRUSTED_SENTENCE } from './tools.ts'
+import { registerTools, serverInstructions, TOOL_DEFINITIONS, UNTRUSTED_SENTENCE } from './tools.ts'
 
 const NOW = Date.UTC(2026, 9, 3, 12, 0, 0)
 const PRINCIPAL: McpPrincipal = { userId: 'int-1', username: 'planner-bot', tokenId: 'tok-1' }
@@ -180,7 +180,7 @@ function setup(config: BoardConfig = board(), list: Issue[] = issues()): Setup {
       tools.set(name, { config, callback })
     },
   }
-  registerTools(fake as unknown as McpServer, { principal: PRINCIPAL }, deps)
+  registerTools(fake as unknown as McpServer, { principal: PRINCIPAL, permissions: { moveCards: true } }, deps)
   return {
     deps,
     tools,
@@ -230,7 +230,30 @@ describe('registration', () => {
     }
     expect(s.tools.get('get_board')?.config._meta).toEqual({ 'anthropic/maxResultSizeChars': 400_000 })
     expect(s.tools.get('move_card')?.config._meta).toBeUndefined()
-    expect(SERVER_INSTRUCTIONS.endsWith(UNTRUSTED_SENTENCE)).toBe(true)
+    expect(serverInstructions({ moveCards: true }).endsWith(UNTRUSTED_SENTENCE)).toBe(true)
+  })
+
+  it('names the move tools in the instructions only for an integration that may move cards', () => {
+    expect(serverInstructions({ moveCards: true })).toBe(
+      [
+        'Urutau is a kanban board for GitHub issues.',
+        'list_boards lists the boards this integration may read. get_board returns one board as JSON: its buckets and their cards in the order people see them.',
+        'move_card and reorder_bucket change card positions on the Urutau board only. They never change anything on GitHub, and everyone with the board open sees the change.',
+        'record_run reports an agent run on an issue and claims or releases its card. It never changes GitHub or the board layout.',
+        UNTRUSTED_SENTENCE,
+      ].join(' '),
+    )
+    const readOnly = serverInstructions({ moveCards: false })
+    expect(readOnly).toContain('may only read')
+    expect(readOnly).not.toMatch(/move_card|reorder_bucket|record_run/)
+    expect(readOnly.endsWith(UNTRUSTED_SENTENCE)).toBe(true)
+  })
+
+  it('registers only list_boards and get_board for a read-only integration', () => {
+    const tools: string[] = []
+    const fake = { registerTool: (name: string) => tools.push(name) }
+    registerTools(fake as unknown as McpServer, { principal: PRINCIPAL, permissions: { moveCards: false } }, setup().deps)
+    expect(tools).toEqual(['list_boards', 'get_board'])
   })
 
   it('has inputs that refuse unknown keys and publish defaults only in the handler', () => {
@@ -619,7 +642,7 @@ describe('untrusted text', () => {
     expect(read.content[0].text).not.toContain('\u202e')
     expect(read.content[0].text).not.toContain('\u200b')
 
-    const everything: string[] = [SERVER_INSTRUCTIONS]
+    const everything: string[] = [serverInstructions({ moveCards: true })]
     for (const { config } of s.tools.values()) everything.push(config.title ?? '', config.description ?? '')
     const failures = [
       await s.call('move_card', { ...GET, issue: 1, bucket: 'nope' }),
@@ -638,11 +661,11 @@ describe('untrusted text', () => {
 })
 
 describe('through the MCP SDK', () => {
-  async function rpc(s: Setup, method: string, params: unknown) {
+  async function rpc(s: Setup, method: string, params: unknown, permissions = { moveCards: true }) {
     const handler = createMcpHandler(
       () => {
-        const server = new McpServer({ name: 'urutau', version: '0.1.0' }, { capabilities: { tools: { listChanged: false } }, instructions: SERVER_INSTRUCTIONS })
-        registerTools(server, { principal: PRINCIPAL }, s.deps)
+        const server = new McpServer({ name: 'urutau', version: '0.1.0' }, { capabilities: { tools: { listChanged: false } }, instructions: serverInstructions(permissions) })
+        registerTools(server, { principal: PRINCIPAL, permissions }, s.deps)
         return server
       },
       { legacy: 'stateless', responseMode: 'sse' },
@@ -657,7 +680,8 @@ describe('through the MCP SDK', () => {
     const text = await response.text()
     await handler.close()
     const data = text.split('\n').find((line) => line.startsWith('data: '))
-    return JSON.parse((data as string).slice(6)).result
+    const message = JSON.parse((data as string).slice(6))
+    return message.result ?? message.error
   }
 
   it('publishes the tools and answers a read that satisfies the output schema', async () => {
@@ -690,5 +714,24 @@ describe('through the MCP SDK', () => {
     const result = await rpc(s, 'tools/call', { name: 'move_card', arguments: { ...GET, issue: 4, bucket: 'todo', position: 'top' } })
     expect(result.isError).toBeUndefined()
     expect(result.structuredContent).toMatchObject({ version: 2, from: 'backlog', to: 'todo', index: 0 })
+  })
+
+  it('gives a read-only integration only the read tools, and its move calls change nothing', async () => {
+    const s = setup()
+    const readOnly = { moveCards: false }
+    const listed = await rpc(s, 'tools/list', {}, readOnly)
+    expect(listed.tools.map((tool: { name: string }) => tool.name).sort()).toEqual(['get_board', 'list_boards'])
+    const calls = [
+      { name: 'move_card', arguments: { ...GET, issue: 4, bucket: 'todo', position: 'top' } },
+      { name: 'reorder_bucket', arguments: { ...GET, bucket: 'todo', order: [1, 2] } },
+      { name: 'record_run', arguments: { repo: GET.repo, issue: 4, status: 'running' } },
+    ]
+    for (const call of calls) {
+      const result = await rpc(s, 'tools/call', call, readOnly)
+      expect(JSON.stringify(result)).toContain(call.name)
+      expect(result.structuredContent).toBeUndefined()
+    }
+    expect(s.saves).toHaveLength(0)
+    expect(s.deps.runs.recordRun).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'vitest'
+import type { Kysely } from 'kysely'
 import { openDatabase, type Database } from '../index.ts'
 import { migrateTo } from './index.ts'
 import { getGithubWrites, setGithubWrite } from '../settings.ts'
@@ -46,7 +47,7 @@ describe('migration 0003_integrations', () => {
     const admin = await createAccount(database.db, { username: 'ada', displayName: null, passwordHash: null, now: NOW })
     if (!admin.created) throw new Error('account not created')
     const bot = await createIntegration(database.db, { username: 'bot', createdBy: admin.user.id, now: NOW })
-    await forget(['0003_integrations', '0004_card_runs', '0005_github_write_kinds'])
+    await forget(['0003_integrations', '0004_card_runs', '0005_github_write_kinds', '0006_integration_permissions'])
     await database.migrate()
     expect(await database.db.selectFrom('integrations').select('user_id').execute()).toEqual([{ user_id: bot.id }])
     expect(await database.db.selectFrom('kysely_migration' as never).select('name' as never).where('name' as never, '=', '0003_integrations' as never).execute()).toHaveLength(1)
@@ -72,7 +73,7 @@ describe('migration 0004_card_runs', () => {
       .insertInto('card_claims')
       .values({ repo_key: 'acme/widgets', issue: 7, run_id: 'run-1', holder: bot.id, lease_until: null, claimed_at: NOW.toISOString() })
       .execute()
-    await forget(['0004_card_runs', '0005_github_write_kinds'])
+    await forget(['0004_card_runs', '0005_github_write_kinds', '0006_integration_permissions'])
     await database.migrate()
     expect(await database.db.selectFrom('card_runs').select('run_id').execute()).toEqual([{ run_id: 'run-1' }])
     expect(await database.db.selectFrom('card_claims').select('run_id').execute()).toEqual([{ run_id: 'run-1' }])
@@ -98,9 +99,31 @@ describe('migration 0005_github_write_kinds', () => {
     database = await openDatabase('sqlite::memory:')
     await database.migrate()
     await setGithubWrite(database.db, 'createIssues', true)
-    await forget(['0005_github_write_kinds'])
+    await forget(['0005_github_write_kinds', '0006_integration_permissions'])
     await database.migrate()
     expect(await getGithubWrites(database.db)).toEqual({ createIssues: true, editIssues: false })
     expect(await metaValue('github_writes')).toBeUndefined()
+  })
+})
+
+describe('migration 0006_integration_permissions', () => {
+  test('lets existing integrations move cards', async () => {
+    database = await openDatabase('sqlite::memory:')
+    await migrateTo(database.db, database.backend, '0005_github_write_kinds')
+    const db = database.db as Kysely<any>
+    await db.insertInto('users').values({ id: 'u-bot', username: 'bot', username_key: 'bot', display_name: null, password_hash: null, is_admin: 0, created_at: NOW.toISOString() }).execute()
+    await db.insertInto('integrations').values({ user_id: 'u-bot', created_by: null, created_at: NOW.toISOString() }).execute()
+    await database.migrate()
+    expect(await database.db.selectFrom('integrations').select(['user_id', 'move_cards']).execute()).toEqual([{ user_id: 'u-bot', move_cards: 1 }])
+  })
+
+  test('running again after its kysely_migration row was deleted succeeds and adds no second column', async () => {
+    database = await openDatabase('sqlite::memory:')
+    await database.migrate()
+    await forget(['0006_integration_permissions'])
+    await database.migrate()
+    const tables = await database.db.introspection.getTables()
+    const columns = tables.find((t) => t.name === 'integrations')?.columns.filter((c) => c.name === 'move_cards')
+    expect(columns).toHaveLength(1)
   })
 })

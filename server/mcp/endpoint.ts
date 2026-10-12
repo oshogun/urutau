@@ -17,14 +17,14 @@ import {
   MCP_WWW_AUTHENTICATE_NO_CREDENTIALS,
   type McpCallContext,
   type McpHttpErrorCode,
-  type McpPrincipal,
+  type McpVerifiedBearer,
 } from './contract.ts'
-import { SERVER_INSTRUCTIONS } from './tools.ts'
+import { serverInstructions } from './tools.ts'
 
 export interface McpEndpointDeps {
   log: Logger
   /** Looks a well-formed token up; null when unknown, revoked or expired. */
-  verifyBearer(token: string): Promise<McpPrincipal | null>
+  verifyBearer(token: string): Promise<McpVerifiedBearer | null>
   /** The bearer-failure limiter: a RateLimiter of its own, keyed by client IP. */
   failures: { retryAfter(ip: string): number | null; recordFailure(ip: string): void }
   clientIp(c: Context): string
@@ -98,15 +98,15 @@ function errorResponse(status: ContentfulStatusCode, error: McpHttpErrorCode, he
 export function createMcpEndpoint(deps: McpEndpointDeps): McpEndpoint {
   const { log } = deps
   const calls = new WeakMap<AuthInfo, McpCallContext>()
-  const principals = new WeakMap<Request, McpPrincipal>()
+  const principals = new WeakMap<Request, McpVerifiedBearer>()
 
   const handler = createMcpHandler(
     (ctx) => {
+      const call = ctx.authInfo ? calls.get(ctx.authInfo) : undefined
       const server = new McpServer(MCP_SERVER_INFO, {
         capabilities: { tools: { listChanged: false } },
-        instructions: SERVER_INSTRUCTIONS,
+        instructions: serverInstructions(call?.permissions ?? { moveCards: false }),
       })
-      const call = ctx.authInfo ? calls.get(ctx.authInfo) : undefined
       if (call) deps.registerTools(server, call)
       return server
     },
@@ -160,7 +160,7 @@ export function createMcpEndpoint(deps: McpEndpointDeps): McpEndpoint {
 
     // 3. Bearer: a live token always passes; the failure limiter only gates misses.
     const token = bearerFromHeader(c.req.header('authorization'))
-    let principal: McpPrincipal | null = null
+    let principal: McpVerifiedBearer | null = null
     try {
       principal = token === null ? null : await deps.verifyBearer(token)
     } catch (error) {
@@ -191,10 +191,13 @@ export function createMcpEndpoint(deps: McpEndpointDeps): McpEndpoint {
   })
 
   routes.post('/mcp', async (c) => {
-    const principal = principals.get(c.req.raw)
-    if (!principal) return errorResponse(401, 'invalid-token', { 'WWW-Authenticate': challengeFor(c.req.raw) })
-    const authInfo: AuthInfo = { token: VERIFIED_PLACEHOLDER, clientId: principal.userId, scopes: [] }
-    calls.set(authInfo, { principal })
+    const verified = principals.get(c.req.raw)
+    if (!verified) return errorResponse(401, 'invalid-token', { 'WWW-Authenticate': challengeFor(c.req.raw) })
+    const { permissions, ...principal } = verified
+    // scopes is information only: the tool list itself follows call.permissions.
+    const scopes = ['read', ...Object.entries(permissions).filter(([, granted]) => granted).map(([key]) => key)]
+    const authInfo: AuthInfo = { token: VERIFIED_PLACEHOLDER, clientId: principal.userId, scopes }
+    calls.set(authInfo, { principal, permissions })
     // A body that is not JSON by its Content-Type goes on unread, so the SDK still answers 415.
     let request = c.req.raw
     let parsedBody: unknown

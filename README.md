@@ -51,7 +51,8 @@ for the app, and Hono, Kysely and a SQL database for the server.
   comments are not changed.
 - **AI agents (MCP).** An admin can create agent integrations: accounts of their own that an AI
   agent uses to list boards, read them, move cards and record its runs through Urutau's MCP
-  server, with no access to GitHub beyond reading. See [AI agents (MCP)](#ai-agents-mcp).
+  server, with no access to GitHub beyond reading. Each integration has a permission: *Read*, or
+  *Read and move cards*. See [AI agents (MCP)](#ai-agents-mcp).
 - **Estimates and agent runs on cards.** Anyone signed in can give an issue a size estimate
   (S, M or L, and how sure: sure, unsure or no idea), shown on the card as `M`, `M?` or `?`. When
   an agent records a run on an issue, the card shows who holds it, a flag for claims nothing
@@ -417,7 +418,8 @@ Urutau serves a [Model Context Protocol](https://modelcontextprotocol.io/) endpo
 It takes JSON-RPC requests over HTTP `POST`; a request it accepts is answered as a
 `text/event-stream`, and a refused one (400, 401, 403, 405, 406, 413, 415, 429, 503) or a server error (500) as JSON.
 A protocol-level refusal (a batch, a body that is not JSON) is a JSON-RPC error object; the other
-refusals are `{ "error", "message" }`. It offers five tools:
+refusals are `{ "error", "message" }`. It offers up to five tools, depending on the integration's
+permission:
 
 | Tool | What it does |
 | --- | --- |
@@ -427,8 +429,24 @@ refusals are `{ "error", "message" }`. It offers five tools:
 | `reorder_bucket` | Sets the order of the cards in one bucket in one save. |
 | `record_run` | Records one agent run on one issue: its status, size range and unverified claims, and claims or releases the issue's card. Reads and writes only Urutau. |
 
-**MCP moves are Urutau-only.** `move_card` and `reorder_bucket` change card positions in Urutau's
-database and nothing on GitHub, and `record_run` changes only runs and claims in Urutau's database
+**Permissions.** Each integration has one of two permissions, set on the Users page:
+
+- *Read*: the integration gets only `list_boards` and `get_board`. It changes nothing, which suits
+  an agent that writes a summary or a report.
+- *Read and move cards*: it also gets `move_card`, `reorder_bucket` and `record_run`.
+
+A *Read* integration's tool list leaves the other three tools out, rather than listing them and
+refusing the calls: an agent then never plans a call it cannot make, and the list shows what the
+integration may do. The list is built for each request, so it follows a change of permission at
+the next request; a client that kept an older list gets the MCP library's unknown-tool error.
+`record_run` comes with moving cards because it writes shared board state: a `running` claim holds
+the card for 30 minutes, and people and other agents see it and skip the card. A report agent never
+claims work. Integrations that existed before the permission came keep *Read and move cards*, and
+so does a new one unless the admin picks *Read*.
+
+**MCP moves are Urutau-only.** With *Read and move cards*, `move_card` and `reorder_bucket` change
+card positions in Urutau's database and nothing on GitHub, and `record_run` changes only runs and
+claims in Urutau's database
 and makes no GitHub request at all. No MCP request makes a non-`GET` request to GitHub, and the
 endpoint cannot create or edit issues. Everyone with the board open sees an agent's move
 live, labelled *Agent*. Issue titles, labels and other text come from GitHub and are untrusted:
@@ -436,7 +454,8 @@ an agent should treat them as data, not as instructions.
 
 ### Recording runs (`record_run`)
 
-`record_run` is for any agent that does work on issues; the example `observedBy` below is
+`record_run` is for any agent that does work on issues, and needs the *Read and move cards*
+permission; the example `observedBy` below is
 `carcara/extent-1`. It is an upsert on `runId`, so repeating a call after a crash is safe. An
 omitted field keeps its stored value. Call it when the run starts (`status: "running"`, which
 claims the card), about every 10 minutes while running, whenever the status changes, and once with
@@ -483,7 +502,7 @@ nothing was recorded:
 | `repo-not-allowed` | the repository is not on the integration's list |
 | `no-board` | a claiming status for a repository nobody has opened a board for |
 | `rate-limited` | over 120 calls a minute; `retryAfterSeconds` is given |
-| `call-stopped` | the token was revoked, the integration removed, or the connection closed |
+| `call-stopped` | the token was revoked, the integration removed, its permission reduced, or the connection closed |
 | `server-error` | an unexpected failure; retry the same call |
 
 Input that breaks the schema (a pattern, a length, an unknown key) is refused before Urutau sees
@@ -496,6 +515,11 @@ it, with the MCP library's own text.
 2. **Create the integration.** As the admin, open *Users* in the user menu, then *Agent
    integrations*, and create one. It is an account of its own: it cannot sign in, it is never the
    admin, and its name shares the username namespace with people, so a name a person has is taken.
+   Choose its *Permission*: *Read and move cards* (the default) or *Read*. To change it later,
+   expand the integration's row and pick another; the page sends
+   `PATCH /api/integrations/:id` with `{ "permissions": { "moveCards": true | false } }`. Lowering
+   the permission stops the integration's calls in flight, and the change is written to the
+   server log.
 3. **Add repositories.** The integration can read only the boards of the repositories on its list
    (at most 200).
 4. **Set its GitHub token.** Use a [fine-grained personal access
@@ -649,7 +673,11 @@ until they are set again.
 
 Use one integration per trust domain. Do not give one integration private repositories and an agent
 that reads untrusted public content and can write elsewhere: text in an issue is untrusted input
-to the agent.
+to the agent. Give an agent that only reports the *Read* permission.
+
+Not done yet: a policy per tool call (beyond the integration's permission) and an audit log of tool
+calls. A later permission, such as writing to GitHub, will be one more choice next to *Read and move
+cards* and will start off for existing integrations.
 
 ### Downgrading past the integrations
 
@@ -673,7 +701,21 @@ DELETE FROM kysely_migration WHERE name = '0003_integrations';
 The first statement is optional: without it the integration accounts stay as `users` rows with no
 password that an older build lists as Keycloak users who cannot sign in. Run the
 `0005_github_write_kinds` statements from *Creating and editing issues* before these. If you also
-go back past the issue switch, run the `0002_github_writes` statements afterwards.
+go back past the issue switch, run the `0002_github_writes` statements afterwards. The
+`move_cards` column of `0006_integration_permissions` goes away with the `integrations` table, so
+it needs no statement of its own here; only delete its `kysely_migration` row:
+`DELETE FROM kysely_migration WHERE name = '0006_integration_permissions';`.
+
+**Downgrading past the permissions.** Migration `0006_integration_permissions` adds the
+`move_cards` column to `integrations`. To go back to a build without it, stop the server, run this
+statement against the database, then start the older build:
+
+```sql
+DELETE FROM kysely_migration WHERE name = '0006_integration_permissions';
+```
+
+The older build ignores the column, and every integration can move cards again. Upgrading again
+keeps the column and the permissions stored in it.
 
 ## How issues are placed
 

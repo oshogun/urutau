@@ -1,5 +1,12 @@
 import { vi } from 'vitest'
-import { CLIENT_ID_HEADER, CSRF_HEADER, GITHUB_WRITE_KINDS, NEW_ISSUE_BODY_MAX, NEW_ISSUE_TITLE_MAX } from '../domain/api'
+import {
+  CLIENT_ID_HEADER,
+  CSRF_HEADER,
+  GITHUB_WRITE_KINDS,
+  INTEGRATION_PERMISSIONS,
+  NEW_ISSUE_BODY_MAX,
+  NEW_ISSUE_TITLE_MAX,
+} from '../domain/api'
 import type {
   AcceptInviteRequest,
   ApiErrorBody,
@@ -30,6 +37,7 @@ import type {
   GithubWriteKind,
   GithubWrites,
   IntegrationListResponse,
+  IntegrationPermissions,
   IntegrationSummary,
   ImportBoardsResponse,
   ServerSettings,
@@ -42,6 +50,7 @@ import type {
   SetGitHubTokenResponse,
   SetIntegrationReposRequest,
   SetIntegrationReposResponse,
+  UpdateIntegrationResponse,
   StaleBoardResponse,
   StoredBoard,
   UpdateIssueResponse,
@@ -119,8 +128,8 @@ export interface ApiStubOptions {
   }) => Response | undefined
   /** Whether the server can store GitHub tokens (TOKEN_ENCRYPTION_KEY is set). Default true. */
   githubTokenStorage?: boolean
-  /** Agent integrations at the start. */
-  integrations?: { username: string; repos?: string[]; githubToken?: boolean }[]
+  /** Agent integrations at the start. `moveCards` defaults to true. */
+  integrations?: { username: string; repos?: string[]; githubToken?: boolean; moveCards?: boolean }[]
 }
 
 export interface ApiCall {
@@ -420,6 +429,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
       ? { set: true, readable: githubTokenStorage, status: 'unchecked', updatedAt: stamp() }
       : { set: false, readable: false, status: null, updatedAt: null },
     repos: [...new Set((start.repos ?? []).map((r) => r.toLowerCase()))].sort(),
+    permissions: { moveCards: start.moveCards ?? true },
   }))
   let issuedTokens = 0
 
@@ -585,6 +595,16 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     return ref && repoKey(ref) === path ? { key: path } : null
   }
 
+  /** A `permissions` object as the server reads it: known keys only, each a boolean; null when not. */
+  function readPermissions(input: unknown, nonEmpty: boolean): Partial<IntegrationPermissions> | null {
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) return null
+    const entries = Object.entries(input)
+    if (nonEmpty && entries.length === 0) return null
+    const known = INTEGRATION_PERMISSIONS as readonly string[]
+    if (entries.some(([key, on]) => !known.includes(key) || typeof on !== 'boolean')) return null
+    return Object.fromEntries(entries) as Partial<IntegrationPermissions>
+  }
+
   function integrationsRoute(method: string, tail: string, body: unknown): Response {
     const fields = typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : null
     if (tail === '') {
@@ -598,6 +618,8 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/.test(username)) {
           return error(400, 'invalid-request', 'The username must be 3 to 32 characters: letters, digits, dots, dashes and underscores, starting with a letter or digit.')
         }
+        const permissions = fields?.permissions === undefined ? {} : readPermissions(fields.permissions, false)
+        if (!permissions) return error(400, 'invalid-request', 'permissions must hold only known permissions, each true or false.')
         if (usernameTaken(username)) return takenUsername()
         const integration: IntegrationSummary = {
           id: `integration-${nextId++}`,
@@ -607,6 +629,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
           tokens: [],
           githubToken: { set: false, readable: false, status: null, updatedAt: null },
           repos: [],
+          permissions: { moveCards: permissions.moveCards ?? true },
         }
         integrations.push(integration)
         return toResponse(201, { integration } satisfies CreateIntegrationResponse)
@@ -619,6 +642,13 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     if (!integration) return error(404, 'not-found', 'There is no agent integration with this id.')
     if (more.length > 0) return error(404, 'not-found', 'No such route.')
 
+    if (section === undefined && method === 'PATCH') {
+      const permissions =
+        fields && Object.keys(fields).every((key) => key === 'permissions') ? readPermissions(fields.permissions, true) : null
+      if (!permissions) return error(400, 'invalid-request', 'The body must be a JSON object with only permissions, each true or false.')
+      integration.permissions = { ...integration.permissions, ...permissions }
+      return toResponse(200, { integration } satisfies UpdateIntegrationResponse)
+    }
     if (section === undefined && method === 'DELETE') {
       integrations.splice(integrations.indexOf(integration), 1)
       return toResponse(204, null)

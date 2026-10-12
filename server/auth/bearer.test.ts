@@ -81,7 +81,12 @@ describe('bearerFromHeader', () => {
 describe('verifyBearer', () => {
   test('a live token gives its principal', async () => {
     const { secret, row } = await issue()
-    expect(await verifyBearer(database.db, secret, later(1000))).toEqual({ userId: botId, username: 'planner-bot', tokenId: row.id })
+    expect(await verifyBearer(database.db, secret, later(1000))).toEqual({
+      userId: botId,
+      username: 'planner-bot',
+      tokenId: row.id,
+      permissions: { moveCards: true },
+    })
   })
 
   test('unknown, malformed, revoked and expired tokens give null', async () => {

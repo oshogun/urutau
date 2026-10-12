@@ -11,6 +11,8 @@ import type {
   SetGitHubTokenResponse,
   SetIntegrationReposRequest,
   SetIntegrationReposResponse,
+  UpdateIntegrationRequest,
+  UpdateIntegrationResponse,
   UserListResponse,
 } from '../domain/api'
 import { apiRequest } from './client'
@@ -34,6 +36,8 @@ export const listIntegrations = (signal?: AbortSignal) =>
   apiRequest<IntegrationListResponse>('integrations', { signal })
 export const createIntegration = (request: CreateIntegrationRequest) =>
   apiRequest<CreateIntegrationResponse>('integrations', { method: 'POST', body: request })
+export const updateIntegration = (id: string, request: UpdateIntegrationRequest) =>
+  apiRequest<UpdateIntegrationResponse>(`integrations/${encodeURIComponent(id)}`, { method: 'PATCH', body: request })
 export const removeIntegration = (id: string) =>
   apiRequest<void>(`integrations/${encodeURIComponent(id)}`, { method: 'DELETE' })
 export const createApiToken = (id: string, request: CreateApiTokenRequest) =>

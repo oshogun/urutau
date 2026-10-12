@@ -11,7 +11,7 @@ import { createIntegration } from '../db/integrations.ts'
 import { createAccount } from '../db/users.ts'
 import { createLogger } from '../log.ts'
 import { MCP_WWW_AUTHENTICATE, MCP_WWW_AUTHENTICATE_NO_CREDENTIALS, type McpCallContext } from './contract.ts'
-import { SERVER_INSTRUCTIONS } from './tools.ts'
+import { serverInstructions } from './tools.ts'
 import { createMcpEndpoint, type McpEndpoint } from './endpoint.ts'
 
 const T0 = new Date('2026-10-03T12:00:00.000Z')
@@ -208,7 +208,7 @@ describe('authenticated calls', () => {
     const { secret } = await issue()
     const init = await post(INIT, secret)
     const message = frames(await init.text())[0].result as { instructions?: string } | undefined
-    expect(message?.instructions).toBe(SERVER_INSTRUCTIONS)
+    expect(message?.instructions).toBe(serverInstructions({ moveCards: true }))
   })
 
   test('sends the response headers of a modern request before a slow tool finishes', async () => {

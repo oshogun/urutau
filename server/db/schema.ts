@@ -1,3 +1,4 @@
+import type { Generated } from 'kysely'
 import type { RunStatus, TriageRange, UncertaintyKind } from '../../src/domain/types.ts'
 
 /**
@@ -67,6 +68,7 @@ export interface IntegrationsTable {
   user_id: string // VARCHAR(36) PK, FK users.id ON DELETE CASCADE
   created_by: string | null // VARCHAR(36) FK users.id ON DELETE SET NULL
   created_at: string // VARCHAR(24)
+  move_cards: Generated<number> // INTEGER 0 | 1, NOT NULL DEFAULT 1
 }
 
 export interface ApiTokensTable {

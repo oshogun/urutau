@@ -1,13 +1,17 @@
 import { Hono } from 'hono'
-import type {
-  ApiTokenSummary,
-  CreateApiTokenResponse,
-  CreateIntegrationResponse,
-  GitHubTokenStatus,
-  IntegrationListResponse,
-  IntegrationSummary,
-  SetGitHubTokenResponse,
-  SetIntegrationReposResponse,
+import {
+  INTEGRATION_PERMISSIONS,
+  type ApiTokenSummary,
+  type CreateApiTokenResponse,
+  type CreateIntegrationResponse,
+  type GitHubTokenStatus,
+  type IntegrationListResponse,
+  type IntegrationPermission,
+  type IntegrationPermissions,
+  type IntegrationSummary,
+  type SetGitHubTokenResponse,
+  type SetIntegrationReposResponse,
+  type UpdateIntegrationResponse,
 } from '../../src/domain/api.ts'
 import type { AppContext } from '../app.ts'
 import { newBearerToken } from '../auth/bearer.ts'
@@ -19,7 +23,14 @@ import { createApiToken, deleteApiToken, listApiTokens, type ApiTokenRow } from 
 import { deleteGithubToken, listGithubTokenInfo, putGithubToken, type GithubTokenInfo } from '../db/githubTokens.ts'
 import { isUniqueViolation } from '../db/index.ts'
 import { listAllIntegrationRepos, listIntegrationRepos, setIntegrationRepos } from '../db/integrationRepos.ts'
-import { createIntegration, deleteIntegration, isIntegration, listIntegrations } from '../db/integrations.ts'
+import {
+  createIntegration,
+  deleteIntegration,
+  isIntegration,
+  listIntegrations,
+  setIntegrationPermissions,
+  type IntegrationRow,
+} from '../db/integrations.ts'
 import { checkGitHubToken } from '../github/tokenFormats.ts'
 import { isRecord, readJson } from '../http/body.ts'
 import { HttpError, invalidRequest } from '../http/errors.ts'
@@ -39,6 +50,28 @@ function tokenSummary(row: ApiTokenRow): ApiTokenSummary {
 function githubTokenStatus(info: GithubTokenInfo | undefined, sealer: SecretSealer | null): GitHubTokenStatus {
   if (!info) return { set: false, readable: false, status: null, updatedAt: null }
   return { set: true, readable: sealer !== null && sealer.recognizesKeyId(info.key_id), status: info.status, updatedAt: info.updated_at }
+}
+
+function permissionsOf(row: IntegrationRow): IntegrationPermissions {
+  return { moveCards: row.move_cards === 1 }
+}
+
+function isPermission(key: string): key is IntegrationPermission {
+  return (INTEGRATION_PERMISSIONS as readonly string[]).includes(key)
+}
+
+/** Reads a `permissions` object: known keys only, each a boolean; at least one when `nonEmpty`. */
+function readPermissions(input: unknown, nonEmpty: boolean): Partial<IntegrationPermissions> {
+  if (!isRecord(input) || (nonEmpty && Object.keys(input).length === 0)) {
+    throw invalidRequest('permissions must be a JSON object with a permission to set.')
+  }
+  const permissions: Partial<IntegrationPermissions> = {}
+  for (const [key, on] of Object.entries(input)) {
+    if (!isPermission(key)) throw invalidRequest(`Unknown permission: ${key}.`)
+    if (typeof on !== 'boolean') throw invalidRequest(`permissions.${key} must be true or false.`)
+    permissions[key] = on
+  }
+  return permissions
 }
 
 export function integrationsRoutes(ctx: AppContext) {
@@ -61,6 +94,26 @@ export function integrationsRoutes(ctx: AppContext) {
     if (!(await isIntegration(db, id))) throw notAnIntegration()
   }
 
+  /** The one place an IntegrationSummary is built; `tokens` are this integration's live tokens. */
+  function summary(row: IntegrationRow, tokens: ApiTokenRow[], githubToken: GithubTokenInfo | undefined, repos: string[]): IntegrationSummary {
+    return {
+      id: row.id,
+      username: row.username,
+      createdAt: row.created_at,
+      createdBy: row.created_by !== null && row.created_by_username !== null ? { id: row.created_by, username: row.created_by_username } : null,
+      tokens: tokens.map(tokenSummary),
+      githubToken: githubTokenStatus(githubToken, ctx.githubTokenSealer),
+      repos,
+      permissions: permissionsOf(row),
+    }
+  }
+
+  async function findIntegration(id: string): Promise<IntegrationRow> {
+    const row = (await listIntegrations(db)).find((entry) => entry.id === id)
+    if (!row) throw notAnIntegration()
+    return row
+  }
+
   routes.get('/integrations', requireAdmin, (c) =>
     guarded(async () => {
       const now = ctx.now()
@@ -70,15 +123,14 @@ export function integrationsRoutes(ctx: AppContext) {
         listGithubTokenInfo(db),
         listAllIntegrationRepos(db),
       ])
-      const integrations: IntegrationSummary[] = rows.map((row) => ({
-        id: row.id,
-        username: row.username,
-        createdAt: row.created_at,
-        createdBy: row.created_by !== null && row.created_by_username !== null ? { id: row.created_by, username: row.created_by_username } : null,
-        tokens: tokens.filter((token) => token.user_id === row.id).map(tokenSummary),
-        githubToken: githubTokenStatus(githubTokens.get(row.id), ctx.githubTokenSealer),
-        repos: repos.get(row.id) ?? [],
-      }))
+      const integrations: IntegrationSummary[] = rows.map((row) =>
+        summary(
+          row,
+          tokens.filter((token) => token.user_id === row.id),
+          githubTokens.get(row.id),
+          repos.get(row.id) ?? [],
+        ),
+      )
       const body: IntegrationListResponse = { integrations, githubTokenStorage: ctx.githubTokenSealer !== null }
       return c.json(body)
     }),
@@ -89,28 +141,54 @@ export function integrationsRoutes(ctx: AppContext) {
       const body = await readJson(c)
       if (!isRecord(body) || typeof body.username !== 'string') throw invalidRequest('A username is required.')
       validateUsername(body.username)
+      const permissions = body.permissions === undefined ? {} : readPermissions(body.permissions, false)
       const admin = c.get('auth')!.user
       const now = ctx.now()
       let user
       try {
-        user = await createIntegration(db, { username: body.username, createdBy: admin.id, now })
+        user = await createIntegration(db, { username: body.username, createdBy: admin.id, now, moveCards: permissions.moveCards ?? true })
       } catch (error) {
         if (isUniqueViolation(error)) throw new HttpError(409, 'username-taken', 'That username is already taken.')
         throw error
       }
       ctx.log.info('integration created', { integration: user.id, user: admin.id })
-      const response: CreateIntegrationResponse = {
-        integration: {
-          id: user.id,
-          username: user.username,
-          createdAt: user.created_at,
-          createdBy: { id: admin.id, username: admin.username },
-          tokens: [],
-          githubToken: githubTokenStatus(undefined, ctx.githubTokenSealer),
-          repos: [],
-        },
+      const row: IntegrationRow = {
+        id: user.id,
+        username: user.username,
+        created_at: user.created_at,
+        created_by: admin.id,
+        created_by_username: admin.username,
+        move_cards: (permissions.moveCards ?? true) ? 1 : 0,
       }
+      const response: CreateIntegrationResponse = { integration: summary(row, [], undefined, []) }
       return c.json(response, 201)
+    }),
+  )
+
+  routes.patch('/integrations/:id', requireAdmin, (c) =>
+    guarded(async () => {
+      const id = c.req.param('id')
+      const before = await findIntegration(id)
+      const body = await readJson(c)
+      if (!isRecord(body) || Object.keys(body).some((key) => key !== 'permissions')) {
+        throw invalidRequest('The body must be a JSON object with only permissions.')
+      }
+      const permissions = readPermissions(body.permissions, true)
+      if (!(await setIntegrationPermissions(db, id, permissions))) throw notAnIntegration()
+      const previous = permissionsOf(before)
+      // Calls that passed the permission check before the change stop at their next wait or before they save.
+      if (INTEGRATION_PERMISSIONS.some((key) => previous[key] && permissions[key] === false)) mcp.inflight.abortIntegration(id)
+      const user = c.get('auth')!.user.id
+      ctx.log.info('integration permissions changed', { integration: id, user, ...permissions })
+      const now = ctx.now()
+      const [row, tokens, githubTokens, repos] = await Promise.all([
+        findIntegration(id),
+        listApiTokens(db, id, now),
+        listGithubTokenInfo(db),
+        listIntegrationRepos(db, id),
+      ])
+      const response: UpdateIntegrationResponse = { integration: summary(row, tokens, githubTokens.get(id), repos) }
+      return c.json(response)
     }),
   )
 
