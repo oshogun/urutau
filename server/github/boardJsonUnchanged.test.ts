@@ -73,7 +73,7 @@ const GOLDEN =
 const GOLDEN_START = GOLDEN.slice(0, GOLDEN.indexOf('"bucketsOmitted":0,') + '"bucketsOmitted":0,'.length)
 const GOLDEN_END = GOLDEN.slice(GOLDEN.indexOf('"buckets":[{'))
 
-const OPTIONS = { buckets: null, limitPerBucket: 50, offset: 0, includeClosed: false }
+const OPTIONS = { buckets: null, limitPerBucket: 50, offset: 0, includeClosed: false, includeUnverifiedItems: false }
 const NOW = new Date('2026-10-08T14:00:00.000Z')
 const NO_ACTIVITY = { claims: new Map(), lastRuns: new Map(), waiting: [], now: NOW }
 

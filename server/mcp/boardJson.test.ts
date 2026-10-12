@@ -4,6 +4,7 @@ import { resolveBuckets } from '../../src/domain/board.ts'
 import type { BoardConfig, Bucket, Issue } from '../../src/domain/types.ts'
 import { boardJson, boardListJson, editorJson, readableBoard, windowNumbers, type BoardActivityInput, type BoardJsonOptions } from './boardJson.ts'
 import { bucketIds } from './clean.ts'
+import type { BoardUnverifiedItem } from '../runs/types.ts'
 import { DISPLAY_CAPS, MCP_LIMITS, type BoardSnapshot } from './contract.ts'
 
 function makeIssue(number: number, overrides: Partial<Issue> = {}): Issue {
@@ -34,7 +35,7 @@ function makeBoard(buckets: Bucket[], overrides: Partial<BoardConfig> = {}): Boa
   return { version: 1, buckets, placements: {}, order: {}, closedWindowDays: 14, ...overrides }
 }
 
-const OPTIONS: BoardJsonOptions = { buckets: null, limitPerBucket: 50, offset: 0, includeClosed: false }
+const OPTIONS: BoardJsonOptions = { buckets: null, limitPerBucket: 50, offset: 0, includeClosed: false, includeUnverifiedItems: false }
 
 function stored(board: StoredBoard['board']): StoredBoard {
   return {
@@ -326,6 +327,47 @@ describe('boardJson run activity', () => {
     const stor = stored(makeBoard([makeBucket('todo')]))
     expect(windowNumbers(stor, snapshot(many), { ...OPTIONS, offset: 2, limitPerBucket: 3 })).toEqual([8, 7, 6])
     expect(windowNumbers(stor, snapshot([...many, makeIssue(11, { state: 'closed' })]), OPTIONS)).toHaveLength(10)
+  })
+
+  describe('unverified items', () => {
+    const counts = { external: 0, normative: 0, untested: 1 }
+    const items = [
+      { id: 'U1', kind: 'untested' as const, text: 'login works on Safari', status: 'open' as const },
+      { id: 'U2', kind: 'external' as const, text: 'the API sends ETags', status: 'resolved' as const },
+      { id: 'U3', kind: 'normative' as const, text: 'tokens expire after 1 h', status: 'accepted' as const },
+    ]
+    const activity = (unverifiedItems?: BoardUnverifiedItem[]): BoardActivityInput => ({
+      claims: new Map(),
+      lastRuns: new Map([[3, { runId: 'r3', status: 'done', triageRange: 'S', unverifiedOpen: counts, unverifiedItems }]]),
+      waiting: [],
+      now: NOW,
+    })
+    const three = (answer: ReturnType<typeof build>) => answer.buckets[0].cards.find((c) => c.number === 3)!
+
+    it('lists open, resolved and accepted items in order when asked', () => {
+      const answer = build(stored(board), snapshot(issues), { includeUnverifiedItems: true }, activity(items))
+      expect(three(answer).lastRun).toEqual({ status: 'done', triageRange: 'S', unverifiedOpen: counts, runId: 'r3', unverifiedItems: items })
+    })
+
+    it('leaves the key out when not asked, keeping the counts', () => {
+      const answer = build(stored(board), snapshot(issues), {}, activity(items))
+      expect(three(answer).lastRun).toEqual({ status: 'done', triageRange: 'S', unverifiedOpen: counts, runId: 'r3' })
+      expect(JSON.stringify(answer)).not.toContain('unverifiedItems')
+    })
+
+    it('gives [] for a run without items and null for a card without a run', () => {
+      const answer = build(stored(board), snapshot(issues), { includeUnverifiedItems: true }, activity(undefined))
+      expect(three(answer).lastRun?.unverifiedItems).toEqual([])
+      expect(answer.buckets[0].cards.find((c) => c.number === 1)!.lastRun).toBeNull()
+    })
+
+    it('cleans and caps id and text', () => {
+      const long = { id: 'U9\u202e', kind: 'untested' as const, text: `a\nb\u0007 ${'x'.repeat(400)}`, status: 'open' as const }
+      const [item] = three(build(stored(board), snapshot(issues), { includeUnverifiedItems: true }, activity([long]))).lastRun!.unverifiedItems!
+      expect(item.id).toBe('U9')
+      expect(item.text.startsWith('a b ')).toBe(true)
+      expect(Array.from(item.text)).toHaveLength(DISPLAY_CAPS.itemText)
+    })
   })
 
   it('refuses a board whose estimates are invalid', () => {

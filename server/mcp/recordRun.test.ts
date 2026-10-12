@@ -285,6 +285,33 @@ describe('get_board with runs', () => {
     expect(finished.buckets.flatMap((b) => b.cards).find((c) => c.number === 3)).toMatchObject({ claim: null, lastRun: { runId: 'r-2', status: 'done' } })
   })
 
+  test('lists the last run\'s items with their status only when includeUnverifiedItems is set', async () => {
+    const { agent } = await setUp()
+    const items = [
+      { id: 'U1', kind: 'untested', text: 'the import keeps blank rows' },
+      { id: 'U2', kind: 'external', text: 'the API pages at 100' },
+      { id: 'U3', kind: 'normative', text: 'admins may skip review' },
+    ]
+    await ok(agent, { unverified: items })
+    await ok(agent, { status: 'done', probes: [{ item: 'U1', note: 'tested' }] })
+    const accepted = await h.post(`/api/boards/${REPO}/runs/r-1/items/U3/accept`, {})
+    expect(accepted.status).toBe(201)
+
+    const card2 = (read: GetBoardJson) => read.buckets.flatMap((bucket) => bucket.cards).find((card) => card.number === 2)
+    const withItems = (await agent.bearer.tool('get_board', { repo: REPO, includeUnverifiedItems: true })).structured as unknown as GetBoardJson
+    expect(card2(withItems)?.lastRun).toMatchObject({
+      unverifiedOpen: { external: 1, normative: 0, untested: 0 },
+      unverifiedItems: [
+        { ...items[0], status: 'resolved' },
+        { ...items[1], status: 'open' },
+        { ...items[2], status: 'accepted' },
+      ],
+    })
+    const plain = (await agent.bearer.tool('get_board', { repo: REPO })).structured as unknown as GetBoardJson
+    expect(card2(plain)?.lastRun).not.toHaveProperty('unverifiedItems')
+    expect(card2(plain)?.lastRun?.unverifiedOpen).toEqual(card2(withItems)?.lastRun?.unverifiedOpen)
+  })
+
   test('move_card on a board with estimates and a limit saves both unchanged', async () => {
     const estimate = { size: 'M', confidence: 'sure', by: 'ada', at: '2026-10-07T09:00:00.000Z' }
     const config = board({ humanWaitLimit: 12, estimates: { 2: estimate as never } })

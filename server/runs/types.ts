@@ -6,6 +6,7 @@ import type {
 } from '../../src/domain/api.ts'
 import type {
   HoldingStatus,
+  ItemKind,
   RunStatus,
   TerminalStatus,
   TriageRange,
@@ -106,10 +107,31 @@ export interface BoardActivity {
 
 export type IssueActivity = IssueActivityResponse
 
+/** open: no resolution; resolved: an agent's probe closed it; accepted: a person accepted it. */
+export type BoardItemStatus = 'open' | 'resolved' | 'accepted'
+
+/** A latest-run item as get_board shows it with includeUnverifiedItems. Withdrawn items are left out. */
+export interface BoardUnverifiedItem {
+  id: string
+  kind: ItemKind
+  text: string
+  status: BoardItemStatus
+}
+
 /** For get_board: keyed by issue number. */
 export interface ActivityForCards {
   claims: Map<number, { runId: string; status: HoldingStatus; since: string }>
-  lastRuns: Map<number, { runId: string; status: RunStatus; triageRange: TriageRange | null; unverifiedOpen: UnverifiedCounts }>
+  lastRuns: Map<
+    number,
+    {
+      runId: string
+      status: RunStatus
+      triageRange: TriageRange | null
+      unverifiedOpen: UnverifiedCounts
+      /** Present only when activityFor was asked for items, in stored order. */
+      unverifiedItems?: BoardUnverifiedItem[]
+    }
+  >
 }
 
 export interface WaitingClaim {
@@ -144,7 +166,8 @@ export interface RunStore {
   recordRun(input: RecordRunInput, now: Date): Promise<RecordRunOutcome>
   boardActivity(repoKey: string, now: Date): Promise<BoardActivity>
   issueActivity(repoKey: string, issue: number, now: Date): Promise<IssueActivity>
-  activityFor(repoKey: string, issues: readonly number[], now: Date): Promise<ActivityForCards>
+  /** With items: true, each last run also carries its unverifiedItems. */
+  activityFor(repoKey: string, issues: readonly number[], now: Date, opts?: { items?: boolean }): Promise<ActivityForCards>
   /** Every live claim whose run status is a WaitingStatus, oldest since first, then by issue. */
   waitingClaims(repoKey: string, now: Date): Promise<WaitingClaim[]>
   releaseClaim(repoKey: string, issue: number, runId: string): Promise<ReleaseOutcome>

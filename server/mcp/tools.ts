@@ -94,6 +94,12 @@ export const getBoardInput = z
       .optional()
       .describe('Cards to skip at the top of the bucket. Only allowed when buckets names exactly one bucket. Default 0.'),
     includeClosed: z.boolean().optional().describe('Include closed issues. Default false.'),
+    includeUnverifiedItems: z
+      .boolean()
+      .optional()
+      .describe(
+        "Add lastRun.unverifiedItems to each card: the latest run's unverified items as {id, kind, text, status}, status open, resolved or accepted. Default false.",
+      ),
   })
   .strict()
 
@@ -226,6 +232,18 @@ const card = z.object({
       triageRange: z.enum(['S', 'M', 'L', 'S-M', 'M-L', 'S-L']).nullable(),
       unverifiedOpen: openCounts,
       runId: z.string(),
+      unverifiedItems: z
+        .array(
+          z
+            .object({
+              id: z.string(),
+              kind: z.enum(['external', 'normative', 'untested']),
+              text: z.string(),
+              status: z.enum(['open', 'resolved', 'accepted']),
+            })
+            .strict(),
+        )
+        .optional(),
     })
     .nullable(),
   claim: z.object({ runId: z.string(), status: runStatus, since: z.string() }).nullable(),
@@ -321,6 +339,7 @@ export const TOOL_DEFINITIONS = {
       "Returns one Urutau board as JSON: its buckets in board order, and each bucket's cards (GitHub issues) in the order people see them.",
       'Closed issues are left out unless includeClosed is true. One answer holds at most 300 cards; to page through one large bucket, name it alone in buckets and raise offset.',
       'Each card also has its size estimate, its last agent run and its claim, if any; a card with a claim is being worked on by another run.',
+      "Set includeUnverifiedItems to also get each card's latest-run unverified items with status open, resolved or accepted; combine it with buckets to keep answers small.",
       UNTRUSTED_SENTENCE,
     ].join(' '),
     inputSchema: getBoardInput,
@@ -545,10 +564,11 @@ export function registerTools(server: McpServer, call: McpCallContext, deps: Too
           limitPerBucket: input.limitPerBucket ?? MCP_LIMITS.defaultLimitPerBucket,
           offset,
           includeClosed: input.includeClosed ?? false,
+          includeUnverifiedItems: input.includeUnverifiedItems ?? false,
         }
         const now = deps.now()
         const [activity, waiting] = await Promise.all([
-          deps.runs.activityFor(key, windowNumbers(stored, snapshot, options), now),
+          deps.runs.activityFor(key, windowNumbers(stored, snapshot, options), now, { items: options.includeUnverifiedItems }),
           deps.runs.waitingClaims(key, now),
         ])
         return boardJson(stored, snapshot, ids, options, { ...activity, waiting, now })

@@ -12,6 +12,7 @@ import type {
   EstimateSize,
   HoldingStatus,
   Issue,
+  ItemKind,
   RepoRef,
   RepoSnapshot,
   RunStatus,
@@ -263,6 +264,10 @@ export const DISPLAY_CAPS = {
   username: 64,
   fullName: 140,
   timestamp: 30,
+  /** Matches RUN_LIMITS.itemIdPattern's 32. */
+  itemId: 32,
+  /** Matches RUN_LIMITS.itemTextMax. */
+  itemText: 280,
 } as const
 
 // ---------------------------------------------------------------- tool output JSON
@@ -287,6 +292,13 @@ export interface ListBoardsJson {
   reposWithoutBoard: string[]
 }
 
+export interface CardUnverifiedItemJson {
+  id: string
+  kind: ItemKind
+  text: string
+  status: 'open' | 'resolved' | 'accepted'
+}
+
 export interface CardJson {
   number: number
   title: string
@@ -297,7 +309,18 @@ export interface CardJson {
   comments: number
   updatedAt: string
   estimate: { size: EstimateSize | null; confidence: EstimateConfidence; by: string; at: string } | null
-  lastRun: { status: RunStatus; triageRange: TriageRange | null; unverifiedOpen: UnverifiedCounts; runId: string } | null
+  lastRun: {
+    status: RunStatus
+    triageRange: TriageRange | null
+    unverifiedOpen: UnverifiedCounts
+    runId: string
+    /**
+     * Present only when get_board is called with includeUnverifiedItems: true; [] when the run has none.
+     * The latest run's items in the order record_run sent them; id and text are record_run's values.
+     * Withdrawn items are left out. resolved: an agent's probe closed the item; accepted: a person accepted it.
+     */
+    unverifiedItems?: CardUnverifiedItemJson[]
+  } | null
   claim: { runId: string; status: HoldingStatus; since: string } | null
 }
 

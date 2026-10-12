@@ -429,6 +429,25 @@ describe('reading activity', () => {
     ])
     expect((await runs.boardActivity('acme/other', later(20))).cards).toEqual([])
   })
+
+  it('lists the last run\'s items with their status when asked, leaving withdrawn ones out and the counts unchanged', async () => {
+    await runs.recordRun(
+      call('run-a', { unverified: [item('U1', 'untested'), item('U2', 'external'), item('U3', 'normative'), item('U4', 'external')], probes: [{ item: 'U1', note: null }] }),
+      T0,
+    )
+    await runs.recordRun(call('run-a', { status: 'done', withdrawn: ['U4'] }), later(1))
+    await runs.acceptItem({ repoKey: REPO, runId: 'run-a', itemId: 'U3', userId: person, note: null }, later(2))
+    const plain = (await runs.activityFor(REPO, [7], later(3))).lastRuns.get(7)
+    const withItems = (await runs.activityFor(REPO, [7], later(3), { items: true })).lastRuns.get(7)
+    expect(plain).not.toHaveProperty('unverifiedItems')
+    expect(withItems?.unverifiedOpen).toEqual(plain?.unverifiedOpen)
+    expect(withItems?.unverifiedOpen).toEqual({ external: 1, normative: 0, untested: 0 })
+    expect(withItems?.unverifiedItems).toEqual([
+      { id: 'U1', kind: 'untested', text: 'claim U1', status: 'resolved' },
+      { id: 'U2', kind: 'external', text: 'claim U2', status: 'open' },
+      { id: 'U3', kind: 'normative', text: 'claim U3', status: 'accepted' },
+    ])
+  })
 })
 
 describe('isRetryableTransactionError', () => {

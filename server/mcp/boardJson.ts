@@ -25,6 +25,8 @@ export interface BoardJsonOptions {
   limitPerBucket: number
   offset: number
   includeClosed: boolean
+  /** Add each card's latest-run unverified items to lastRun. */
+  includeUnverifiedItems: boolean
 }
 
 function cleanList(values: readonly unknown[], max: number, limit: number): string[] {
@@ -43,7 +45,7 @@ export interface BoardActivityInput extends ActivityForCards {
   now: Date
 }
 
-function cardJson(issue: Issue, config: BoardConfig, activity: BoardActivityInput): CardJson {
+function cardJson(issue: Issue, config: BoardConfig, activity: BoardActivityInput, withItems: boolean): CardJson {
   const estimate = config.estimates?.[issue.number]
   const lastRun = activity.lastRuns.get(issue.number)
   const claim = activity.claims.get(issue.number)
@@ -70,7 +72,22 @@ function cardJson(issue: Issue, config: BoardConfig, activity: BoardActivityInpu
           }
         : null,
     lastRun: lastRun
-      ? { status: lastRun.status, triageRange: lastRun.triageRange, unverifiedOpen: lastRun.unverifiedOpen, runId: lastRun.runId }
+      ? {
+          status: lastRun.status,
+          triageRange: lastRun.triageRange,
+          unverifiedOpen: lastRun.unverifiedOpen,
+          runId: lastRun.runId,
+          ...(withItems
+            ? {
+                unverifiedItems: (lastRun.unverifiedItems ?? []).map((item) => ({
+                  id: cleanText(item.id, DISPLAY_CAPS.itemId),
+                  kind: item.kind,
+                  text: cleanText(item.text, DISPLAY_CAPS.itemText),
+                  status: item.status,
+                })),
+              }
+            : {}),
+        }
       : null,
     claim: claim ? { runId: claim.runId, status: claim.status, since: claim.since } : null,
   }
@@ -166,7 +183,7 @@ export function boardJson(
   walk: for (let i = 0; i < shown.length; i++) {
     const window = shown[i].list.slice(options.offset, options.offset + options.limitPerBucket)
     for (const issue of window) {
-      const card = cardJson(issue, config, activity)
+      const card = cardJson(issue, config, activity, options.includeUnverifiedItems)
       const size = JSON.stringify(card).length + 1
       if (cardCount >= MCP_LIMITS.cardsPerAnswer || used + size > MCP_LIMITS.answerChars) {
         answer.cardBudgetReached = true

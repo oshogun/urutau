@@ -422,7 +422,7 @@ refusals are `{ "error", "message" }`. It offers five tools:
 | Tool | What it does |
 | --- | --- |
 | `list_boards` | Lists the boards the integration may read. Reads only Urutau. |
-| `get_board` | Returns one board as JSON: buckets and cards in the order people see them. Closed issues are left out unless asked for. |
+| `get_board` | Returns one board as JSON: buckets and cards in the order people see them. Closed issues are left out unless asked for. Set `includeUnverifiedItems` to also get each card's latest-run unverified items. |
 | `move_card` | Moves one open issue's card to a position in a bucket. |
 | `reorder_bucket` | Sets the order of the cards in one bucket in one save. |
 | `record_run` | Records one agent run on one issue: its status, size range and unverified claims, and claims or releases the issue's card. Reads and writes only Urutau. |
@@ -458,6 +458,12 @@ a terminal status.
 `awaiting_approval`, `needs_human` and `budget_exceeded` keep the claim with no lease. The four
 other statuses end the run and delete its claim. A run that has ended never changes. The tool's own
 schema lists every limit.
+
+`get_board` called with `includeUnverifiedItems: true` echoes the items back on each card as
+`lastRun.unverifiedItems`, a list of `{ id, kind, text, status }` for the card's latest run, in the
+order they were sent. `id` and `text` are what `record_run` sent. `status` is `open`, `resolved`
+(closed by a probe) or `accepted` (a person accepted a `normative` item). Withdrawn items are left
+out. Without the option the key is absent; with it, a run without items gives `[]`.
 
 Urutau's errors are a tool result with `isError: true` and `{"error": "<code>", "message": ...}`;
 nothing was recorded:
@@ -630,6 +636,8 @@ the token in a text file in your user folder instead, and use a path without spa
   alone, and the integration makes at most 1,000 GitHub requests an hour.
 - 120 tool calls and 30 moves a minute per integration.
 - At most 300 cards per `get_board` answer; name one bucket and raise `offset` to page through it.
+- `get_board` lists unverified items only with `includeUnverifiedItems`, at most 20 per card; the
+  answer's card and size budget still applies, so name the buckets you need.
 
 ### If a key or token leaks
 

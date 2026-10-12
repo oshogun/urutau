@@ -28,6 +28,7 @@ import {
   type AcceptOutcome,
   type ActivityForCards,
   type BoardActivity,
+  type BoardItemStatus,
   type IssueActivity,
   type RecordRunInput,
   type RecordRunOutcome,
@@ -307,6 +308,11 @@ async function resolutionsOf(db: Kysely<Tables>, runIds: readonly string[]): Pro
     }
   }
   return out
+}
+
+function boardItemStatus(resolution: ItemResolutionView | undefined): BoardItemStatus {
+  if (resolution === undefined) return 'open'
+  return resolution.kind === 'probe' ? 'resolved' : 'accepted'
 }
 
 function itemView(runId: string, item: UnverifiedItem, resolution: ItemResolutionView | undefined): UnverifiedItemView {
@@ -638,14 +644,32 @@ export function createRunStore(db: Kysely<Tables>): RunStore {
       return response
     },
 
-    async activityFor(repoKey: string, issues: readonly number[], now: Date): Promise<ActivityForCards> {
+    async activityFor(repoKey: string, issues: readonly number[], now: Date, opts?: { items?: boolean }): Promise<ActivityForCards> {
       const claims = new Map<number, { runId: string; status: HoldingStatus; since: string }>()
       for (const row of await liveClaims(db, repoKey, now)) {
         claims.set(row.issue, { runId: row.run_id, status: row.status as HoldingStatus, since: row.status_at })
       }
       const last = firstPerIssue(await runsOfIssues(db, repoKey, [...new Set(issues)]))
-      const resolved = await resolvedItemIds(db, [...last.values()].map((row) => row.run_id))
+      const runIds = [...last.values()].map((row) => row.run_id)
       const lastRuns: ActivityForCards['lastRuns'] = new Map()
+      if (opts?.items === true) {
+        const resolutions = await resolutionsOf(db, runIds)
+        for (const [issue, row] of last) {
+          const items = parseItems(row.unverified)
+          const byItem = resolutions.get(row.run_id) ?? new Map<string, ItemResolutionView>()
+          lastRuns.set(issue, {
+            runId: row.run_id,
+            status: row.status,
+            triageRange: row.triage_range,
+            unverifiedOpen: openCounts(items, new Set(byItem.keys())),
+            unverifiedItems: items
+              .filter((item) => item.withdrawnAt === undefined)
+              .map((item) => ({ id: item.id, kind: item.kind, text: item.text, status: boardItemStatus(byItem.get(item.id)) })),
+          })
+        }
+        return { claims, lastRuns }
+      }
+      const resolved = await resolvedItemIds(db, runIds)
       for (const [issue, row] of last) {
         lastRuns.set(issue, {
           runId: row.run_id,

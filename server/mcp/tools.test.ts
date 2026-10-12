@@ -237,6 +237,8 @@ describe('registration', () => {
     const s = setup()
     const input = (name: string) => (s.tools.get(name) as Registered).config.inputSchema as { parse(v: unknown): unknown }
     expect(() => input('get_board').parse({ ...GET, extra: 1 })).toThrow()
+    expect(input('get_board').parse({ ...GET, includeUnverifiedItems: true })).toEqual({ ...GET, includeUnverifiedItems: true })
+    expect(() => input('get_board').parse({ ...GET, includeUnverifiedItems: 'yes' })).toThrow()
     expect(() => input('list_boards').parse({ x: 1 })).toThrow()
     expect(input('move_card').parse({ ...GET, issue: 3 })).toEqual({ ...GET, issue: 3 })
     expect(() => input('reorder_bucket').parse({ ...GET, bucket: 'todo', order: [] })).toThrow()
@@ -335,6 +337,25 @@ describe('get_board', () => {
     expect(answer.buckets).toHaveLength(1)
     expect(answer.buckets[0]).toMatchObject({ id: 'todo', offset: 1, more: true })
     expect(answer.buckets[0].cards.map((card) => card.number)).toEqual([2])
+  })
+
+  it('asks the run store for items only with includeUnverifiedItems and shows them on the card', async () => {
+    const s = setup()
+    const lastRun = { runId: 'r1', status: 'done' as const, triageRange: null, unverifiedOpen: { external: 0, normative: 0, untested: 1 } }
+    const unverifiedItems = [
+      { id: 'U1', kind: 'untested' as const, text: 'one', status: 'open' as const },
+      { id: 'U3', kind: 'normative' as const, text: 'three', status: 'accepted' as const },
+    ]
+    vi.mocked(s.deps.runs.activityFor).mockResolvedValue({ claims: new Map(), lastRuns: new Map([[1, { ...lastRun, unverifiedItems }]]) })
+    const result = await s.call('get_board', { ...GET, includeUnverifiedItems: true })
+    expect(vi.mocked(s.deps.runs.activityFor).mock.calls[0][3]).toEqual({ items: true })
+    const answer = result.structuredContent as { buckets: { cards: { number: number; lastRun: unknown }[] }[] }
+    const card = answer.buckets.flatMap((bucket) => bucket.cards).find((c) => c.number === 1)
+    expect(card?.lastRun).toEqual({ ...lastRun, unverifiedItems })
+    expect(outputSchema(s, 'get_board').parse(result.structuredContent)).toBeTruthy()
+
+    await s.call('get_board', GET)
+    expect(vi.mocked(s.deps.runs.activityFor).mock.calls[1][3]).toEqual({ items: false })
   })
 
   it('answers every error with its code and fixed text', async () => {
