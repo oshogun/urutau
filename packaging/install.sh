@@ -800,15 +800,18 @@ db_path_of() {
 }
 
 # Copies the SQLite database into backups/ when the old configuration points at one.
-# Sets DB_BACKUP_DIR and DB_PATH.
+# Sets DB_BACKUP_DIR and DB_PATH, or DB_NOT_BACKED_UP when the database is not SQLite.
 backup_database() {
   local ts dir n=1 f base d key keep
-  DB_BACKUP_DIR=""
+  DB_BACKUP_DIR=""; DB_NOT_BACKED_UP=0
   DB_PATH="$(db_path_of "$ROOT/urutau.env")"
   if [ -z "$DB_PATH" ]; then
     case "$(env_get "$ROOT/urutau.env" DATABASE_URL)" in
       sqlite:*) ;;
-      *) say "The database is not a SQLite file, so the installer does not back it up. Back it up yourself before upgrading." ;;
+      *)
+        DB_NOT_BACKED_UP=1
+        warn "DATABASE_URL in urutau.env is not a SQLite file (PostgreSQL or MariaDB), so no database backup was made. Back up the database yourself before upgrading: if the new version fails to start, the installer restores the previous version but not its database, and the new version's migrations may already have changed it."
+        ;;
     esac
     return 0
   fi
@@ -902,6 +905,8 @@ rollback() {
     fi
     if [ -n "$DB_BACKUP_DIR" ]; then
       say "The previous version, $old_version, was restored with its configuration and with its database as it was before the upgrade."
+    elif [ "$DB_NOT_BACKED_UP" = 1 ]; then
+      say "The previous version, $old_version, was restored with its configuration. Its database (DATABASE_URL, not SQLite) was not backed up and was not restored; if the new version migrated it, restore it from your own backup (see https://github.com/oshogun/urutau#downgrading-past-the-integrations)."
     else
       say "The previous version, $old_version, was restored with its configuration."
     fi
@@ -1137,7 +1142,7 @@ do_install() {
       esac
     fi
   fi
-  DB_BACKUP_DIR=""; DB_PATH=""
+  DB_BACKUP_DIR=""; DB_PATH=""; DB_NOT_BACKED_UP=0
   stop_server
   if [ "$OLD_HAD_APP" = 1 ] && { [ "$REPLACE_APP" = 1 ] || [ "$NODE_REPLACED" = 1 ]; }; then
     backup_database

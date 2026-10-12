@@ -114,7 +114,7 @@ Inside the root:
 | `node/` | the private Node 24; replaced when its version changes |
 | `urutau.env` | the configuration; the installer and you both edit it |
 | `data/urutau.db` (and `-wal`, `-shm`) | the SQLite database |
-| `backups/urutau-<from>-<UTC>/` | copies of the database taken before an upgrade; the three newest are kept |
+| `backups/urutau-<from>-<UTC>/` | copies of the SQLite database taken before an upgrade; the three newest are kept |
 | `.urutau-install` | marker the installer reads to find what it installed |
 | `bin/`, `run/` | Windows only: the supervisor script and its process ids |
 
@@ -160,13 +160,21 @@ version and checks the port. If any of that fails, the old server keeps running
 unchanged.
 
 Then it stops the service, copies the SQLite database (and its `-wal` and `-shm`
-files) to `backups/`, swaps the app, and starts the new version. A database that
-is not SQLite is not copied; back it up yourself. If the new version does not
-answer `/api/health`, the installer restores the previous app, Node,
-configuration and database, restarts the old version, and exits with the logs
-command. There is no version-ordering check: `--version` with an older number
+files) to `backups/`, swaps the app, and starts the new version. If the new
+version does not answer `/api/health`, the installer restores the previous app,
+Node, configuration and SQLite database, restarts the old version, and exits
+with the logs command. There is no version-ordering check: `--version` with an older number
 installs it, and if that build refuses the migrated database it is rolled back
 the same way. Going back deliberately needs the steps in the
+[README](../README.md#downgrading-past-the-integrations).
+
+**PostgreSQL and MariaDB are not backed up.** When `DATABASE_URL` in
+`urutau.env` points at PostgreSQL or MariaDB, the installer makes no database
+backup, and its upgrade output says so. Back up the database yourself (for
+example with `pg_dump` or `mariadb-dump`) before every upgrade. A failed
+upgrade restores the previous app and configuration but not the database, and
+the new version's migrations may already have changed it; an older build
+refuses a database migrated past it. Restore your backup, or follow the
 [README](../README.md#downgrading-past-the-integrations).
 
 A re-run with no options and nothing newer to install changes nothing.

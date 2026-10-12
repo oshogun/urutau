@@ -200,6 +200,25 @@ jobs:
           # The lookup step above left 0.0.0-ci.1 installed, so that is the version restored.
           test "$(cat "$HOME/.local/share/urutau/app/VERSION")" = 0.0.0-ci.1
           test "$(systemctl --user is-active urutau.service)" = active
+      - name: An upgrade with a database that is not SQLite says it made no backup
+        run: |
+          R="$HOME/.local/share/urutau"
+          cp -p "$R/urutau.env" "$RUNNER_TEMP/urutau.env.saved"
+          before="$(find "$R/backups" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+          # Nothing listens on port 1. The restored old version cannot reach it either, so the
+          # rollback also warns that it did not answer; it still exits 1 with its message.
+          sed -i 's|^DATABASE_URL=.*|DATABASE_URL=postgres://urutau:ci@127.0.0.1:1/urutau|' "$R/urutau.env"
+          if bash packaging/install.sh --bundle bundles/urutau-server-0.0.0-ci.broken.tar.gz > "$RUNNER_TEMP/out-pg.txt" 2>&1; then cat "$RUNNER_TEMP/out-pg.txt"; exit 1; fi
+          cat "$RUNNER_TEMP/out-pg.txt"
+          grep -qF 'no database backup was made' "$RUNNER_TEMP/out-pg.txt"
+          grep -qF 'was not restored' "$RUNNER_TEMP/out-pg.txt"
+          if grep -qF 'with its database as it was' "$RUNNER_TEMP/out-pg.txt"; then exit 1; fi
+          test "$(find "$R/backups" -mindepth 1 -maxdepth 1 -type d | wc -l)" = "$before"
+          # Put the SQLite configuration back and reinstall, so the old version runs again.
+          cp -p "$RUNNER_TEMP/urutau.env.saved" "$R/urutau.env"
+          bash packaging/install.sh --bundle bundles/urutau-server-0.0.0-ci.1.tar.gz --force
+          test "$(curl --noproxy '*' -fsS http://127.0.0.1:8787/api/health)" = '{"ok":true}'
+          test "$(systemctl --user is-active urutau.service)" = active
       - name: Uninstall keeps the configuration and the data
         run: |
           R="$HOME/.local/share/urutau"
@@ -316,6 +335,34 @@ jobs:
           if (-not $failed) { throw 'expected the broken bundle to fail' }
           if ((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8787/api/health).StatusCode -ne 200) { throw 'health' }
           if ((Get-Content -Raw "$R\app\VERSION").Trim() -ne $v) { throw 'wrong version after rollback' }
+      - name: An upgrade with a database that is not SQLite says it made no backup
+        run: |
+          $R = Join-Path $env:LOCALAPPDATA 'Urutau'
+          $config = "$R\urutau.env"
+          Copy-Item -LiteralPath $config "$env:RUNNER_TEMP\urutau.env.saved"
+          $before = @(Get-ChildItem -Directory "$R\backups").Count
+          # The installer writes urutau.env as UTF-8 without a BOM, with LF line ends. Nothing
+          # listens on port 1, so the restored old version does not answer either; the rollback
+          # still throws its message.
+          $utf8 = New-Object System.Text.UTF8Encoding $false
+          $text = [IO.File]::ReadAllText($config, $utf8) -replace '(?m)^DATABASE_URL=.*$', 'DATABASE_URL=postgres://urutau:ci@127.0.0.1:1/urutau'
+          [IO.File]::WriteAllText($config, $text, $utf8)
+          $log = New-Object System.Collections.Generic.List[string]
+          $failed = $false
+          try {
+            & .\packaging\install.ps1 -Bundle (Join-Path $PWD 'bundles\urutau-server-0.0.0-ci.broken.tar.gz') *>&1 | ForEach-Object { $log.Add("$_") }
+          } catch { $failed = $true; $log.Add($_.Exception.Message) }
+          $out = $log -join "`n"
+          Write-Host $out
+          if (-not $failed) { throw 'expected the broken bundle to fail' }
+          if ($out -notmatch 'no database backup was made') { throw 'no notice that the database was not backed up' }
+          if ($out -notmatch 'was not restored') { throw 'the rollback did not say the database was not restored' }
+          if ($out -match 'with its database as it was') { throw 'the rollback claims the database was restored' }
+          if (@(Get-ChildItem -Directory "$R\backups").Count -ne $before) { throw 'a backup was made' }
+          # Put the SQLite configuration back and reinstall, so the old version runs again.
+          Copy-Item -LiteralPath "$env:RUNNER_TEMP\urutau.env.saved" $config -Force
+          & .\packaging\install.ps1 -Bundle (Join-Path $PWD 'bundles\urutau-server-0.0.0-ci.1.tar.gz') -Force
+          if ((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8787/api/health).StatusCode -ne 200) { throw 'health' }
       - name: Uninstall keeps the configuration and the data
         run: |
           $R = Join-Path $env:LOCALAPPDATA 'Urutau'

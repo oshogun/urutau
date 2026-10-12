@@ -79,7 +79,8 @@ between yours and the new one, looking for `BREAKING:`.
 **Installer.** Run the install command again (see
 [install.md](install.md#upgrading)). It copies the SQLite database to
 `backups/` before it swaps the app, and restores the old version if the new one
-does not start. Releases v0.1.0 to v0.5.0 have no bundle, so the installer
+does not start. It does not back up a PostgreSQL or MariaDB database; back that
+up yourself (see [install.md](install.md#upgrading)). Releases v0.1.0 to v0.5.0 have no bundle, so the installer
 works from the first release that has one.
 
 **Container image.** Pull and run the version you want:

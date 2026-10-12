@@ -76,7 +76,7 @@ function Install-Urutau {
         Autostart = 'none'; NodeDir = ''; NodeReplaced = $false; NodeVersion = ''
         ConfigChanged = $false; ReplaceApp = $true; Version = ''; NewVersion = ''
         WantHost = ''; WantPublicUrl = ''; RemovePublicUrl = $false
-        Probe = ''; DbBackupDir = ''; DbPath = ''
+        Probe = ''; DbBackupDir = ''; DbPath = ''; DbNotBackedUp = $false
         AppSwapped = $false; NodeSwapped = $false; ConfigSwapped = $false
         BundlePath = ''; DlCode = 0; FirstRun = $false
     }
@@ -1568,14 +1568,16 @@ try {
     }
 
     # Copies the SQLite database into backups\ when the old configuration points at one.
-    # Sets DbBackupDir and DbPath.
+    # Sets DbBackupDir and DbPath, or DbNotBackedUp when the database is not SQLite.
     function Backup-Database {
         $config = Join-Path $S.Root 'urutau.env'
         $S.DbBackupDir = ''
+        $S.DbNotBackedUp = $false
         $S.DbPath = Get-DatabasePath $config
         if (-not $S.DbPath) {
-            if (-not (Get-EnvValue $config 'DATABASE_URL').StartsWith('sqlite:')) {
-                Say 'The database is not a SQLite file, so the installer does not back it up. Back it up yourself before upgrading.'
+            if (-not ([string](Get-EnvValue $config 'DATABASE_URL')).StartsWith('sqlite:')) {
+                $S.DbNotBackedUp = $true
+                Write-Warn "DATABASE_URL in urutau.env is not a SQLite file (PostgreSQL or MariaDB), so no database backup was made. Back up the database yourself before upgrading: if the new version fails to start, the installer restores the previous version but not its database, and the new version's migrations may already have changed it."
             }
             return
         }
@@ -1676,6 +1678,8 @@ try {
         }
         if ($S.DbBackupDir) {
             $message += "The previous version, $oldVersion, was restored with its configuration and with its database as it was before the upgrade.`n"
+        } elseif ($S.DbNotBackedUp) {
+            $message += "The previous version, $oldVersion, was restored with its configuration. Its database (DATABASE_URL, not SQLite) was not backed up and was not restored; if the new version migrated it, restore it from your own backup (see https://github.com/oshogun/urutau#downgrading-past-the-integrations).`n"
         } else {
             $message += "The previous version, $oldVersion, was restored with its configuration.`n"
         }
@@ -1857,6 +1861,7 @@ try {
         }
         $S.DbBackupDir = ''
         $S.DbPath = ''
+        $S.DbNotBackedUp = $false
         Stop-Server
         if ($oldHadApp -and ($S.ReplaceApp -or $S.NodeReplaced)) { Backup-Database }
         Invoke-Swap
