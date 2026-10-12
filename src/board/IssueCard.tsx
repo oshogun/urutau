@@ -55,7 +55,8 @@ export function IssueCard({
 }: IssueCardProps) {
   const closed = issue.state === 'closed'
   const tag = issueStateTag(issue.state, issue.stateReason)
-  const { estimates, activity, now, humanWaitLimit, repoKey, onEditEstimate, onReleaseClaim } = useCardSignals()
+  const { estimates, activity, now, humanWaitLimit, repoKey, onEditEstimate, onAcceptRange, onReleaseClaim } =
+    useCardSignals()
   const stored = estimates?.[issue.number]
   const estimate = isEstimate(stored) ? stored : null
   const card = activity.get(issue.number)
@@ -73,6 +74,7 @@ export function IssueCard({
   const tone = claim ? claimTone(claim, humanWaitLimit, now) : 'running'
   const canMove = !closed && onMoveTo !== undefined && moveTargets.length > 0
   const canEstimate = onEditEstimate !== undefined
+  const canAcceptRange = onAcceptRange !== undefined && range !== null
   const canRelease = claim !== null && onReleaseClaim !== undefined
   const className = ['issue-card', closed && 'issue-card--closed', isOverlay && 'issue-card--overlay']
     .filter(Boolean)
@@ -106,7 +108,7 @@ export function IssueCard({
             {tag.short}
           </Tag>
         )}
-        {!isOverlay && (canMove || canEstimate || canRelease) && (
+        {!isOverlay && (canMove || canEstimate || canAcceptRange || canRelease) && (
           <OverflowMenu
             size="sm"
             flipped
@@ -126,6 +128,13 @@ export function IssueCard({
                 itemText={estimate ? 'Change estimate…' : 'Set estimate…'}
                 hasDivider={canMove}
                 onClick={() => onEditEstimate(issue.number, null)}
+              />
+            )}
+            {canAcceptRange && (
+              <OverflowMenuItem
+                itemText="Accept as estimate…"
+                hasDivider={canMove && !canEstimate}
+                onClick={() => onAcceptRange(issue.number, range, null)}
               />
             )}
             {canRelease && (

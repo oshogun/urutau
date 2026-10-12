@@ -2024,6 +2024,58 @@ describe('App', () => {
       expect(stub.board('acme/widgets')?.board.estimates?.[1]).toMatchObject({ size: 'M', confidence: 'unsure' })
     })
 
+    it('accepts a one-size triage range as the estimate from the card menu', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      stub.setActivity('acme/widgets', 1, { runs: [makeRunDetail('r-1', { status: 'plan_only', triageRange: 'M' })] })
+      await screen.findByText('triage: M')
+      await user.click(screen.getByRole('button', { name: 'Actions for issue #1' }))
+      await user.click(await screen.findByText('Accept as estimate…'))
+      const dialog = await screen.findByRole('dialog', { name: /Estimate for #1/ })
+      expect(within(dialog).getByLabelText('M · Medium')).toBeChecked()
+      expect(within(dialog).queryByLabelText('S · Small')).not.toBeInTheDocument()
+      expect(within(dialog).queryByLabelText('L · Large')).not.toBeInTheDocument()
+      expect(within(dialog).queryByLabelText('No idea')).not.toBeInTheDocument()
+      await user.click(within(dialog).getByLabelText('Unsure'))
+      await user.click(within(dialog).getByRole('button', { name: 'Save' }))
+      expect(await screen.findByRole('button', { name: 'Estimate: medium, unsure. Change estimate' })).toBeInTheDocument()
+      const stored = stub.board('acme/widgets')?.board.estimates?.[1]
+      expect(stored).toMatchObject({ size: 'M', confidence: 'unsure', by: 'ada' })
+      expect(Number.isNaN(Date.parse(stored?.at ?? ''))).toBe(false)
+    })
+
+    it('asks for a size inside a wider triage range before saving it', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      stub.setActivity('acme/widgets', 1, { runs: [makeRunDetail('r-1', { status: 'plan_only', triageRange: 'S-M' })] })
+      await screen.findByText('triage: S–M')
+      await user.click(screen.getByRole('button', { name: 'Actions for issue #1' }))
+      await user.click(await screen.findByText('Accept as estimate…'))
+      const dialog = await screen.findByRole('dialog', { name: /Estimate for #1/ })
+      expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
+      expect(within(dialog).queryByLabelText('L · Large')).not.toBeInTheDocument()
+      await user.click(within(dialog).getByLabelText('S · Small'))
+      await user.click(within(dialog).getByRole('button', { name: 'Save' }))
+      await waitFor(() =>
+        expect(stub.board('acme/widgets')?.board.estimates?.[1]).toMatchObject({ size: 'S', confidence: 'sure', by: 'ada' }),
+      )
+    })
+
+    it('accepts a triage range from the issue details and returns to them', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
+      stub.setActivity('acme/widgets', 1, { runs: [makeRunDetail('r-1', { status: 'plan_only', triageRange: 'S-M' })] })
+      await screen.findByText('triage: S–M')
+      await user.click(screen.getByRole('button', { name: 'Show details of issue #1' }))
+      await user.click(await screen.findByRole('button', { name: 'Accept triage range S–M as estimate' }))
+      const dialog = await screen.findByRole('dialog', { name: /Estimate for #1/ })
+      await user.click(within(dialog).getByLabelText('M · Medium'))
+      await user.click(within(dialog).getByRole('button', { name: 'Save' }))
+      const details = await screen.findByRole('dialog', { name: 'acme/widgets #1' })
+      await waitFor(() => expect(within(details).getByText(/set by/).closest('dd')).toHaveTextContent(/sure · set by ada/))
+      expect(stub.board('acme/widgets')?.board.estimates?.[1]).toMatchObject({ size: 'M', confidence: 'sure', by: 'ada' })
+    })
+
     it('shows the claim, the waiting count and Release to a signed-in person, and releases with confirmation', async () => {
       const user = userEvent.setup()
       renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 1)] })
@@ -2064,6 +2116,7 @@ describe('App', () => {
       expect(await screen.findByRole('heading', { name: 'Sign in to Urutau' })).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /Release/ })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /^Accept/ })).not.toBeInTheDocument()
+      expect(screen.queryByText('Accept as estimate…')).not.toBeInTheDocument()
       expect(screen.queryByText(/waiting on a human/)).not.toBeInTheDocument()
     })
   })

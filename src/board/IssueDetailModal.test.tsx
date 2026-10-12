@@ -845,4 +845,46 @@ describe('IssueDetailModal agent runs', () => {
     await user.click(screen.getByRole('button', { name: 'Click again to release' }))
     await waitFor(() => expect(screen.queryByText(/^Running for/)).not.toBeInTheDocument())
   })
+
+  it('offers Accept as estimate next to the last run\'s range only to a signed-in person', async () => {
+    const user = userEvent.setup()
+    stub.setActivity('acme/widgets', 12, {
+      runs: [
+        makeRunDetail('r-2', { status: 'plan_only', triageRange: 'S-M', endedAt: '2026-10-08T12:10:00.000Z' }),
+        makeRunDetail('r-1', { status: 'plan_only', triageRange: 'L', endedAt: '2026-10-07T12:10:00.000Z' }),
+      ],
+    })
+    const onAcceptRange = vi.fn()
+    const renderWith = (accept?: typeof onAcceptRange) =>
+      render(
+        <IssueDetailModal
+          issue={makeIssue(12, { body: '' })}
+          repoFullName="acme/widgets"
+          labelsByName={new Map()}
+          fetchedAt={0}
+          launcherButtonRef={createRef<HTMLButtonElement>()}
+          onClose={() => {}}
+          onAcceptRange={accept}
+        />,
+      )
+    // Signed out: the range shows without the action.
+    const signedOut = renderWith(onAcceptRange)
+    expect(await screen.findByText(/^Triage range S–M/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /as estimate$/ })).not.toBeInTheDocument()
+    signedOut.unmount()
+
+    await useSession.getState().load()
+    const withoutProp = renderWith(undefined)
+    expect(await screen.findByText(/^Triage range S–M/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /as estimate$/ })).not.toBeInTheDocument()
+    withoutProp.unmount()
+
+    renderWith(onAcceptRange)
+    await user.click(await screen.findByRole('button', { name: 'Accept triage range S–M as estimate' }))
+    expect(onAcceptRange).toHaveBeenCalledWith(12, 'S-M')
+    // Earlier runs keep their range but never offer it.
+    await user.click(screen.getByRole('button', { name: 'Earlier runs (1)' }))
+    expect(screen.getByText(/^Triage range L/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Accept triage range L as estimate' })).not.toBeInTheDocument()
+  })
 })

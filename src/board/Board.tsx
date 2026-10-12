@@ -24,7 +24,7 @@ import {
 import { EMPTY_FILTERS, isFiltering, matchesFilters } from '../domain/filters'
 import { keepEstimates } from '../domain/estimates'
 import { repoKey as repoKeyOf } from '../domain/repoRef'
-import type { BoardConfig, Bucket, Issue, RepoRef, RepoSnapshot } from '../domain/types'
+import type { BoardConfig, Bucket, Issue, RepoRef, RepoSnapshot, TriageRange } from '../domain/types'
 import { useBoardActivity } from '../hooks/useCardActivity'
 import type { CreateIssueInput } from '../hooks/useCreateIssue'
 import type { IssueUpdater } from '../hooks/useUpdateIssue'
@@ -72,7 +72,8 @@ type Dialog =
   | { kind: 'delete-bucket'; bucket: Bucket }
   | { kind: 'board-settings' }
   | { kind: 'issue-detail'; issue: Issue }
-  | { kind: 'estimate'; issue: number }
+  // `range` limits the sizes to an agent's triage range; `back` is the dialog to return to on close.
+  | { kind: 'estimate'; issue: number; range?: TriageRange; back?: Dialog }
   | { kind: 'release-claim'; issue: number; claim: ClaimView }
   | { kind: 'claims' }
   // `create` is kept here so the dialog survives the switch being turned off while it is open.
@@ -152,6 +153,10 @@ export function Board({
       onEditEstimate: (issue, launcher) => {
         estimateLauncher.current = launcher
         setDialog({ kind: 'estimate', issue })
+      },
+      onAcceptRange: (issue, range, launcher) => {
+        estimateLauncher.current = launcher
+        setDialog({ kind: 'estimate', issue, range })
       },
       onReleaseClaim: signedIn
         ? (issue) => {
@@ -414,6 +419,7 @@ export function Board({
               onOpenSettings()
             }}
             onRefresh={onRefresh}
+            onAcceptRange={(issue, range) => setDialog({ kind: 'estimate', issue, range, back: dialog })}
             onClose={() => {
               const number = dialog.issue.number
               closeDialog()
@@ -467,8 +473,13 @@ export function Board({
           <EstimateModal
             issue={dialog.issue}
             estimate={config.estimates?.[dialog.issue] ?? null}
+            range={dialog.range ?? null}
             onSave={onSetEstimate}
             onClose={() => {
+              if (dialog.back) {
+                setDialog(dialog.back)
+                return
+              }
               const number = dialog.issue
               closeDialog()
               const launcher = estimateLauncher.current

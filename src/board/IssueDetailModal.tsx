@@ -35,7 +35,7 @@ import {
 import { ageText, claimIsLive, statusLabel } from '../domain/activity'
 import { estimateLabel } from '../domain/estimates'
 import { labelFor } from '../domain/labels'
-import type { Estimate, Issue, Label, User } from '../domain/types'
+import type { Estimate, Issue, Label, TriageRange, User } from '../domain/types'
 import { UpdateIssueError, updateIssueFailures } from '../github/updateIssue'
 import { useIssueActivity } from '../hooks/useCardActivity'
 import type { IssueUpdater } from '../hooks/useUpdateIssue'
@@ -67,6 +67,8 @@ export interface IssueDetailModalProps {
   onOpenSettings?: () => void
   /** Refetches the board; shown as a notice action when GitHub may hold a different version. */
   onRefresh?: () => void
+  /** Opens the estimate dialog for an agent's triage range; absent where estimates cannot be set. */
+  onAcceptRange?: (issue: number, range: TriageRange) => void
 }
 
 /** Counts Unicode code points, as GitHub and the server do; `length` counts UTF-16 units. */
@@ -170,6 +172,7 @@ export function IssueDetailModal({
   onUpdate: currentUpdate = null,
   onOpenSettings,
   onRefresh,
+  onAcceptRange,
 }: IssueDetailModalProps) {
   const [editor, setEditor] = useState<Editor | null>(null)
   const [sending, setSending] = useState<IssueStateAction | 'edit' | null>(null)
@@ -737,6 +740,7 @@ export function IssueDetailModal({
           runs={activity.data.runs}
           moreRuns={activity.data.moreRuns}
           onAccept={signedIn ? activity.accept : undefined}
+          onAcceptRange={signedIn && onAcceptRange ? (range) => onAcceptRange(issue.number, range) : undefined}
         />
       )}
 

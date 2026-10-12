@@ -1,7 +1,8 @@
 import { InlineNotification, Modal, RadioButton, RadioButtonGroup, Stack, Button } from '@carbon/react'
 import { useState } from 'react'
+import { triageRangeSizes, triageRangeText } from '../domain/activity'
 import type { SetEstimateRequest } from '../domain/api'
-import type { Estimate, EstimateConfidence, EstimateSize } from '../domain/types'
+import type { Estimate, EstimateConfidence, EstimateSize, TriageRange } from '../domain/types'
 
 interface EstimateModalProps {
   issue: number
@@ -10,6 +11,11 @@ interface EstimateModalProps {
   /** Saves the estimate, or removes it with null. Rejects with the server's error. */
   onSave: (issue: number, request: SetEstimateRequest | null) => Promise<void>
   onClose: () => void
+  /**
+   * An agent's triage range being accepted as the estimate: only its sizes are offered,
+   * a one-size range starts on that size, and 'No idea' and Remove are left out.
+   */
+  range?: TriageRange | null
 }
 
 const SIZES: ReadonlyArray<{ value: EstimateSize; label: string }> = [
@@ -24,9 +30,26 @@ const CONFIDENCES: ReadonlyArray<{ value: EstimateConfidence; label: string }> =
   { value: 'no-idea', label: 'No idea' },
 ]
 
-export function EstimateModal({ issue, estimate, onSave, onClose }: EstimateModalProps) {
-  const [size, setSize] = useState<EstimateSize | null>(estimate?.size ?? null)
-  const [confidence, setConfidence] = useState<EstimateConfidence>(estimate?.confidence ?? 'sure')
+function initialSize(estimate: Estimate | null, rangeSizes: EstimateSize[] | null): EstimateSize | null {
+  if (rangeSizes === null) return estimate?.size ?? null
+  if (rangeSizes.length === 1) return rangeSizes[0]
+  return estimate?.size && rangeSizes.includes(estimate.size) ? estimate.size : null
+}
+
+function initialConfidence(estimate: Estimate | null, accepting: boolean): EstimateConfidence {
+  const confidence = estimate?.confidence ?? 'sure'
+  return accepting && confidence === 'no-idea' ? 'sure' : confidence
+}
+
+export function EstimateModal({ issue, estimate, onSave, onClose, range = null }: EstimateModalProps) {
+  const rangeSizes = range === null ? null : triageRangeSizes(range)
+  const sizes = rangeSizes === null ? SIZES : SIZES.filter((option) => rangeSizes.includes(option.value))
+  const confidences =
+    range === null ? CONFIDENCES : CONFIDENCES.filter((option) => option.value !== 'no-idea')
+  const [size, setSize] = useState<EstimateSize | null>(() => initialSize(estimate, rangeSizes))
+  const [confidence, setConfidence] = useState<EstimateConfidence>(() =>
+    initialConfidence(estimate, range !== null),
+  )
   const [busy, setBusy] = useState<'save' | 'remove' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const noIdea = confidence === 'no-idea'
@@ -60,6 +83,9 @@ export function EstimateModal({ issue, estimate, onSave, onClose }: EstimateModa
       onRequestClose={onClose}
     >
       <Stack gap={6}>
+        {range !== null && (
+          <p className="estimate-modal__range">Agent's triage range: {triageRangeText(range)}</p>
+        )}
         <RadioButtonGroup
           legendText="Size"
           name={`estimate-size-${issue}`}
@@ -67,7 +93,7 @@ export function EstimateModal({ issue, estimate, onSave, onClose }: EstimateModa
           disabled={noIdea}
           onChange={(value) => setSize(value as EstimateSize)}
         >
-          {SIZES.map((option) => (
+          {sizes.map((option) => (
             <RadioButton
               key={option.value}
               id={`estimate-size-${issue}-${option.value}`}
@@ -82,7 +108,7 @@ export function EstimateModal({ issue, estimate, onSave, onClose }: EstimateModa
           valueSelected={confidence}
           onChange={(value) => setConfidence(value as EstimateConfidence)}
         >
-          {CONFIDENCES.map((option) => (
+          {confidences.map((option) => (
             <RadioButton
               key={option.value}
               id={`estimate-confidence-${issue}-${option.value}`}
@@ -91,7 +117,7 @@ export function EstimateModal({ issue, estimate, onSave, onClose }: EstimateModa
             />
           ))}
         </RadioButtonGroup>
-        {estimate && (
+        {estimate && range === null && (
           <div>
             <Button kind="ghost" size="sm" disabled={busy !== null} onClick={() => void run('remove', null)}>
               Remove estimate

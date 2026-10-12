@@ -827,6 +827,12 @@ $page-gutter: $spacing-07;
   color: $text-secondary;
 }
 
+.estimate-modal__range {
+  @include type.type-style('body-compact-01');
+
+  color: $text-secondary;
+}
+
 // ---------------------------------------------------------------------------
 // The issue's description, rendered from the parsed tree
 

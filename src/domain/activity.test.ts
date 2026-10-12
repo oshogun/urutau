@@ -11,6 +11,7 @@ import {
   statusLabel,
   triageDisagrees,
   triageFlagText,
+  triageRangeSizes,
   triageRangeText,
   triageTagText,
   unverifiedFlagText,
@@ -65,6 +66,14 @@ describe('triage range helpers', () => {
     expect(triageRangeText('S-M')).toBe('S–M')
     expect(triageRangeText('M-L')).toBe('M–L')
     expect(triageRangeText('S-L')).toBe('S–L')
+  })
+  it('lists the sizes a range spans, smallest first', () => {
+    expect(triageRangeSizes('S')).toEqual(['S'])
+    expect(triageRangeSizes('M')).toEqual(['M'])
+    expect(triageRangeSizes('L')).toEqual(['L'])
+    expect(triageRangeSizes('S-M')).toEqual(['S', 'M'])
+    expect(triageRangeSizes('M-L')).toEqual(['M', 'L'])
+    expect(triageRangeSizes('S-L')).toEqual(['S', 'M', 'L'])
   })
   it('disagrees only when an estimate with a size is outside the range', () => {
     expect(triageDisagrees(null, 'M')).toBe(false)

@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CardActivity, RunSummaryView } from '../domain/api'
 import type { Estimate } from '../domain/types'
 import { issueActivityKey, useActivity } from '../state/activityStore'
@@ -179,5 +180,31 @@ describe('IssueCard triage range', () => {
     unmount()
     renderCard({ activity: activityOf(lastRun({ triageRange: null })) })
     expect(screen.getByText('Question answered')).toBeInTheDocument()
+  })
+
+  it('offers Accept as estimate in the card menu and passes the issue and range', async () => {
+    const onAcceptRange = vi.fn()
+    renderCard({ activity: activityOf(lastRun()), onEditEstimate: vi.fn(), onAcceptRange })
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Actions for issue #7' }))
+    await user.click(await screen.findByText('Accept as estimate…'))
+    expect(onAcceptRange).toHaveBeenCalledWith(7, 'S-M', null)
+  })
+
+  it('offers Accept as estimate only with a range and the callback', async () => {
+    const user = userEvent.setup()
+    const { unmount } = renderCard({
+      activity: activityOf(lastRun({ triageRange: null })),
+      onEditEstimate: vi.fn(),
+      onAcceptRange: vi.fn(),
+    })
+    await user.click(screen.getByRole('button', { name: 'Actions for issue #7' }))
+    expect(await screen.findByText('Set estimate…')).toBeInTheDocument()
+    expect(screen.queryByText('Accept as estimate…')).toBeNull()
+    unmount()
+    renderCard({ activity: activityOf(lastRun()), onEditEstimate: vi.fn() })
+    await user.click(screen.getByRole('button', { name: 'Actions for issue #7' }))
+    expect(await screen.findByText('Set estimate…')).toBeInTheDocument()
+    expect(screen.queryByText('Accept as estimate…')).toBeNull()
   })
 })

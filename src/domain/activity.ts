@@ -43,6 +43,12 @@ export function triageRangeText(range: TriageRange): string {
   return low === high ? low : `${low}–${high}`
 }
 
+/** The sizes a range spans, smallest first: 'S-L' → ['S', 'M', 'L']. */
+export function triageRangeSizes(range: TriageRange): EstimateSize[] {
+  const [low, high] = RANGE_BOUNDS[range]
+  return SIZE_ORDER.slice(SIZE_ORDER.indexOf(low), SIZE_ORDER.indexOf(high) + 1)
+}
+
 /** True when a person's estimate has a size and it is outside the run's triage range. */
 export function triageDisagrees(estimate: Estimate | null, range: TriageRange | null): boolean {
   if (!estimate || estimate.size === null || range === null) return false

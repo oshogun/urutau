@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { ApiError } from '../api/client'
 import { runOutcomeLabel, triageRangeText } from '../domain/activity'
 import type { RunDetailView, UnverifiedItemView } from '../domain/api'
+import type { TriageRange } from '../domain/types'
 import { holderName, httpsLink } from './runDisplay'
 
 function RunDate({ iso }: { iso: string }) {
@@ -90,9 +91,11 @@ interface RunBlockProps {
   run: RunDetailView
   busyItem: string | null
   onAccept?: (item: UnverifiedItemView) => void
+  /** Only for the last run, and absent for anyone who cannot set estimates. */
+  onAcceptRange?: (range: TriageRange) => void
 }
 
-function RunBlock({ run, busyItem, onAccept }: RunBlockProps) {
+function RunBlock({ run, busyItem, onAccept, onAcceptRange }: RunBlockProps) {
   return (
     <div className="run-block">
       <p className="run-block__line">
@@ -104,6 +107,19 @@ function RunBlock({ run, busyItem, onAccept }: RunBlockProps) {
         <p className="run-block__note">
           Triage range {triageRangeText(run.triageRange)}
           {run.uncertaintyKind ? ` · uncertainty: ${run.uncertaintyKind}` : ''}
+          {onAcceptRange && (
+            <>
+              {' '}
+              <Button
+                kind="tertiary"
+                size="sm"
+                aria-label={`Accept triage range ${triageRangeText(run.triageRange)} as estimate`}
+                onClick={() => run.triageRange !== null && onAcceptRange(run.triageRange)}
+              >
+                Accept as estimate
+              </Button>
+            </>
+          )}
         </p>
       )}
       {run.status === 'plan_only' && (
@@ -129,9 +145,11 @@ interface AgentRunsProps {
   moreRuns: boolean
   /** Accepts a normative item; absent for anyone who cannot. Rejects with the server's error. */
   onAccept?: (runId: string, itemId: string) => Promise<void>
+  /** Opens the estimate dialog for the last run's triage range; absent for anyone who cannot set estimates. */
+  onAcceptRange?: (range: TriageRange) => void
 }
 
-export function AgentRuns({ runs, moreRuns, onAccept }: AgentRunsProps) {
+export function AgentRuns({ runs, moreRuns, onAccept, onAcceptRange }: AgentRunsProps) {
   const [busyItem, setBusyItem] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   if (runs.length === 0) return null
@@ -174,7 +192,7 @@ export function AgentRuns({ runs, moreRuns, onAccept }: AgentRunsProps) {
           }}
         />
       )}
-      <RunBlock run={last} busyItem={busyItem} onAccept={accept} />
+      <RunBlock run={last} busyItem={busyItem} onAccept={accept} onAcceptRange={onAcceptRange} />
       {earlier.length > 0 && (
         <Accordion>
           <AccordionItem title={`Earlier runs (${earlier.length})`}>

@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { CardActivity } from '../domain/api'
-import type { Estimate } from '../domain/types'
+import type { Estimate, TriageRange } from '../domain/types'
 
 /** What the cards of a board need besides their issue: estimates, claims and the last run, and the clock they are judged by. */
 export interface CardSignals {
@@ -13,6 +13,8 @@ export interface CardSignals {
   repoKey?: string
   /** Absent while nobody can change estimates here. */
   onEditEstimate?: (issue: number, launcher: HTMLElement | null) => void
+  /** Opens the estimate dialog limited to an agent's triage range; absent whenever onEditEstimate is. */
+  onAcceptRange?: (issue: number, range: TriageRange, launcher: HTMLElement | null) => void
   /** Absent for anyone who cannot release a claim. */
   onReleaseClaim?: (issue: number) => void
 }
