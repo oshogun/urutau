@@ -1,14 +1,20 @@
 /** POST /mcp: origin, query and bearer checks, then the MCP SDK. */
-import { createMcpHandler, McpServer, type AuthInfo } from '@modelcontextprotocol/server'
+import { createMcpHandler, isJsonContentType, McpServer, readRequestBody, type AuthInfo } from '@modelcontextprotocol/server'
 import { Hono, type Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { bearerFromHeader } from '../auth/bearer.ts'
 import type { Logger } from '../log.ts'
 import {
+  jsonRpcError,
   MCP_HTTP_ERROR_TEXT,
+  MCP_JSONRPC_BATCH_TEXT,
+  MCP_JSONRPC_INVALID_REQUEST,
+  MCP_JSONRPC_PARSE_ERROR,
+  MCP_JSONRPC_PARSE_ERROR_TEXT,
   MCP_LIMITS,
   MCP_SERVER_INFO,
   MCP_WWW_AUTHENTICATE,
+  MCP_WWW_AUTHENTICATE_NO_CREDENTIALS,
   type McpCallContext,
   type McpHttpErrorCode,
   type McpPrincipal,
@@ -45,6 +51,44 @@ export function withoutCredentials(raw: Request): Request {
   headers.delete('cookie')
   headers.delete('proxy-authorization')
   return new Request(raw, { headers, signal: raw.signal })
+}
+
+/** RFC 6750 §3.1: no error attribute when the request sent no credentials at all. */
+function challengeFor(req: Request): string {
+  return req.headers.has('authorization') ? MCP_WWW_AUTHENTICATE : MCP_WWW_AUTHENTICATE_NO_CREDENTIALS
+}
+
+/** The 413 the SDK itself would give for a body over MCP_LIMITS.requestBodyBytes. */
+const BODY_TOO_LARGE_TEXT = `Payload Too Large: Request body must not exceed ${MCP_LIMITS.requestBodyBytes} bytes`
+
+/**
+ * Reads a JSON POST body up to the byte cap and refuses what the SDK must not see: a body that is
+ * not JSON (-32700) and a batch (-32600). MCP 2025-06-18 removed JSON-RPC batching; refusing it
+ * here also means a batch's tools/list and ping calls can no longer get past the call limits.
+ * Returns the request to forward and its parsed body, or the refusal.
+ */
+async function preparseBody(raw: Request): Promise<{ request: Request; parsedBody: unknown } | Response> {
+  let text: string
+  try {
+    const read = await readRequestBody(raw, MCP_LIMITS.requestBodyBytes)
+    if (read.tooLarge) return Response.json(jsonRpcError(-32000, BODY_TOO_LARGE_TEXT), { status: 413 })
+    text = read.text
+  } catch {
+    return Response.json(jsonRpcError(MCP_JSONRPC_PARSE_ERROR, MCP_JSONRPC_PARSE_ERROR_TEXT), { status: 400 })
+  }
+  let parsedBody: unknown
+  try {
+    parsedBody = JSON.parse(text)
+  } catch {
+    return Response.json(jsonRpcError(MCP_JSONRPC_PARSE_ERROR, MCP_JSONRPC_PARSE_ERROR_TEXT), { status: 400 })
+  }
+  if (Array.isArray(parsedBody)) {
+    return Response.json(jsonRpcError(MCP_JSONRPC_INVALID_REQUEST, MCP_JSONRPC_BATCH_TEXT), { status: 400 })
+  }
+  const headers = new Headers(raw.headers)
+  headers.delete('content-length')
+  const request = new Request(raw.url, { method: raw.method, headers, body: text, signal: raw.signal })
+  return { request, parsedBody }
 }
 
 function errorResponse(status: ContentfulStatusCode, error: McpHttpErrorCode, headers: Record<string, string> = {}): Response {
@@ -99,8 +143,10 @@ export function createMcpEndpoint(deps: McpEndpointDeps): McpEndpoint {
         return errorResponse(403, 'origin-rejected')
       }
     } else {
+      // Browsers send 'none' only for navigations the user started (address bar, bookmark), which no
+      // cross-site page can cause; clients that are not browsers send no Sec-Fetch-Site at all.
       const site = c.req.header('sec-fetch-site')
-      if (site !== undefined && site !== 'same-origin') {
+      if (site !== undefined && site !== 'same-origin' && site !== 'none') {
         record(403)
         return errorResponse(403, 'origin-rejected')
       }
@@ -130,7 +176,7 @@ export function createMcpEndpoint(deps: McpEndpointDeps): McpEndpoint {
       }
       deps.failures.recordFailure(ip)
       record(401)
-      return errorResponse(401, 'invalid-token', { 'WWW-Authenticate': MCP_WWW_AUTHENTICATE })
+      return errorResponse(401, 'invalid-token', { 'WWW-Authenticate': challengeFor(c.req.raw) })
     }
     user = principal.userId
     principals.set(c.req.raw, principal)
@@ -146,11 +192,20 @@ export function createMcpEndpoint(deps: McpEndpointDeps): McpEndpoint {
 
   routes.post('/mcp', async (c) => {
     const principal = principals.get(c.req.raw)
-    if (!principal) return errorResponse(401, 'invalid-token', { 'WWW-Authenticate': MCP_WWW_AUTHENTICATE })
+    if (!principal) return errorResponse(401, 'invalid-token', { 'WWW-Authenticate': challengeFor(c.req.raw) })
     const authInfo: AuthInfo = { token: VERIFIED_PLACEHOLDER, clientId: principal.userId, scopes: [] }
     calls.set(authInfo, { principal })
+    // A body that is not JSON by its Content-Type goes on unread, so the SDK still answers 415.
+    let request = c.req.raw
+    let parsedBody: unknown
+    if (isJsonContentType(request.headers.get('content-type'))) {
+      const prepared = await preparseBody(request)
+      if (prepared instanceof Response) return prepared
+      request = prepared.request
+      parsedBody = prepared.parsedBody
+    }
     try {
-      return await handler.fetch(withoutCredentials(c.req.raw), { authInfo })
+      return await handler.fetch(withoutCredentials(request), { authInfo, ...(parsedBody !== undefined && { parsedBody }) })
     } catch {
       return errorResponse(503, 'unavailable')
     }

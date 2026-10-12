@@ -70,6 +70,25 @@ export const MCP_HTTP_ERROR_TEXT: Record<McpHttpErrorCode, string> = {
 export const MCP_WWW_AUTHENTICATE =
   'Bearer realm="urutau", error="invalid_token", error_description="The Urutau MCP token is missing, unknown, revoked or expired."'
 
+/** The challenge for a request that sent no Authorization header: RFC 6750 §3.1 leaves the error out then. */
+export const MCP_WWW_AUTHENTICATE_NO_CREDENTIALS = 'Bearer realm="urutau"'
+
+/** JSON-RPC protocol errors Urutau answers itself on /mcp, before the SDK sees the body. */
+export const MCP_JSONRPC_PARSE_ERROR = -32700
+export const MCP_JSONRPC_INVALID_REQUEST = -32600
+export const MCP_JSONRPC_PARSE_ERROR_TEXT = 'Parse error: the body is not valid JSON.'
+export const MCP_JSONRPC_BATCH_TEXT = 'Batches are not supported: MCP 2025-06-18 removed JSON-RPC batching. Send one message per request.'
+
+export interface McpJsonRpcErrorBody {
+  jsonrpc: '2.0'
+  id: null
+  error: { code: number; message: string }
+}
+
+export function jsonRpcError(code: number, message: string): McpJsonRpcErrorBody {
+  return { jsonrpc: '2.0', id: null, error: { code, message } }
+}
+
 // ---------------------------------------------------------------- tool errors
 
 export type McpToolErrorCode =

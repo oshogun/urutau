@@ -381,7 +381,9 @@ export and is kept when the file is imported into another repository.
 Urutau serves a [Model Context Protocol](https://modelcontextprotocol.io/) endpoint at
 `<PUBLIC_URL>/mcp` (`http://127.0.0.1:8787/mcp` on a default local start).
 It takes JSON-RPC requests over HTTP `POST`; a request it accepts is answered as a
-`text/event-stream`, and a refused one (400, 401, 403, 405, 406, 413, 415, 429, 503) or a server error (500) as JSON. It offers five tools:
+`text/event-stream`, and a refused one (400, 401, 403, 405, 406, 413, 415, 429, 503) or a server error (500) as JSON.
+A protocol-level refusal (a batch, a body that is not JSON) is a JSON-RPC error object; the other
+refusals are `{ "error", "message" }`. It offers five tools:
 
 | Tool | What it does |
 | --- | --- |
@@ -560,12 +562,18 @@ the token in a text file in your user folder instead, and use a path without spa
   request does). A query string gets 400, so a token in the address is never
   read.
 - Clients must send `Accept: application/json, text/event-stream`.
+- One JSON-RPC message per `POST`. A batch (a JSON array, an empty one included) gets 400 with
+  JSON-RPC error `-32600`: MCP protocol revision 2025-06-18 removed batching.
+- A body that is not JSON gets 400 with JSON-RPC parse error `-32700`.
 - A request whose `Origin` header is not Urutau's own address (the `PUBLIC_URL` origin, or the
   server's own host when `PUBLIC_URL` is unset) gets 403 `origin-rejected`. Desktop clients do not
-  normally send `Origin`; one that sends its own is refused.
+  normally send `Origin`; one that sends its own is refused. Without `Origin`, `Sec-Fetch-Site`
+  must be absent, `same-origin` or `none`; `same-site` and `cross-site` get 403.
 - A missing, wrong, revoked or expired token gets 401 `invalid-token`. A client may answer that with
   an OAuth or client-registration error: it means the Urutau MCP token is missing, wrong or revoked.
-  The endpoint has no OAuth.
+  The endpoint has no OAuth. With no `Authorization` header the challenge is a bare
+  `WWW-Authenticate: Bearer realm="urutau"`; with a header that holds no valid token it carries
+  `error="invalid_token"`.
 - The failed-token limiter answers 429 `too-many-attempts` to failed attempts from one address
   after 50 in 15 minutes. It limits answers to failures; it is not brute-force protection. A token
   guess is still looked up, and what makes guessing impractical is the token's 256 random bits.

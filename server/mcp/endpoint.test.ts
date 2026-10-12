@@ -10,7 +10,7 @@ import { openDatabase, type Database } from '../db/index.ts'
 import { createIntegration } from '../db/integrations.ts'
 import { createAccount } from '../db/users.ts'
 import { createLogger } from '../log.ts'
-import { MCP_WWW_AUTHENTICATE, type McpCallContext } from './contract.ts'
+import { MCP_WWW_AUTHENTICATE, MCP_WWW_AUTHENTICATE_NO_CREDENTIALS, type McpCallContext } from './contract.ts'
 import { SERVER_INSTRUCTIONS } from './tools.ts'
 import { createMcpEndpoint, type McpEndpoint } from './endpoint.ts'
 
@@ -251,8 +251,20 @@ describe('authentication', () => {
     expect(await res.json()).toMatchObject({ error: 'invalid-token' })
   }
 
-  test('no token, a bad token, an expired token and a revoked token each give 401', async () => {
-    await expectInvalid(await post(INIT, null))
+  test('no Authorization header gives 401 with a bare challenge and no error attribute', async () => {
+    const res = await post(INIT, null)
+    expect(res.status).toBe(401)
+    expect(res.headers.get('www-authenticate')).toBe(MCP_WWW_AUTHENTICATE_NO_CREDENTIALS)
+    expect(res.headers.get('www-authenticate')).not.toContain('error=')
+    expect(await res.json()).toMatchObject({ error: 'invalid-token' })
+  })
+
+  test('a malformed header or another scheme gives 401 with error="invalid_token"', async () => {
+    await expectInvalid(await post(INIT, null, { authorization: 'Bearer' }))
+    await expectInvalid(await post(INIT, null, { authorization: 'Basic eDp5' }))
+  })
+
+  test('a bad token, an expired token and a revoked token each give 401', async () => {
     await expectInvalid(await post(INIT, 'urutau_mcp_' + 'A'.repeat(43)))
     await expectInvalid(await post(INIT, 'not-a-token'))
     const expired = await issue(new Date(T0.getTime() + 1000))
@@ -327,6 +339,48 @@ describe('refusals before the SDK', () => {
     expect(crossSite.status).toBe(403)
     expect((await post(INIT, secret, { origin: ORIGIN })).status).toBe(200)
     expect((await post(INIT, secret, { 'sec-fetch-site': 'same-origin' })).status).toBe(200)
+  })
+
+  test('Sec-Fetch-Site none without Origin is accepted; same-site and cross-site are not', async () => {
+    const { secret } = await issue()
+    const none = await post(INIT, secret, { 'sec-fetch-site': 'none' })
+    expect(none.status).toBe(200)
+    expect(frames(await none.text())[0].result?.protocolVersion).toBe('2025-11-25')
+    for (const site of ['same-site', 'cross-site']) {
+      const res = await post(INIT, secret, { 'sec-fetch-site': site })
+      expect(res.status).toBe(403)
+      expect(await res.json()).toMatchObject({ error: 'origin-rejected' })
+    }
+    const foreign = await post(INIT, secret, { 'sec-fetch-site': 'none', origin: 'http://evil.test' })
+    expect(foreign.status).toBe(403)
+  })
+
+  test('a JSON-RPC batch, an empty one included, gives 400 with -32600', async () => {
+    const { secret } = await issue()
+    for (const body of [`[${INIT}]`, `[${rpc('tools/list', {}, 1)},${rpc('ping', {}, 2)}]`, '[]']) {
+      const res = await post(body, secret)
+      expect(res.status).toBe(400)
+      expect(res.headers.get('content-type')).toContain('application/json')
+      expect(await res.json()).toMatchObject({ jsonrpc: '2.0', id: null, error: { code: -32600 } })
+    }
+  })
+
+  test('a body that is not JSON gives 400 with -32700; text/plain still gives 415', async () => {
+    const { secret } = await issue()
+    for (const body of ['not json{', '']) {
+      const res = await post(body, secret)
+      expect(res.status).toBe(400)
+      expect(await res.json()).toMatchObject({ jsonrpc: '2.0', id: null, error: { code: -32700 } })
+    }
+    const plain = await post(INIT, secret, { 'content-type': 'text/plain' })
+    expect(plain.status).toBe(415)
+    const charset = await post(INIT, secret, { 'content-type': 'application/json; charset=utf-8' })
+    expect(charset.status).toBe(200)
+  })
+
+  test('an unauthenticated batch or body that is not JSON gets 401 first', async () => {
+    expect((await post(`[${INIT}]`, null)).status).toBe(401)
+    expect((await post('not json{', null)).status).toBe(401)
   })
 
   test('other paths get the JSON 404, never HTML', async () => {
