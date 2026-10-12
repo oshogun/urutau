@@ -17,9 +17,22 @@ function migrations(backend: Backend): Record<string, Migration> {
   }
 }
 
+function migrator(db: Kysely<any>, backend: Backend): Migrator {
+  return new Migrator({ db, provider: { getMigrations: async () => migrations(backend) } })
+}
+
+function throwIfFailed(error: unknown): void {
+  if (error) throw error instanceof Error ? error : new Error(String(error))
+}
+
 /** Applies every pending migration and throws the first failure. */
 export async function migrateToLatest(db: Kysely<Tables>, backend: Backend): Promise<void> {
-  const migrator = new Migrator({ db, provider: { getMigrations: async () => migrations(backend) } })
-  const { error } = await migrator.migrateToLatest()
-  if (error) throw error instanceof Error ? error : new Error(String(error))
+  const { error } = await migrator(db, backend).migrateToLatest()
+  throwIfFailed(error)
+}
+
+/** Applies migrations up to and including `target` and throws the first failure. Tests use it to build a database at an older version. */
+export async function migrateTo(db: Kysely<any>, backend: Backend, target: string): Promise<void> {
+  const { error } = await migrator(db, backend).migrateTo(target)
+  throwIfFailed(error)
 }

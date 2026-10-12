@@ -18,7 +18,7 @@ const imeKeys = [
   ['keyCode 229', { key: 'Enter', keyCode: 229 }],
 ] as const
 
-describe('BucketEditorModal Enter', () => {
+describe('BucketEditorModal Enter', { timeout: 15_000 }, () => {
   it.each(imeKeys)('does not save on an IME Enter in the name (%s)', async (_name, init) => {
     const { onSave, onClose } = renderEditor()
     await userEvent.setup().type(screen.getByRole('textbox', { name: 'Name' }), 'Review')

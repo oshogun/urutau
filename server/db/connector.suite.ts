@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fixtureBoard } from './fixtures.ts'
 import { isUniqueViolation, type Database } from './index.ts'
+import { migrateTo } from './migrations/index.ts'
 import { createApiToken, deleteApiToken, deleteExpiredApiTokens, findLiveToken, listApiTokens, touchApiToken, apiTokenIsLive } from './apiTokens.ts'
 import { createBoard, deleteBoard, getBoard, listBoards, listBoardsByKeys, saveBoard } from './boards.ts'
 import { deleteGithubToken, getGithubToken, listGithubTokenInfo, putGithubToken, setGithubTokenStatus } from './githubTokens.ts'
@@ -24,13 +25,31 @@ function isForeignKeyViolation(error: unknown): boolean {
   return e.errcode === 787 || e.code === '23503' || e.errno === 1452
 }
 
+/**
+ * Every application table except `meta`, children before parents. A new
+ * migration's tables go here too, so resetData empties them and dropSchema
+ * drops them.
+ */
+const TABLES = ['run_events', 'card_claims', 'card_runs', 'integration_repos', 'api_tokens', 'github_tokens', 'integrations', 'sessions', 'invites', 'identities', 'boards', 'instance_claim', 'users'] as const
+
 /** Empties every application table except `meta`, children before parents, and turns the GitHub writes switch off. */
 async function resetData(database: Database): Promise<void> {
   const { db } = database
-  for (const table of ['run_events', 'card_claims', 'card_runs', 'integration_repos', 'api_tokens', 'github_tokens', 'integrations', 'sessions', 'invites', 'identities', 'boards', 'instance_claim', 'users'] as const) {
+  for (const table of TABLES) {
     await db.deleteFrom(table).execute()
   }
   await setGithubWrites(db, false)
+}
+
+/**
+ * Drops every table, including Kysely's own, so the next migration starts from
+ * an empty database. Not in a transaction: MariaDB commits each DROP TABLE on
+ * its own.
+ */
+async function dropSchema(database: Database): Promise<void> {
+  for (const table of [...TABLES, 'meta', 'kysely_migration', 'kysely_migration_lock']) {
+    await database.db.schema.dropTable(table).ifExists().execute()
+  }
 }
 
 /**
@@ -84,6 +103,117 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         await database.db.deleteFrom('kysely_migration' as never).where('name' as never, 'in', ['0003_integrations', '0004_card_runs'] as never).execute()
         await database.migrate()
         expect(await isIntegration(database.db, made.id)).toBe(true)
+      })
+
+      // Each case builds the database at one older migration, writes rows with
+      // the app's helpers, then upgrades to the latest. A new migration adds its
+      // own case here, built at the migration before it.
+      async function seedSession(userId: string) {
+        await createSession(database.db, {
+          idHash: 'h'.repeat(64), userId, authMethod: 'local', csrfToken: 'c'.repeat(43), now: T0, expiresAt: later(60_000),
+        })
+      }
+
+      it('rows written at 0001_initial survive the upgrade to latest', async () => {
+        await dropSchema(database)
+        await migrateTo(database.db, database.backend, '0001_initial')
+        expect(await database.db.selectFrom('meta').select('key').where('key', '=', 'github_writes').executeTakeFirst()).toBeUndefined()
+        const admin = await seedAdmin()
+        await seedSession(admin.id)
+        await createBoard(database.db, { repoKey: 'acme/widgets', fullName: 'Acme/Widgets', config: fixtureBoard(), userId: admin.id, now: T0 })
+
+        await database.migrate()
+
+        expect(await database.db.selectFrom('meta').select('value').where('key', '=', 'github_writes').executeTakeFirst()).toEqual({ value: '0' })
+        expect(await getGithubWrites(database.db)).toBe(false)
+        expect(await database.db.selectFrom('users').select('username').execute()).toEqual([{ username: admin.username }])
+        expect(await database.db.selectFrom('sessions').select('id_hash').execute()).toHaveLength(1)
+        expect(await database.db.selectFrom('boards').select('repo_key').execute()).toEqual([{ repo_key: 'acme/widgets' }])
+      })
+
+      it('rows written at 0002_github_writes survive the upgrade to latest and the new tables start empty', async () => {
+        await dropSchema(database)
+        await migrateTo(database.db, database.backend, '0002_github_writes')
+        const admin = await seedAdmin()
+        await seedSession(admin.id)
+        await createBoard(database.db, { repoKey: 'acme/widgets', fullName: 'Acme/Widgets', config: fixtureBoard(), userId: admin.id, now: T0 })
+        await setGithubWrites(database.db, true)
+
+        await database.migrate()
+
+        expect(await database.db.selectFrom('users').select('username').execute()).toEqual([{ username: admin.username }])
+        expect(await database.db.selectFrom('sessions').select('id_hash').execute()).toHaveLength(1)
+        expect(await database.db.selectFrom('boards').select(['repo_key', 'updated_by']).execute()).toEqual([
+          { repo_key: 'acme/widgets', updated_by: admin.id },
+        ])
+        expect(await getGithubWrites(database.db)).toBe(true)
+        for (const table of ['integrations', 'api_tokens', 'github_tokens', 'integration_repos'] as const) {
+          expect(await database.db.selectFrom(table).selectAll().execute()).toEqual([])
+        }
+      })
+
+      it('rows written at 0003_integrations survive the upgrade to latest and the new tables start empty', async () => {
+        await dropSchema(database)
+        await migrateTo(database.db, database.backend, '0003_integrations')
+        const admin = await seedAdmin()
+        const bot = await createIntegration(database.db, { username: 'bot', createdBy: admin.id, now: T0 })
+        await createBoard(database.db, { repoKey: 'acme/widgets', fullName: 'Acme/Widgets', config: fixtureBoard(), userId: admin.id, now: T0 })
+        await database.db
+          .insertInto('api_tokens')
+          .values({ id: 'tok-1', user_id: bot.id, token_hash: 'a'.repeat(64), label: 'ci', created_by: admin.id, created_at: T0.toISOString(), expires_at: null, last_used_at: null })
+          .execute()
+        await setGithubWrites(database.db, true)
+
+        await database.migrate()
+
+        expect(await database.db.selectFrom('users').select('username').orderBy('username').execute()).toEqual([{ username: 'bot' }, { username: admin.username }])
+        expect(await database.db.selectFrom('integrations').select('user_id').execute()).toEqual([{ user_id: bot.id }])
+        expect(await database.db.selectFrom('api_tokens').select('id').execute()).toEqual([{ id: 'tok-1' }])
+        const boards = await database.db.selectFrom('boards').select(['repo_key', 'version']).execute()
+        expect(boards.map((b) => ({ repo_key: b.repo_key, version: Number(b.version) }))).toEqual([{ repo_key: 'acme/widgets', version: 1 }])
+        expect(await getGithubWrites(database.db)).toBe(true)
+        for (const table of ['card_runs', 'card_claims', 'run_events'] as const) {
+          expect(await database.db.selectFrom(table).selectAll().execute()).toEqual([])
+        }
+      })
+
+      it('rows written at 0004_card_runs survive the upgrade to latest and the new tables start empty', async () => {
+        await dropSchema(database)
+        await migrateTo(database.db, database.backend, '0004_card_runs')
+        const admin = await seedAdmin()
+        const bot = await createIntegration(database.db, { username: 'bot', createdBy: admin.id, now: T0 })
+        await createBoard(database.db, { repoKey: 'acme/widgets', fullName: 'Acme/Widgets', config: fixtureBoard(), userId: admin.id, now: T0 })
+        await database.db
+          .insertInto('api_tokens')
+          .values({ id: 'tok-1', user_id: bot.id, token_hash: 'a'.repeat(64), label: 'ci', created_by: admin.id, created_at: T0.toISOString(), expires_at: null, last_used_at: null })
+          .execute()
+        await database.db
+          .insertInto('card_runs')
+          .values({
+            run_id: 'run-1', repo_key: 'acme/widgets', issue: 7, agent_user_id: bot.id, status: 'running', status_at: T0.toISOString(),
+            triage_range: null, uncertainty_kind: null, unverified: '[]', merge_shas: '[]', files: '[]', files_omitted: 0, areas: '[]',
+            observed_by: null, fix_rounds: 0, cost_usd: null, findings: null, started_at: T0.toISOString(), ended_at: null,
+          })
+          .execute()
+        await database.db
+          .insertInto('card_claims')
+          .values({ repo_key: 'acme/widgets', issue: 7, run_id: 'run-1', holder: bot.id, lease_until: null, claimed_at: T0.toISOString() })
+          .execute()
+        await setGithubWrites(database.db, true)
+
+        await database.migrate()
+
+        expect(await database.db.selectFrom('users').select('username').orderBy('username').execute()).toEqual([{ username: 'bot' }, { username: admin.username }])
+        expect(await database.db.selectFrom('integrations').select('user_id').execute()).toEqual([{ user_id: bot.id }])
+        expect(await database.db.selectFrom('api_tokens').select('id').execute()).toEqual([{ id: 'tok-1' }])
+        const boards = await database.db.selectFrom('boards').select(['repo_key', 'version']).execute()
+        expect(boards.map((b) => ({ repo_key: b.repo_key, version: Number(b.version) }))).toEqual([{ repo_key: 'acme/widgets', version: 1 }])
+        expect(await database.db.selectFrom('card_runs').select('run_id').execute()).toEqual([{ run_id: 'run-1' }])
+        expect(await database.db.selectFrom('card_claims').select('run_id').execute()).toEqual([{ run_id: 'run-1' }])
+        expect(await getGithubWrites(database.db)).toBe(true)
+        for (const table of ['run_events'] as const) {
+          expect(await database.db.selectFrom(table).selectAll().execute()).toEqual([])
+        }
       })
     })
 

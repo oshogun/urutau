@@ -67,9 +67,18 @@ independently and which ones you could not, with the reason.
      `dangerouslySetInnerHTML` or a URL built from them without encoding, and
      links to GitHub keep `rel="noreferrer"`.
    - No new network destination appears without the design naming it.
-6. **Scope**: every changed file is inside the task's `allowed_paths`. A file
+6. **Database migrations**: every new migration in `server/db/migrations/`
+   adds its own upgrade-with-rows case to the connector suite
+   (`server/db/connector.suite.ts`). The case must build a database at
+   the previous migration, write rows with the app's helpers, migrate to
+   the latest, and verify that the rows survived and new tables start
+   empty. The migration's new tables must be added to the suite's `TABLES`
+   list. Verify this by reading the diff and running
+   `npm test && npm run test:db:postgres && npm run test:db:mariadb` to
+   confirm all database upgrades pass.
+7. **Scope**: every changed file is inside the task's `allowed_paths`. A file
    outside them is a finding regardless of how good the change is.
-7. **Style, Carbon and accessibility**:
+8. **Style, Carbon and accessibility**:
    - The new code reads like the code around it.
    - UI uses `@carbon/react` components and Carbon tokens (`$layer`,
      `$text-secondary`, spacing and type tokens) rather than hard-coded colours
@@ -84,13 +93,13 @@ independently and which ones you could not, with the reason.
      Exit 0 means clean and exit 2 means findings, which it prints to stderr.
    - For a visible change, take a driver screenshot (see How to work safely)
      and look at it in both the light and dark themes.
-8. **No run citations in comments.** A new or edited comment must not point at
+9. **No run citations in comments.** A new or edited comment must not point at
    `.claude/runs/`, a run-id, `design.md`, a `§`-numbered section, an
    "Amendment" label, `plan.json`, a task id (`T-NNN`), or a phase/review file
    (`phase3.md`, `reviews/phase-2.md`). That is a finding even if the citation
    is accurate today: it makes the comment depend on a document the next reader
    of `src/` has no way to know exists.
-9. **Literal wording.** A new or edited comment or doc line explains in plain
+10. **Literal wording.** A new or edited comment or doc line explains in plain
    terms; a metaphor standing in for the reason is a finding (the rule and its
    examples: `CLAUDE.md` § Writing comments and docs). Run
    `git diff -U0 | grep -niE '^\+.*(load[- ]?bearing|belt[- ]and[- ](suspenders|braces)|trip[- ]?wire|choke[- ]?point)'`.

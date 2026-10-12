@@ -108,6 +108,14 @@ on a database a newer one has migrated; restore the backup, or follow the
 downgrade steps in the [README](../README.md#downgrading-past-the-integrations)
 where one exists.
 
+Every new migration in `server/db/migrations/` adds its own upgrade-with-rows
+case to the connector suite (`server/db/connector.suite.ts`). The case builds a
+database at the previous migration, writes rows, migrates to the latest, and
+checks that the rows survived and the new tables start empty. The migration's
+new tables also go in the suite's table list. The case runs on SQLite,
+PostgreSQL and MariaDB through `npm test`, `npm run test:db:postgres` and
+`npm run test:db:mariadb`.
+
 ## The release bundle
 
 Each Release carries four assets:
