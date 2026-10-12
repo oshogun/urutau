@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
 import { getServerSettings, SERVER_SETTINGS_QUERY_KEY } from '../api/settings'
-import type { ServerSettings } from '../domain/api'
+import type { GithubWriteKind, ServerSettings } from '../domain/api'
 import type { RepoSnapshot } from '../domain/types'
 import { useSession } from '../state/session'
 import { useSettings } from '../state/settings'
@@ -36,11 +36,12 @@ export function chooseWritePath(failures: IssueWriteFailures): { via: 'browser' 
   return { via, token }
 }
 
-/** Asks the server for the GitHub-writes switch again, because the admin may have turned it off since the board loaded. */
+/** Asks the server for the switch of this kind of write again, because the admin may have turned it off since the board loaded. */
 export async function requireWritesOn(
   queryClient: QueryClient,
   signal: AbortSignal | undefined,
   failures: IssueWriteFailures,
+  kind: GithubWriteKind,
 ): Promise<void> {
   let settings: ServerSettings | typeof ABORTED
   try {
@@ -57,14 +58,20 @@ export async function requireWritesOn(
   }
   if (settings === ABORTED) throw failures.stoppedBeforeSend()
   if (typeof settings !== 'object' || settings === null) throw failures.settingsUnreachable()
-  if (!settings.githubWrites) throw failures.writesOff()
+  if (!settings.githubWrites?.[kind]) throw failures.writesOff()
   if (signal?.aborted) throw failures.stoppedBeforeSend()
 }
 
-/** Caches a 'writes-off' answer and refreshes the session when a failure shows it changed. */
-export function noteWriteFailure(queryClient: QueryClient, error: { kind: string; problem: string | null }): void {
+/** Caches a 'writes-off' answer for this kind only and refreshes the session when a failure shows it changed. */
+export function noteWriteFailure(
+  queryClient: QueryClient,
+  error: { kind: string; problem: string | null },
+  writeKind: GithubWriteKind,
+): void {
   if (error.kind === 'writes-off') {
-    queryClient.setQueryData<ServerSettings>(SERVER_SETTINGS_QUERY_KEY, { githubWrites: false })
+    queryClient.setQueryData<ServerSettings>(SERVER_SETTINGS_QUERY_KEY, (old) =>
+      old ? { ...old, githubWrites: { ...old.githubWrites, [writeKind]: false } } : old,
+    )
   }
   const sessionChanged = error.kind === 'refused' || (error.kind === 'server-access' && error.problem !== 'unavailable')
   if (sessionChanged) void useSession.getState().refresh()

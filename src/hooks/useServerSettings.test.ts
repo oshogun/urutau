@@ -8,6 +8,9 @@ import { useSession } from '../state/session'
 import { installApiStub } from '../test/apiStub'
 import { useServerSettings, useUpdateServerSettings } from './useServerSettings'
 
+const ALL_OFF = { createIssues: false, editIssues: false }
+const ALL_ON = { createIssues: true, editIssues: true }
+
 function setup() {
   const queryClient = new QueryClient()
   const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: queryClient }, children)
@@ -19,32 +22,32 @@ beforeEach(() => {
 })
 
 describe('useServerSettings', () => {
-  it('reads false while loading, then the server value', async () => {
-    const stub = installApiStub({ githubWrites: true })
+  it('reads every kind off while loading, then the server values', async () => {
+    const stub = installApiStub({ githubWrites: { editIssues: true } })
     await useSession.getState().load()
     const { result } = renderHook(() => useServerSettings(), { wrapper: setup().wrapper })
-    expect(result.current).toMatchObject({ githubWrites: false, isLoading: true })
-    await waitFor(() => expect(result.current.githubWrites).toBe(true))
+    expect(result.current).toMatchObject({ githubWrites: ALL_OFF, isLoading: true })
+    await waitFor(() => expect(result.current.githubWrites).toEqual({ createIssues: false, editIssues: true }))
     expect(stub.requests('GET settings')).toHaveLength(1)
   })
 
-  it('reads false when the request fails, without retrying', async () => {
+  it('reads every kind off when the request fails, without retrying', async () => {
     const stub = installApiStub({ githubWrites: true })
     await useSession.getState().load()
     stub.failNext('GET settings', { status: 500, error: 'server-error' }, 3)
     const { result } = renderHook(() => useServerSettings(), { wrapper: setup().wrapper })
     await waitFor(() => expect(result.current.error).not.toBeNull())
-    expect(result.current.githubWrites).toBe(false)
+    expect(result.current.githubWrites).toEqual(ALL_OFF)
     expect(stub.requests('GET settings')).toHaveLength(1)
   })
 
-  it('reads false from a server that has no settings route', async () => {
+  it('reads every kind off from a server that has no settings route', async () => {
     const stub = installApiStub({ githubWrites: true })
     await useSession.getState().load()
     stub.failNext('GET settings', { status: 404, error: 'not-found' })
     const { result } = renderHook(() => useServerSettings(), { wrapper: setup().wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
-    expect(result.current.githubWrites).toBe(false)
+    expect(result.current.githubWrites).toEqual(ALL_OFF)
   })
 })
 
@@ -54,17 +57,19 @@ describe('useUpdateServerSettings', () => {
     await useSession.getState().load()
     const { queryClient, wrapper } = setup()
     const { result } = renderHook(() => useUpdateServerSettings(), { wrapper })
-    await act(() => result.current.update({ githubWrites: true }))
-    expect(stub.githubWrites).toBe(true)
-    expect(stub.requests('PATCH settings')[0].body).toEqual({ githubWrites: true })
-    expect(queryClient.getQueryData(SERVER_SETTINGS_QUERY_KEY)).toEqual({ githubWrites: true })
+    await act(() => result.current.update({ githubWrites: { createIssues: true } }))
+    expect(stub.githubWrites).toEqual({ createIssues: true, editIssues: false })
+    expect(stub.requests('PATCH settings')[0].body).toEqual({ githubWrites: { createIssues: true } })
+    expect(queryClient.getQueryData(SERVER_SETTINGS_QUERY_KEY)).toEqual({ githubWrites: { createIssues: true, editIssues: false } })
+    await act(() => result.current.update({ githubWrites: { editIssues: true } }))
+    expect(queryClient.getQueryData(SERVER_SETTINGS_QUERY_KEY)).toEqual({ githubWrites: ALL_ON })
   })
 
   it('reports a non-admin refusal as an error', async () => {
     installApiStub({ user: { isAdmin: false } })
     await useSession.getState().load()
     const { result } = renderHook(() => useUpdateServerSettings(), { wrapper: setup().wrapper })
-    await act(() => result.current.update({ githubWrites: true }).catch(() => undefined))
+    await act(() => result.current.update({ githubWrites: { createIssues: true } }).catch(() => undefined))
     await waitFor(() => expect(result.current.error).not.toBeNull())
   })
 })

@@ -1546,8 +1546,8 @@ describe('App', () => {
     })
     afterEach(() => useSettings.setState({ token: '' }))
 
-    it('offers no create action while the switch is off', async () => {
-      open({ githubWrites: false })
+    it('offers no create action while creating is off, even with editing on', async () => {
+      open({ githubWrites: { editIssues: true } })
       await screen.findByText('Dark mode')
       expect(screen.queryByRole('button', { name: /Create issue in/ })).not.toBeInTheDocument()
     })
@@ -1847,6 +1847,24 @@ describe('App', () => {
       expect(within(dialog).queryByRole('button', { name: /Close as|Reopen/ })).not.toBeInTheDocument()
     })
 
+    it('with only editing on, offers edit but no create action', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { githubWrites: { editIssues: true }, boards: [stubBoard('acme/widgets', 1)] })
+      const dialog = await openDetails(user)
+      expect(within(dialog).getByRole('button', { name: 'Edit' })).toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: 'Close as not planned' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Create issue in/ })).not.toBeInTheDocument()
+    })
+
+    it('with only creating on, offers the create action but no edit', async () => {
+      const user = userEvent.setup()
+      renderApp('?repo=acme/widgets', { githubWrites: { createIssues: true }, boards: [stubBoard('acme/widgets', 1)] })
+      expect(await screen.findByRole('button', { name: 'Create issue in Backlog' })).toBeInTheDocument()
+      const dialog = await openDetails(user)
+      expect(within(dialog).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+      expect(within(dialog).queryByRole('button', { name: /Close as|Reopen/ })).not.toBeInTheDocument()
+    })
+
     it('sends the change through the server for a Keycloak user and updates the card', async () => {
       const user = userEvent.setup()
       renderApp('?repo=acme/widgets', {
@@ -1877,18 +1895,26 @@ describe('App', () => {
   })
 
   describe('server settings', () => {
-    it('shows the switch to the admin and saves a change', async () => {
+    it('shows one switch per kind of write to the admin and saves each on its own', async () => {
       const user = userEvent.setup()
       renderApp('?view=server-settings')
 
       expect(await screen.findByRole('heading', { name: 'Server settings' })).toBeInTheDocument()
-      const toggle = await screen.findByRole('switch', { name: 'Create and edit issues on GitHub' })
-      expect(toggle).not.toBeChecked()
-      await user.click(toggle)
+      const create = await screen.findByRole('switch', { name: 'Create issues on GitHub' })
+      const edit = screen.getByRole('switch', { name: 'Edit, close and reopen issues on GitHub' })
+      expect(create).not.toBeChecked()
+      expect(edit).not.toBeChecked()
+      await user.click(create)
 
-      await waitFor(() => expect(screen.getByRole('switch', { name: 'Create and edit issues on GitHub' })).toBeChecked())
-      expect(stub.requests('PATCH settings')[0].body).toEqual({ githubWrites: true })
-      expect(stub.githubWrites).toBe(true)
+      await waitFor(() => expect(screen.getByRole('switch', { name: 'Create issues on GitHub' })).toBeChecked())
+      expect(screen.getByRole('switch', { name: 'Edit, close and reopen issues on GitHub' })).not.toBeChecked()
+      expect(stub.requests('PATCH settings')[0].body).toEqual({ githubWrites: { createIssues: true } })
+      expect(stub.githubWrites).toEqual({ createIssues: true, editIssues: false })
+
+      await user.click(screen.getByRole('switch', { name: 'Edit, close and reopen issues on GitHub' }))
+      await waitFor(() => expect(screen.getByRole('switch', { name: 'Edit, close and reopen issues on GitHub' })).toBeChecked())
+      expect(stub.requests('PATCH settings')[1].body).toEqual({ githubWrites: { editIssues: true } })
+      expect(stub.githubWrites).toEqual({ createIssues: true, editIssues: true })
     })
 
     it('reaches the page from the account menu for an admin only', async () => {

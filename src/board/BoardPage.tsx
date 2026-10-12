@@ -108,8 +108,8 @@ function RepositoryBoard({ repo, onOpenSettings, onChangeRepo }: BoardPageProps)
           isFetching={query.isFetching}
           refreshError={query.isError ? query.error : null}
           onRefresh={() => void query.refetch()}
-          onCreateIssue={githubWrites ? createIssue : null}
-          onUpdateIssue={githubWrites ? updateIssue : null}
+          onCreateIssue={githubWrites.createIssues ? createIssue : null}
+          onUpdateIssue={githubWrites.editIssues ? updateIssue : null}
           onOpenSettings={onOpenSettings}
         />
       </>

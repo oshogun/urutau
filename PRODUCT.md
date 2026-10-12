@@ -47,9 +47,9 @@ started.
 ## Operating Context
 
 - Data comes from the GitHub REST API: issues (pull requests excluded), labels,
-  assignees and milestones. When the admin has turned GitHub writes on, issues
-  are created and changed through the same API, with the same token that
-  reads them.
+  assignees and milestones. When the admin has turned on that kind of GitHub
+  write, issues are created, or changed, through the same API, with the same
+  token that reads them.
 - Public repositories work without a token, within GitHub's anonymous limit of
   60 API requests an hour. Private repositories and heavier use need a GitHub
   token: either the user's own personal access token, kept in their browser
@@ -72,8 +72,8 @@ started.
 
 - Today: reads from GitHub; shows an issue's details, with its description
   formatted from Markdown, in a modal; creates issues from a bucket, and
-  edits, closes and reopens them from that modal, once the admin turns GitHub
-  writes on; boards stored on the team's server and
+  edits, closes and reopens them from that modal, once the admin turns on each
+  of those two kinds of GitHub write; boards stored on the team's server and
   shared by every signed-in user, with live updates and a refusal (and notice)
   when two people save the same board at once; local accounts, where the first
   account is the admin and invites the others by link, and Keycloak sign-in;
@@ -89,6 +89,9 @@ started.
 - Settled: a team shares boards through a self-hosted backend (2026-10-02).
 - Settled: writing to GitHub is turned on for the whole server by the admin,
   not per user (2026-10-03).
+- Settled: one switch per kind of write (today *Create issues* and *Edit, close
+  and reopen issues*); a new kind of write ships with its own switch, turned
+  off, so an upgrade never widens what the admin allowed (2026-10-12).
 - Settled: agents act as admin-created integration accounts; their GitHub
   token is stored per integration, encrypted, and used only to read
   (2026-10-03).
@@ -116,7 +119,8 @@ or published screenshots yet; future work must not invent any.
 
 1. A repository name is all it takes to get a useful board.
 2. GitHub stays the source of truth for issues. Urutau organizes them, and
-   writes to GitHub only after the admin has turned writes on for the server.
+   writes to GitHub only the kinds of write the admin has turned on for the
+   server.
 3. Built for a team: anything that works only in one person's browser is a
    stopgap.
 4. Accessible and bilingual by default.

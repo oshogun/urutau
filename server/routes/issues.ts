@@ -3,6 +3,7 @@ import type {
   CreateIssueResponse,
   GitHubRejectedError,
   IssueUpdateRejectedError,
+  GithubWriteKind,
   StaleIssueResponse,
   UpdateIssueResponse,
 } from '../../src/domain/api.ts'
@@ -31,13 +32,27 @@ async function readBody(response: Response): Promise<unknown> {
 
 /** The words that differ between creating an issue and changing one, in the messages and log lines the two routes share. */
 interface WriteWording {
+  /** The switch the admin turns on for this kind of write. */
+  kind: GithubWriteKind
   doing: string
   gerund: string
   past: string
   logLine: string
 }
-const CREATE_WORDING: WriteWording = { doing: 'creates', gerund: 'creating', past: 'created', logLine: 'github create failed' }
-const UPDATE_WORDING: WriteWording = { doing: 'changes', gerund: 'changing', past: 'changed', logLine: 'github update failed' }
+const CREATE_WORDING: WriteWording = {
+  kind: 'createIssues',
+  doing: 'creates',
+  gerund: 'creating',
+  past: 'created',
+  logLine: 'github create failed',
+}
+const UPDATE_WORDING: WriteWording = {
+  kind: 'editIssues',
+  doing: 'changes',
+  gerund: 'editing, closing and reopening',
+  past: 'changed',
+  logLine: 'github update failed',
+}
 
 /** The headers of a request to GitHub made with the signed-in user's token. */
 function githubHeaders(bearer: string, json: boolean): Record<string, string> {
@@ -55,7 +70,7 @@ export function issuesRoutes(ctx: AppContext) {
 
   /**
    * The checks both write routes start with: the user is signed in with a Keycloak account whose
-   * realm brokers GitHub, and the admin has turned GitHub writes on. Returns what the route needs next.
+   * realm brokers GitHub, and the admin has turned on this kind of GitHub write. Returns what the route needs next.
    */
   async function requireWriter(c: Context<AppEnv>, wording: WriteWording) {
     const auth = c.get('auth')
@@ -66,7 +81,7 @@ export function issuesRoutes(ctx: AppContext) {
     }
     let on: boolean
     try {
-      on = await getGithubWrites(ctx.database.db)
+      on = (await getGithubWrites(ctx.database.db))[wording.kind]
     } catch {
       throw new HttpError(503, 'unavailable', 'The server could not read its settings.')
     }

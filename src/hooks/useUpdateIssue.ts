@@ -50,7 +50,7 @@ export function useUpdateIssue(repo: RepoRef): IssueUpdater {
       if (!normalized.ok) throw updateIssueFailures.invalid(normalized.message)
 
       const { via, token } = chooseWritePath(updateIssueFailures)
-      await requireWritesOn(queryClient, signal, updateIssueFailures)
+      await requireWritesOn(queryClient, signal, updateIssueFailures, 'editIssues')
 
       const apply = (issue: Issue) => applyToSnapshots(queryClient, key, (snapshot) => withUpdatedIssue(snapshot, issue))
 
@@ -59,7 +59,7 @@ export function useUpdateIssue(repo: RepoRef): IssueUpdater {
         issue = await updateIssue({ fullName, number, expectedUpdatedAt, fields: normalized.value, via, token, signal })
       } catch (error) {
         if (error instanceof UpdateIssueError) {
-          noteWriteFailure(queryClient, error)
+          noteWriteFailure(queryClient, error, 'editIssues')
           if (error.kind === 'stale' && error.current) await apply(error.current)
         }
         throw error

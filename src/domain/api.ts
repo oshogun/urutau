@@ -35,7 +35,7 @@ export type ApiErrorCode =
   | 'invite-invalid' // 404: invite token unknown, already used, revoked or expired
   | 'keycloak-disabled' // 404: a Keycloak route while Keycloak is not configured
   | 'github-path-not-allowed' // 404: GitHub proxy path or query outside the allow-list
-  | 'github-writes-off' // 403: the admin has not turned on GitHub writes (creating and changing issues) for this server
+  | 'github-writes-off' // 403: the admin has not turned on this kind of GitHub write (GithubWriteKind) for this server
   | 'claim-changed' // 409: the claim on the issue now belongs to another run (body: ClaimChangedResponse)
   | 'item-resolved' // 409: the item was already closed by a probe or an accept (body: ItemResolvedResponse)
   | 'already-set-up' // 409: first-run after the first account exists
@@ -384,14 +384,27 @@ export interface GitHubAccessError extends ApiErrorBody {
 
 // ---------------------------------------------------------------- server settings
 
+/**
+ * The kinds of GitHub write the admin turns on one by one: `createIssues` creates issues,
+ * `editIssues` edits, closes and reopens them. A new kind is one more entry here and ships turned off.
+ */
+export const GITHUB_WRITE_KINDS = ['createIssues', 'editIssues'] as const
+export type GithubWriteKind = (typeof GITHUB_WRITE_KINDS)[number]
+/** One switch per kind of write: true when the admin has turned it on. All false on new servers. */
+export type GithubWrites = Record<GithubWriteKind, boolean>
+
 /** GET /api/settings (any signed-in user) and the 200 body of PATCH /api/settings. */
 export interface ServerSettings {
-  /** True when the admin has turned on creating and changing issues on GitHub from Urutau. False on new and upgraded servers. */
-  githubWrites: boolean
+  githubWrites: GithubWrites
 }
 
-/** PATCH /api/settings (admin only): at least one known key; unknown keys are refused with 400. */
-export type UpdateServerSettingsRequest = Partial<ServerSettings>
+/**
+ * PATCH /api/settings (admin only): `githubWrites` with at least one known kind, each a boolean;
+ * kinds left out keep their value. Unknown keys or kinds are refused with 400.
+ */
+export interface UpdateServerSettingsRequest {
+  githubWrites: Partial<GithubWrites>
+}
 
 // ---------------------------------------------------------------- creating issues
 

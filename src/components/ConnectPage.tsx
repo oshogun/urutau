@@ -54,7 +54,8 @@ export function ConnectPage({ onOpen }: ConnectPageProps) {
         <p className="connect__lead">
           Point Urutau at a repository to pull in its issues and labels. Your buckets and card
           positions are saved on this server and shared with everyone who has an account; Urutau
-          writes to GitHub only to create issues, and only after the admin turns that on.
+          writes to GitHub only the kinds of change the admin turns on, such as creating or editing
+          issues.
         </p>
       </div>
 

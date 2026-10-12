@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { CLIENT_ID_HEADER, CSRF_HEADER, NEW_ISSUE_BODY_MAX, NEW_ISSUE_TITLE_MAX } from '../domain/api'
+import { CLIENT_ID_HEADER, CSRF_HEADER, GITHUB_WRITE_KINDS, NEW_ISSUE_BODY_MAX, NEW_ISSUE_TITLE_MAX } from '../domain/api'
 import type {
   AcceptInviteRequest,
   ApiErrorBody,
@@ -27,6 +27,8 @@ import type {
   CreateInviteResponse,
   CredentialsRequest,
   GitHubAccess,
+  GithubWriteKind,
+  GithubWrites,
   IntegrationListResponse,
   IntegrationSummary,
   ImportBoardsResponse,
@@ -78,12 +80,15 @@ export interface ApiStubOptions {
    * answers 404 github-path-not-allowed. In browser mode the stub answers 403 forbidden.
    */
   github?: (request: { path: string; query: string; headers: Record<string, string> }) => Response | undefined
-  /** The server-wide GitHub writes switch at the start. Default false. */
-  githubWrites?: boolean
+  /**
+   * The server-wide GitHub write switches at the start: true or false sets every kind, an object
+   * sets the kinds it names. Every kind not set is off.
+   */
+  githubWrites?: boolean | Partial<GithubWrites>
   /**
    * Answers POST api/issues/<owner>/<name> once the stub's own checks pass, in the server's order:
    * CSRF (403 csrf-rejected), session (401 signed-out), session mode 'server' (else 403 forbidden),
-   * switch on (else 403 github-writes-off), owner and name by the proxy's patterns (else 400
+   * createIssues switch on (else 403 github-writes-off), owner and name by the proxy's patterns (else 400
    * invalid-request), fields valid by the server's rules, lengths in code points (else 400
    * invalid-request). The host guard, body limit, 424, 503 and 504 are not modelled; inject them
    * with failNext. Return undefined for the default answer: 201 with
@@ -98,8 +103,8 @@ export interface ApiStubOptions {
   }) => Response | undefined
   /**
    * Answers PATCH api/issues/<owner>/<name>/<number> once the stub's own checks pass, in the
-   * server's order: session (401 signed-out), session mode 'server' (else 403 forbidden), switch on
-   * (else 403 github-writes-off), owner, name and number by the server's patterns (else 400
+   * server's order: session (401 signed-out), session mode 'server' (else 403 forbidden), editIssues
+   * switch on (else 403 github-writes-off), owner, name and number by the server's patterns (else 400
    * invalid-request), body by the server's rules (else 400 invalid-request). The stale check,
    * the host guard, body limit, 424, 502, 503 and 504 are not modelled; return them from this
    * handler or inject them with failNext. Return undefined for the default answer: 200 with
@@ -166,10 +171,13 @@ export interface ApiStub {
   setGithubAccess(access: GitHubAccess): void
   /** The signed-in session, or null. */
   readonly session: Session | null
-  /** The GitHub writes switch as the stub's server holds it now. */
-  readonly githubWrites: boolean
-  /** Changes the switch as the admin would from another browser; this client is not told. */
-  setGithubWrites(on: boolean): void
+  /** The GitHub write switches as the stub's server holds them now. */
+  readonly githubWrites: GithubWrites
+  /**
+   * Changes switches as the admin would from another browser; this client is not told. True or
+   * false sets every kind; an object changes the kinds it names and keeps the others.
+   */
+  setGithubWrites(on: boolean | Partial<GithubWrites>): void
   /** Number of EventSource instances currently open. */
   openStreams(): number
   /** Fails every open stream: 'reconnect' (the browser retries) or 'closed' (HTTP error, source ended). */
@@ -375,7 +383,12 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     accounts.push(makeAccount(extra.username, extra.password, extra.isAdmin ?? false))
   }
 
-  let githubWrites = options.githubWrites ?? false
+  const writeSwitches = (on: boolean | Partial<GithubWrites>): Partial<GithubWrites> =>
+    typeof on === 'boolean' ? Object.fromEntries(GITHUB_WRITE_KINDS.map((kind) => [kind, on])) : on
+  let githubWrites: GithubWrites = {
+    ...(Object.fromEntries(GITHUB_WRITE_KINDS.map((kind) => [kind, false])) as GithubWrites),
+    ...writeSwitches(options.githubWrites ?? false),
+  }
   let createdIssues = 0
   let current: Session | null = null
   const startSession = (account: Account): Session => {
@@ -735,17 +748,30 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
     if (!current) return error(401, 'signed-out', 'Sign in to continue.')
 
     if (head === 'settings' && method === 'GET' && tail === '') {
-      return toResponse(200, { githubWrites } satisfies ServerSettings)
+      return toResponse(200, { githubWrites: { ...githubWrites } } satisfies ServerSettings)
     }
     if (head === 'settings' && method === 'PATCH' && tail === '') {
       if (!current.user.isAdmin) return error(403, 'forbidden', 'Only the admin can do this.')
-      const request = body as Partial<ServerSettings> | null
-      const keys = request && typeof request === 'object' && !Array.isArray(request) ? Object.keys(request) : []
-      if (keys.length === 0 || keys.some((key) => key !== 'githubWrites') || typeof request?.githubWrites !== 'boolean') {
-        return error(400, 'invalid-request', 'The settings request is not valid.')
+      const isRecord = (value: unknown): value is Record<string, unknown> =>
+        typeof value === 'object' && value !== null && !Array.isArray(value)
+      if (!isRecord(body) || Object.keys(body).length === 0) {
+        return error(400, 'invalid-request', 'The body must be a JSON object with a setting to change.')
       }
-      githubWrites = request.githubWrites
-      return toResponse(200, { githubWrites } satisfies ServerSettings)
+      if (Object.keys(body).some((key) => key !== 'githubWrites')) return error(400, 'invalid-request', 'Only githubWrites can be changed.')
+      const writes = body.githubWrites
+      if (!isRecord(writes) || Object.keys(writes).length === 0) {
+        return error(400, 'invalid-request', 'githubWrites must be a JSON object with a kind of GitHub write to change.')
+      }
+      const changes: Partial<GithubWrites> = {}
+      for (const [kind, on] of Object.entries(writes)) {
+        if (!(GITHUB_WRITE_KINDS as readonly string[]).includes(kind)) {
+          return error(400, 'invalid-request', `Unknown kind of GitHub write: ${kind}.`)
+        }
+        if (typeof on !== 'boolean') return error(400, 'invalid-request', `githubWrites.${kind} must be true or false.`)
+        changes[kind as GithubWriteKind] = on
+      }
+      githubWrites = { ...githubWrites, ...changes }
+      return toResponse(200, { githubWrites: { ...githubWrites } } satisfies ServerSettings)
     }
     if (head === 'issues' && method === 'POST') {
       const [owner = '', name = '', ...more] = tail.split('/').map(decodeURIComponent)
@@ -753,7 +779,7 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
       if (current.githubAccess.mode !== 'server') {
         return error(403, 'forbidden', 'This account creates issues from the browser.')
       }
-      if (!githubWrites) return error(403, 'github-writes-off', 'The admin has not turned on creating issues on GitHub.')
+      if (!githubWrites.createIssues) return error(403, 'github-writes-off', 'The admin has not turned on creating issues on GitHub.')
       if (!OWNER_PATTERN.test(owner) || !NAME_PATTERN.test(name) || name === '.' || name === '..') {
         return error(400, 'invalid-request', 'The path must be a repository as owner/name.')
       }
@@ -773,7 +799,9 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
       if (current.githubAccess.mode !== 'server') {
         return error(403, 'forbidden', 'This account changes issues from the browser.')
       }
-      if (!githubWrites) return error(403, 'github-writes-off', 'The admin has not turned on changing issues on GitHub.')
+      if (!githubWrites.editIssues) {
+        return error(403, 'github-writes-off', 'The admin has not turned on editing, closing and reopening issues on GitHub.')
+      }
       const number = Number(digits)
       if (
         !OWNER_PATTERN.test(owner) ||
@@ -1021,10 +1049,10 @@ export function installApiStub(options: ApiStubOptions = {}): ApiStub {
       return current
     },
     get githubWrites() {
-      return githubWrites
+      return { ...githubWrites }
     },
     setGithubWrites(on) {
-      githubWrites = on
+      githubWrites = { ...githubWrites, ...writeSwitches(on) }
     },
     openStreams: () => FakeEventSource.instances.size,
     failStreams: (mode) => [...FakeEventSource.instances].forEach((source) => source.fail(mode)),

@@ -148,8 +148,8 @@ describe('useCreateIssue', () => {
     expect(stub.calls.slice(apiCallsBefore).filter((call) => call.path.startsWith('github/'))).toEqual([])
   })
 
-  it('sends nothing to GitHub when the switch is off, and the pre-check reads it again', async () => {
-    const stub = await start({ githubWrites: false })
+  it('sends nothing to GitHub when creating is off, even with editing on, and the pre-check reads it again', async () => {
+    const stub = await start({ githubWrites: { createIssues: false, editIssues: true } })
     const { result } = render()
     await waitFor(() => expect(result.current.snapshot.data).toBeDefined())
     const before = githubCalls.length
@@ -164,10 +164,10 @@ describe('useCreateIssue', () => {
     const stub = await start()
     const { result, queryClient } = render()
     await waitFor(() => expect(result.current.snapshot.data).toBeDefined())
-    queryClient.setQueryData(SERVER_SETTINGS_QUERY_KEY, { githubWrites: true })
-    stub.setGithubWrites(false)
+    queryClient.setQueryData(SERVER_SETTINGS_QUERY_KEY, { githubWrites: { createIssues: true, editIssues: true } })
+    stub.setGithubWrites({ createIssues: false })
     await expect(result.current.create(input())).rejects.toMatchObject({ kind: 'writes-off' })
-    expect(queryClient.getQueryData(SERVER_SETTINGS_QUERY_KEY)).toEqual({ githubWrites: false })
+    expect(queryClient.getQueryData(SERVER_SETTINGS_QUERY_KEY)).toEqual({ githubWrites: { createIssues: false, editIssues: true } })
   })
 
   it.each([
@@ -187,13 +187,13 @@ describe('useCreateIssue', () => {
     expect(githubCalls).toHaveLength(before)
   })
 
-  it('a server 403 github-writes-off turns the cached switch off', async () => {
+  it('a server 403 github-writes-off turns off only the cached create switch', async () => {
     const stub = await start({ githubAccess: { mode: 'server' }, github: ({ path }) => githubAnswer('GET', `/${path}`) })
     const { result, queryClient } = render()
     await waitFor(() => expect(result.current.snapshot.data).toBeDefined())
     stub.failNext('POST issues', { status: 403, error: 'github-writes-off' })
     await expect(result.current.create(input())).rejects.toMatchObject({ kind: 'writes-off' })
-    expect(queryClient.getQueryData(SERVER_SETTINGS_QUERY_KEY)).toEqual({ githubWrites: false })
+    expect(queryClient.getQueryData(SERVER_SETTINGS_QUERY_KEY)).toEqual({ githubWrites: { createIssues: false, editIssues: true } })
     expect(result.current.snapshot.data?.issues).toHaveLength(1)
   })
 

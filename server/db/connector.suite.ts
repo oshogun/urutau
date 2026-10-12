@@ -9,7 +9,8 @@ import { createIntegration, deleteIntegration, isIntegration, listIntegrations }
 import { listAllIntegrationRepos, listIntegrationRepos, setIntegrationRepos } from './integrationRepos.ts'
 import { findUserByIdentity, linkIdentity } from './identities.ts'
 import { createInvite, deleteInvite, getUsableInvite, listUsableInvites, markInviteUsed } from './invites.ts'
-import { getGithubWrites, setGithubWrites } from './settings.ts'
+import { GITHUB_WRITE_KINDS } from '../../src/domain/api.ts'
+import { getGithubWrites, setGithubWrite } from './settings.ts'
 import { createRunStore } from '../runs/store.ts'
 import type { RecordRunInput } from '../runs/types.ts'
 import { createSession, deleteExpiredSessions, getSession, getSessionWithUser } from './sessions.ts'
@@ -32,13 +33,15 @@ function isForeignKeyViolation(error: unknown): boolean {
  */
 const TABLES = ['run_events', 'card_claims', 'card_runs', 'integration_repos', 'api_tokens', 'github_tokens', 'integrations', 'sessions', 'invites', 'identities', 'boards', 'instance_claim', 'users'] as const
 
-/** Empties every application table except `meta`, children before parents, and turns the GitHub writes switch off. */
+/** Empties every application table except `meta`, children before parents, and turns every GitHub writes switch off. */
 async function resetData(database: Database): Promise<void> {
   const { db } = database
   for (const table of TABLES) {
     await db.deleteFrom(table).execute()
   }
-  await setGithubWrites(db, false)
+  for (const kind of GITHUB_WRITE_KINDS) {
+    await setGithubWrite(db, kind, false)
+  }
 }
 
 /**
@@ -100,7 +103,7 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         const admin = await seedAdmin()
         const made = await createIntegration(database.db, { username: 'planner-bot', createdBy: admin.id, now: T0 })
         // Kysely refuses a gap in the executed list, so the later migration's row goes too.
-        await database.db.deleteFrom('kysely_migration' as never).where('name' as never, 'in', ['0003_integrations', '0004_card_runs'] as never).execute()
+        await database.db.deleteFrom('kysely_migration' as never).where('name' as never, 'in', ['0003_integrations', '0004_card_runs', '0005_github_write_kinds'] as never).execute()
         await database.migrate()
         expect(await isIntegration(database.db, made.id)).toBe(true)
       })
@@ -114,6 +117,15 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         })
       }
 
+      async function metaValue(key: string) {
+        return (await database.db.selectFrom('meta').select('value').where('key', '=', key).executeTakeFirst())?.value
+      }
+
+      /** Sets the single switch of 0002–0004 by its raw row, as the app then did. */
+      async function turnOldSwitchOn(value = '1') {
+        await database.db.updateTable('meta').set({ value }).where('key', '=', 'github_writes').execute()
+      }
+
       it('rows written at 0001_initial survive the upgrade to latest', async () => {
         await dropSchema(database)
         await migrateTo(database.db, database.backend, '0001_initial')
@@ -124,8 +136,10 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
 
         await database.migrate()
 
-        expect(await database.db.selectFrom('meta').select('value').where('key', '=', 'github_writes').executeTakeFirst()).toEqual({ value: '0' })
-        expect(await getGithubWrites(database.db)).toBe(false)
+        expect(await metaValue('github_writes_create_issues')).toBe('0')
+        expect(await metaValue('github_writes_edit_issues')).toBe('0')
+        expect(await metaValue('github_writes')).toBeUndefined()
+        expect(await getGithubWrites(database.db)).toEqual({ createIssues: false, editIssues: false })
         expect(await database.db.selectFrom('users').select('username').execute()).toEqual([{ username: admin.username }])
         expect(await database.db.selectFrom('sessions').select('id_hash').execute()).toHaveLength(1)
         expect(await database.db.selectFrom('boards').select('repo_key').execute()).toEqual([{ repo_key: 'acme/widgets' }])
@@ -137,7 +151,7 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         const admin = await seedAdmin()
         await seedSession(admin.id)
         await createBoard(database.db, { repoKey: 'acme/widgets', fullName: 'Acme/Widgets', config: fixtureBoard(), userId: admin.id, now: T0 })
-        await setGithubWrites(database.db, true)
+        await turnOldSwitchOn()
 
         await database.migrate()
 
@@ -146,7 +160,7 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         expect(await database.db.selectFrom('boards').select(['repo_key', 'updated_by']).execute()).toEqual([
           { repo_key: 'acme/widgets', updated_by: admin.id },
         ])
-        expect(await getGithubWrites(database.db)).toBe(true)
+        expect(await getGithubWrites(database.db)).toEqual({ createIssues: true, editIssues: true })
         for (const table of ['integrations', 'api_tokens', 'github_tokens', 'integration_repos'] as const) {
           expect(await database.db.selectFrom(table).selectAll().execute()).toEqual([])
         }
@@ -162,7 +176,7 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
           .insertInto('api_tokens')
           .values({ id: 'tok-1', user_id: bot.id, token_hash: 'a'.repeat(64), label: 'ci', created_by: admin.id, created_at: T0.toISOString(), expires_at: null, last_used_at: null })
           .execute()
-        await setGithubWrites(database.db, true)
+        await turnOldSwitchOn()
 
         await database.migrate()
 
@@ -171,7 +185,7 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         expect(await database.db.selectFrom('api_tokens').select('id').execute()).toEqual([{ id: 'tok-1' }])
         const boards = await database.db.selectFrom('boards').select(['repo_key', 'version']).execute()
         expect(boards.map((b) => ({ repo_key: b.repo_key, version: Number(b.version) }))).toEqual([{ repo_key: 'acme/widgets', version: 1 }])
-        expect(await getGithubWrites(database.db)).toBe(true)
+        expect(await getGithubWrites(database.db)).toEqual({ createIssues: true, editIssues: true })
         for (const table of ['card_runs', 'card_claims', 'run_events'] as const) {
           expect(await database.db.selectFrom(table).selectAll().execute()).toEqual([])
         }
@@ -199,7 +213,7 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
           .insertInto('card_claims')
           .values({ repo_key: 'acme/widgets', issue: 7, run_id: 'run-1', holder: bot.id, lease_until: null, claimed_at: T0.toISOString() })
           .execute()
-        await setGithubWrites(database.db, true)
+        await turnOldSwitchOn()
 
         await database.migrate()
 
@@ -210,24 +224,65 @@ export function connectorSuite(name: string, open: () => Promise<Database>): voi
         expect(boards.map((b) => ({ repo_key: b.repo_key, version: Number(b.version) }))).toEqual([{ repo_key: 'acme/widgets', version: 1 }])
         expect(await database.db.selectFrom('card_runs').select('run_id').execute()).toEqual([{ run_id: 'run-1' }])
         expect(await database.db.selectFrom('card_claims').select('run_id').execute()).toEqual([{ run_id: 'run-1' }])
-        expect(await getGithubWrites(database.db)).toBe(true)
+        expect(await getGithubWrites(database.db)).toEqual({ createIssues: true, editIssues: true })
         for (const table of ['run_events'] as const) {
           expect(await database.db.selectFrom(table).selectAll().execute()).toEqual([])
         }
       })
+
+      it.each([
+        ['1', true],
+        ['0', false],
+      ])('rows written at 0004_card_runs survive the upgrade to latest, and github_writes %s carries over to both kinds', async (old, on) => {
+        await dropSchema(database)
+        await migrateTo(database.db, database.backend, '0004_card_runs')
+        const admin = await seedAdmin()
+        await seedSession(admin.id)
+        const bot = await createIntegration(database.db, { username: 'bot', createdBy: admin.id, now: T0 })
+        await createBoard(database.db, { repoKey: 'acme/widgets', fullName: 'Acme/Widgets', config: fixtureBoard(), userId: admin.id, now: T0 })
+        await database.db
+          .insertInto('card_runs')
+          .values({
+            run_id: 'run-1', repo_key: 'acme/widgets', issue: 7, agent_user_id: bot.id, status: 'running', status_at: T0.toISOString(),
+            triage_range: null, uncertainty_kind: null, unverified: '[]', merge_shas: '[]', files: '[]', files_omitted: 0, areas: '[]',
+            observed_by: null, fix_rounds: 0, cost_usd: null, findings: null, started_at: T0.toISOString(), ended_at: null,
+          })
+          .execute()
+        await database.db
+          .insertInto('card_claims')
+          .values({ repo_key: 'acme/widgets', issue: 7, run_id: 'run-1', holder: bot.id, lease_until: null, claimed_at: T0.toISOString() })
+          .execute()
+        await turnOldSwitchOn(old)
+
+        await database.migrate()
+
+        expect(await database.db.selectFrom('users').select('username').orderBy('username').execute()).toEqual([{ username: 'bot' }, { username: admin.username }])
+        expect(await database.db.selectFrom('sessions').select('id_hash').execute()).toHaveLength(1)
+        expect(await database.db.selectFrom('integrations').select('user_id').execute()).toEqual([{ user_id: bot.id }])
+        expect(await database.db.selectFrom('boards').select('repo_key').execute()).toEqual([{ repo_key: 'acme/widgets' }])
+        expect(await database.db.selectFrom('card_runs').select('run_id').execute()).toEqual([{ run_id: 'run-1' }])
+        expect(await database.db.selectFrom('card_claims').select('run_id').execute()).toEqual([{ run_id: 'run-1' }])
+        expect(await metaValue('github_writes_create_issues')).toBe(old)
+        expect(await metaValue('github_writes_edit_issues')).toBe(old)
+        expect(await metaValue('github_writes')).toBeUndefined()
+        expect(await getGithubWrites(database.db)).toEqual({ createIssues: on, editIssues: on })
+      })
     })
 
     describe('github writes switch', () => {
-      it('is off after migrate and round-trips', async () => {
-        const row = await database.db.selectFrom('meta').select('value').where('key', '=', 'github_writes').executeTakeFirstOrThrow()
-        expect(row.value).toBe('0')
-        expect(await getGithubWrites(database.db)).toBe(false)
-        await setGithubWrites(database.db, true)
-        expect(await getGithubWrites(database.db)).toBe(true)
+      it('is off for every kind after migrate, and each kind round-trips on its own', async () => {
+        expect(await getGithubWrites(database.db)).toEqual({ createIssues: false, editIssues: false })
+        await setGithubWrite(database.db, 'createIssues', true)
+        expect(await getGithubWrites(database.db)).toEqual({ createIssues: true, editIssues: false })
         await database.migrate()
-        expect(await getGithubWrites(database.db)).toBe(true)
-        await setGithubWrites(database.db, false)
-        expect(await getGithubWrites(database.db)).toBe(false)
+        expect(await getGithubWrites(database.db)).toEqual({ createIssues: true, editIssues: false })
+        await setGithubWrite(database.db, 'editIssues', true)
+        await setGithubWrite(database.db, 'createIssues', false)
+        expect(await getGithubWrites(database.db)).toEqual({ createIssues: false, editIssues: true })
+        await database.migrate()
+        expect(await getGithubWrites(database.db)).toEqual({ createIssues: false, editIssues: true })
+        await setGithubWrite(database.db, 'editIssues', false)
+        expect(await getGithubWrites(database.db)).toEqual({ createIssues: false, editIssues: false })
       })
     })
 

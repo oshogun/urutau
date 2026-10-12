@@ -26,7 +26,7 @@ for the app, and Hono, Kysely and a SQL database for the server.
   a link to the issue on GitHub, and the description formatted from its Markdown (headings,
   lists, task lists, tables, code, quotes, links; images are never loaded: each shows as a link,
   or as its alt text when its address is refused). The modal is read only unless the admin has
-  turned on *Create and edit issues on GitHub* (see *Edit, close and reopen issues* below). The
+  turned on *Edit, close and reopen issues on GitHub* (see *Edit, close and reopen issues* below). The
   description comes from the issue list the board already loads, so opening the modal makes no
   request to the GitHub API. The description is formatted in a Web Worker; one that takes more
   than a second to format is shown as plain text, with a notice.
@@ -37,12 +37,13 @@ for the app, and Hono, Kysely and a SQL database for the server.
   in an open board without a reload, with a *Live* indicator and a *Board updated by …* notice.
 - **Accounts.** Local username and password accounts, created from invite links by the admin, or
   sign-in with Keycloak.
-- **Create issues.** When the admin turns on *Create and edit issues on GitHub* on the Server
+- **Create issues.** When the admin turns on *Create issues on GitHub* on the Server
   settings page (user menu, *Server settings*), each bucket header gets a **+** button. It opens a
   dialog for a title and an optional description, creates the issue on GitHub as the person who
   clicked, and puts the new card in that bucket. The closed-issues bucket has no **+**. The switch is off by
   default and is server-wide.
-- **Edit, close and reopen issues.** With the same switch on, the issue details modal can edit the
+- **Edit, close and reopen issues.** When the admin turns on its own switch, *Edit, close and
+  reopen issues on GitHub*, the issue details modal can edit the
   issue's title and description, close it as completed or as not planned, and reopen a closed one,
   on GitHub, as the person who clicked. It works with a token pasted in the browser and with a
   token held by Keycloak. A change (edit, close or reopen) is refused, with nothing sent, when the
@@ -60,9 +61,11 @@ for the app, and Hono, Kysely and a SQL database for the server.
   exported from another repository brings its buckets and rules, but not card positions or
   estimates.
 
-Urutau reads issues and labels from GitHub and, when the admin turns on *Create and edit issues on
-GitHub*, creates issues and changes an existing issue's title, description and state (open or
-closed). It writes nothing else to a repository: no labels, assignees, milestones or comments.
+Urutau reads issues and labels from GitHub. When the admin turns on *Create issues on GitHub* it
+creates issues, and when the admin turns on *Edit, close and reopen issues on GitHub* it changes an
+existing issue's title, description and state (open or closed). It writes nothing else to a
+repository: no labels, assignees, milestones or comments. Each kind of write Urutau adds later
+comes with its own switch, turned off.
 Buckets, rules and card positions live in the server's database. Creating an issue adds no
 labels, whatever the bucket's rules are. The moves and run records an AI agent makes through MCP
 are Urutau-only: they change card positions, runs and claims in Urutau's database and never write
@@ -108,7 +111,7 @@ hour and is required for private repositories. There are three ways to give Urut
    **Settings** (the gear icon). It stays in this browser's local storage, is sent only to `api.github.com`,
    and never reaches the Urutau server or a board export. Anyone with access to your browser
    profile can read it. A token with Issues write can create and edit issues in those
-   repositories, so give it only the repositories you need, and use a token with Issues read-only
+   repositories, whichever GitHub writes the admin has turned on, so give it only the repositories you need, and use a token with Issues read-only
    if you only view boards.
 2. **A token held by Keycloak** (Keycloak accounts, when `KEYCLOAK_GITHUB_IDP` is set). The user
    signs in to Keycloak with GitHub. The server asks Keycloak for the GitHub token and keeps it in
@@ -293,25 +296,48 @@ does not mention issues under `public_repo` or `repo`, and no real GitHub accoun
 
 ### Creating and editing issues
 
-The switch covers creating an issue and changing one (edit, close, reopen). It is a row in the
-database, off after a first start or an upgrade from a build without it, and only the admin can
-change it (`PATCH /api/settings`). A server where creating issues was already on keeps it on, and
-that now also allows editing, closing and reopening, with no action by the admin. What it
-enforces depends on the path the token takes:
+Writes to GitHub have one switch per kind of write, on the Server settings page:
 
-- **Token held by Keycloak:** the server checks the switch before it fetches the token, and
+- *Create issues on GitHub* covers creating an issue.
+- *Edit, close and reopen issues on GitHub* covers changing one (edit, close, reopen).
+
+Each switch is a row in the database, off after a first start, and only the admin can change it
+(`PATCH /api/settings`, for example `{"githubWrites": {"createIssues": true}}`). Upgrading from a
+build with the single *Create and edit issues on GitHub* switch turns both on if it was on, and
+both off if it was off. Each kind of write Urutau adds later (labels, assignees and milestones,
+comments) comes with its own switch, turned off, so an upgrade never allows a write the admin has
+not turned on. What a switch enforces depends on the path the token takes:
+
+- **Token held by Keycloak:** the server checks the kind's switch before it fetches the token, and
   refuses the create or the change while it is off.
-- **Token pasted in the browser:** only the interface enforces the switch. It hides the **+**
-  buttons and the details modal's edit, close and reopen controls while the switch is off and
-  re-reads the switch before each create or change, but the browser sends the request straight to
-  `api.github.com`, which the server cannot refuse. Anyone holding a token with Issues write can
-  create and edit issues with it outside Urutau. The switch is a product
-  setting, not a security boundary for pasted tokens: GitHub's permissions on the token decide
-  what it can do.
+- **Token pasted in the browser:** only the interface enforces the switches. It hides the **+**
+  buttons while *Create issues on GitHub* is off, and the details modal's edit, close and reopen
+  controls while *Edit, close and reopen issues on GitHub* is off. It re-reads the switch before
+  each create or change, but the browser sends the request straight to `api.github.com`, which the
+  server cannot refuse. Anyone holding a token with Issues write can create and edit issues with it
+  outside Urutau. The switches are product settings, not a security boundary for pasted tokens:
+  GitHub's permissions on the token decide what it can do.
 
 Creating an issue notifies the repository's watchers, like creating it on github.com. GitHub
 limits requests that create content (80 a minute, 500 an hour); Urutau reports a rejection and
 does not retry.
+
+**Downgrading past the per-kind switches.** Migration `0005_github_write_kinds` replaces the
+single `github_writes` row of the `meta` table with `github_writes_create_issues` and
+`github_writes_edit_issues`. An older server build refuses to start on a database that has run it.
+To go back to a build with the single switch, stop the server and run these statements against the
+database (they run on SQLite, PostgreSQL and MariaDB), then start the older build:
+
+```sql
+INSERT INTO meta
+  SELECT 'github_writes', meta.value FROM meta WHERE meta.key = 'github_writes_create_issues';
+DELETE FROM meta WHERE meta.key IN ('github_writes_create_issues', 'github_writes_edit_issues');
+DELETE FROM kysely_migration WHERE name = '0005_github_write_kinds';
+```
+
+The single switch takes the value of *Create issues on GitHub*, and on the older build it also
+allows editing, closing and reopening. Upgrading again turns both kinds on or off together, so an
+admin who had only one of them on sets the other again.
 
 **Downgrading past the switch.** Migration `0002_github_writes` adds the switch to the `meta`
 table. An older server build refuses to start on a database that has run it, because Kysely
@@ -637,9 +663,9 @@ DELETE FROM kysely_migration WHERE name = '0003_integrations';
 ```
 
 The first statement is optional: without it the integration accounts stay as `users` rows with no
-password that an older build lists as Keycloak users who cannot sign in. If you also go back past
-the issue switch, run the `0002_github_writes` statements from *Creating and editing issues*
-afterwards.
+password that an older build lists as Keycloak users who cannot sign in. Run the
+`0005_github_write_kinds` statements from *Creating and editing issues* before these. If you also
+go back past the issue switch, run the `0002_github_writes` statements afterwards.
 
 ## How issues are placed
 
@@ -735,7 +761,7 @@ src/
 server/
 ├── main.ts        Starts the server (config, database, shutdown)
 ├── app.ts         The Hono app: middleware and routes
-├── routes/        /api endpoints: auth, invites, users, agent integrations, boards, settings (the switch), events, GitHub reads and issue creation and changes
+├── routes/        /api endpoints: auth, invites, users, agent integrations, boards, settings (the GitHub-write switches), events, GitHub reads and issue creation and changes
 ├── db/            Kysely schema, migrations and one repository module per table
 ├── auth/          Passwords, sessions, CSRF, sign-in rate limits, MCP bearer tokens, the secret box for stored GitHub tokens
 ├── oidc/          Keycloak sign-in and GitHub token brokering
@@ -771,7 +797,8 @@ the UI only uses those types. Adding another provider (GitLab, Gitea, …) means
 ## Roadmap ideas
 
 - More writes to GitHub from the board: labelling, assigning and commenting. Creating issues and
-  editing, closing and reopening them are the only writes today.
+  editing, closing and reopening them are the only writes today. Each new kind of write comes with
+  its own switch on the Server settings page, turned off.
 - Boards stored in the repository itself (e.g. `.urutau.json`).
 - Sign in with GitHub (OAuth/device flow) instead of pasting a token.
 - UI copy in Portuguese as well as English.

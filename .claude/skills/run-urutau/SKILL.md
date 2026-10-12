@@ -171,8 +171,8 @@ refusal on #2 and closes #12; every `PATCH` goes to the fixtures:
 curl -s http://127.0.0.1:9334 --data-binary @- <<'EOS'
 page.setDefaultTimeout(10000)
 await page.goto(appUrl + '/?view=server-settings')
-await page.getByText('Create and edit issues on GitHub').click()
-await page.waitForFunction(() => document.querySelector('#github-writes')?.getAttribute('aria-checked') === 'true')
+await page.getByText('Edit, close and reopen issues on GitHub').click()
+await page.waitForFunction(() => document.querySelector('#github-writes-editIssues')?.getAttribute('aria-checked') === 'true')
 await page.getByRole('button', { name: 'Settings', exact: true }).click()
 const dlg = page.getByRole('dialog', { name: 'Settings' })
 await dlg.getByLabel('GitHub personal access token').fill('fixture-token')
@@ -409,7 +409,8 @@ Expect every test to pass (1620 passed and 3 skipped, in 81 test files plus 1 sk
   but leaves the boards and the session.
 - **A Carbon `Toggle`'s label covers its switch.** `getByRole('switch', …).click()` retries for
   30 seconds ("… label … subtree intercepts pointer events") and fails. Click the label text:
-  `page.getByText('Create and edit issues on GitHub').click()`.
+  `page.getByText('Create issues on GitHub').click()` (or `'Edit, close and reopen issues on
+  GitHub'`; their switches are `#github-writes-createIssues` and `#github-writes-editIssues`).
 - **A failed locator waits Playwright's default 30 seconds** before the driver answers HTTP 500.
   Start long scripts with `page.setDefaultTimeout(10000)`; it stays set for the driver's life.
 - **`githubRequests` and the `[github]` lines in `logs` count the main `page` only.** Requests from

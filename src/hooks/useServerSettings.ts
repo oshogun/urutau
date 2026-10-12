@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getServerSettings, SERVER_SETTINGS_QUERY_KEY, updateServerSettings } from '../api/settings'
-import type { ServerSettings, UpdateServerSettingsRequest } from '../domain/api'
+import { GITHUB_WRITE_KINDS, type GithubWrites, type ServerSettings, type UpdateServerSettingsRequest } from '../domain/api'
 
-/** The server-wide switches. `githubWrites` is false while loading, on error and when the admin has it off. */
+const ALL_WRITES_OFF = Object.fromEntries(GITHUB_WRITE_KINDS.map((kind) => [kind, false])) as GithubWrites
+
+/** The server-wide switches. Every kind of GitHub write is off while loading, on error and when the admin has it off. */
 export function useServerSettings() {
   const query = useQuery({
     queryKey: SERVER_SETTINGS_QUERY_KEY,
@@ -12,7 +14,7 @@ export function useServerSettings() {
     retry: false,
   })
   return {
-    githubWrites: query.data?.githubWrites ?? false,
+    githubWrites: query.data?.githubWrites ?? ALL_WRITES_OFF,
     isLoading: query.isLoading,
     error: query.error,
   }

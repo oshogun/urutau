@@ -65,7 +65,9 @@ describe('the api stub answers PATCH api/issues like the server', () => {
     const off = installApiStub({ githubAccess: { mode: 'server' } })
     await useSession.getState().load()
     expect((await failure(apiRequest('issues/acme/widgets/7', { method: 'PATCH', body }))).code).toBe('github-writes-off')
-    off.setGithubWrites(true)
+    off.setGithubWrites({ createIssues: true })
+    expect((await failure(apiRequest('issues/acme/widgets/7', { method: 'PATCH', body }))).code).toBe('github-writes-off')
+    off.setGithubWrites({ editIssues: true })
     expect((await failure(apiRequest('issues/acme/widgets/0', { method: 'PATCH', body }))).status).toBe(400)
     expect((await failure(apiRequest('issues/acme/widgets/7', { method: 'PATCH', body: { fields } }))).status).toBe(400)
   })
@@ -84,5 +86,52 @@ describe('the api stub answers PATCH api/issues like the server', () => {
     installApiStub({ session: 'signed-out' })
     await useSession.getState().load()
     expect((await failure(apiRequest('issues/acme/widgets/7', { method: 'PATCH', body }))).code).toBe('signed-out')
+  })
+})
+
+describe('the api stub keeps one GitHub write switch per kind like the server', () => {
+  it('takes a boolean for every kind or an object for some, and setGithubWrites merges', () => {
+    expect(installApiStub().githubWrites).toEqual({ createIssues: false, editIssues: false })
+    expect(installApiStub({ githubWrites: true }).githubWrites).toEqual({ createIssues: true, editIssues: true })
+    const stub = installApiStub({ githubWrites: { editIssues: true } })
+    expect(stub.githubWrites).toEqual({ createIssues: false, editIssues: true })
+    stub.setGithubWrites({ createIssues: true })
+    expect(stub.githubWrites).toEqual({ createIssues: true, editIssues: true })
+    stub.setGithubWrites(false)
+    expect(stub.githubWrites).toEqual({ createIssues: false, editIssues: false })
+  })
+
+  it('PATCH api/settings changes only the kinds given and refuses what the server refuses', async () => {
+    const stub = installApiStub()
+    await useSession.getState().load()
+    const answer = await apiRequest('settings', { method: 'PATCH', body: { githubWrites: { editIssues: true } } })
+    expect(answer).toEqual({ githubWrites: { createIssues: false, editIssues: true } })
+    expect(await apiRequest('settings')).toEqual({ githubWrites: { createIssues: false, editIssues: true } })
+    for (const bad of [
+      {},
+      { githubWrites: true },
+      { githubWrites: {} },
+      { githubWrites: { comments: true } },
+      { githubWrites: { createIssues: 'yes' } },
+      { githubWrites: { createIssues: true }, other: 1 },
+    ]) {
+      expect((await failure(apiRequest('settings', { method: 'PATCH', body: bad }))).status).toBe(400)
+    }
+    expect(stub.githubWrites).toEqual({ createIssues: false, editIssues: true })
+  })
+
+  it('POST api/issues needs createIssues, whatever editIssues says', async () => {
+    const stub = installApiStub({ githubAccess: { mode: 'server' }, githubWrites: { editIssues: true } })
+    await useSession.getState().load()
+    const create = () => apiRequest('issues/acme/widgets', { method: 'POST', body: { title: 'New' } })
+    const error = await failure(create())
+    expect(error.code).toBe('github-writes-off')
+    expect(error.message).toBe('The admin has not turned on creating issues on GitHub.')
+    stub.setGithubWrites({ createIssues: true, editIssues: false })
+    await expect(create()).resolves.toMatchObject({ issue: { title: 'New' } })
+    const edit = await failure(
+      apiRequest('issues/acme/widgets/7', { method: 'PATCH', body: { expectedUpdatedAt: '2026-01-01T00:00:00Z', fields: { title: 'X' } } }),
+    )
+    expect(edit.message).toBe('The admin has not turned on editing, closing and reopening issues on GitHub.')
   })
 })

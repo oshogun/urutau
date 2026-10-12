@@ -6,7 +6,7 @@ import type { RunStatus, TriageRange, UncertaintyKind } from '../../src/domain/t
  * booleans are 0 or 1, JSON is text.
  */
 export interface MetaTable {
-  key: string // VARCHAR(64) PK; rows: 'instance_id', and 'github_writes' ('1' when the admin has turned on GitHub writes, '0' otherwise)
+  key: string // VARCHAR(64) PK; rows: 'instance_id', and one per kind of GitHub write ('github_writes_create_issues', 'github_writes_edit_issues': '1' when the admin has turned it on, '0' otherwise)
   value: string // VARCHAR(255)
 }
 

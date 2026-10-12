@@ -49,13 +49,13 @@ export function useCreateIssue(repo: RepoRef) {
       if (!normalized.ok) throw createIssueFailures.invalid(normalized.message)
 
       const { via, token } = chooseWritePath(createIssueFailures)
-      await requireWritesOn(queryClient, signal, createIssueFailures)
+      await requireWritesOn(queryClient, signal, createIssueFailures, 'createIssues')
 
       let issue: Issue
       try {
         issue = await createIssue({ fullName, fields: normalized.value, via, token, signal })
       } catch (error) {
-        if (error instanceof CreateIssueError) noteWriteFailure(queryClient, error)
+        if (error instanceof CreateIssueError) noteWriteFailure(queryClient, error, 'createIssues')
         throw error
       }
 

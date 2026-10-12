@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import type { CreateIssueResponse, GitHubRejectedError, IssueUpdateRejectedError } from '../../src/domain/api.ts'
+import type { CreateIssueResponse, GitHubRejectedError, GithubWrites, IssueUpdateRejectedError } from '../../src/domain/api.ts'
 import type { Keycloak } from '../oidc/keycloak.ts'
 import { issuesPathFor } from '../github/newIssue.ts'
 import { createFakeKeycloak } from '../oidc/fakeKeycloak.ts'
@@ -30,13 +30,15 @@ afterEach(async () => {
   await t.h.close()
 })
 
-async function signedIn(on = true): Promise<void> {
+/** `on` turns every kind of write on or leaves them all off; an object turns on just the kinds it holds as true. */
+async function signedIn(on: boolean | Partial<GithubWrites> = true): Promise<void> {
   t = await createKeycloakApp()
-  // The first account is the admin; sign in through Keycloak as a second one and turn the switch on from a local admin client.
+  // The first account is the admin; sign in through Keycloak as a second one and turn the switches on from a local admin client.
   const admin = t.h.newClient()
   expect((await admin.post('/api/auth/first-run', ADMIN)).status).toBe(201)
   await keycloakSignIn(t.h, t.kc, OCTOCAT)
-  if (on) expect((await admin.send('PATCH', '/api/settings', { githubWrites: true })).status).toBe(200)
+  const githubWrites = typeof on === 'boolean' ? (on ? { createIssues: true, editIssues: true } : null) : on
+  if (githubWrites) expect((await admin.send('PATCH', '/api/settings', { githubWrites })).status).toBe(200)
   t.kc.github = () => new Response(JSON.stringify(CREATED), { status: 201, headers: { 'content-type': 'application/json' } })
 }
 
@@ -65,7 +67,7 @@ describe('who may create', () => {
   test('a local account is 403 forbidden', async () => {
     t = await createKeycloakApp()
     expect((await t.h.post('/api/auth/first-run', ADMIN)).status).toBe(201)
-    expect((await t.h.send('PATCH', '/api/settings', { githubWrites: true })).status).toBe(200)
+    expect((await t.h.send('PATCH', '/api/settings', { githubWrites: { createIssues: true, editIssues: true } })).status).toBe(200)
     const response = await create()
     expect(response.status).toBe(403)
     expect(await json(response)).toMatchObject({ error: 'forbidden' })
@@ -183,7 +185,7 @@ describe('the request to GitHub', () => {
     const h = await createTestApp({ config: { publicUrl: PUBLIC_URL, keycloak: keycloakConfig }, fetch: wrapped })
     t = { h, kc }
     expect((await h.post('/api/auth/first-run', ADMIN)).status).toBe(201)
-    expect((await h.send('PATCH', '/api/settings', { githubWrites: true })).status).toBe(200)
+    expect((await h.send('PATCH', '/api/settings', { githubWrites: { createIssues: true, editIssues: true } })).status).toBe(200)
     await keycloakSignIn(h, kc, OCTOCAT)
     kc.github = () => new Response(JSON.stringify(CREATED), { status: 201 })
     expect((await create()).status).toBe(201)
@@ -383,7 +385,7 @@ describe('changing an issue', () => {
   function github(check: () => Response, write: () => Response) {
     t.kc.github = (request) => (request.method === 'GET' ? check() : write())
   }
-  async function ready(on = true) {
+  async function ready(on: boolean | Partial<GithubWrites> = true) {
     await signedIn(on)
     github(() => jsonResponse(issue()), () => jsonResponse(issue({ title: 'Renamed', updated_at: '2026-01-02T00:00:00Z' })))
   }
@@ -407,7 +409,7 @@ describe('changing an issue', () => {
     test('a local account is 403 forbidden', async () => {
       t = await createKeycloakApp()
       expect((await t.h.post('/api/auth/first-run', ADMIN)).status).toBe(201)
-      expect((await t.h.send('PATCH', '/api/settings', { githubWrites: true })).status).toBe(200)
+      expect((await t.h.send('PATCH', '/api/settings', { githubWrites: { createIssues: true, editIssues: true } })).status).toBe(200)
       const response = await patch()
       expect(response.status).toBe(403)
       expect(await json(response)).toMatchObject({ error: 'forbidden', message: 'This account changes issues from the browser.' })
@@ -419,9 +421,30 @@ describe('changing an issue', () => {
       const before = brokerRequests().length
       const response = await patch()
       expect(response.status).toBe(403)
-      expect(await json(response)).toMatchObject({ error: 'github-writes-off', message: 'The admin has not turned on changing issues on GitHub.' })
+      expect(await json(response)).toMatchObject({ error: 'github-writes-off', message: 'The admin has not turned on editing, closing and reopening issues on GitHub.' })
       expect(githubRequests()).toEqual([])
       expect(brokerRequests()).toHaveLength(before)
+    })
+
+    test('with only creating on, a change is 403 github-writes-off and a create still goes through', async () => {
+      await ready({ createIssues: true })
+      const response = await patch()
+      expect(response.status).toBe(403)
+      expect(await json(response)).toMatchObject({ error: 'github-writes-off' })
+      expect(githubRequests()).toEqual([])
+      t.kc.github = () => jsonResponse(CREATED, 201)
+      expect((await create()).status).toBe(201)
+      expect(sent()).toEqual(['POST'])
+    })
+
+    test('with only editing on, a create is 403 github-writes-off and a change still goes through', async () => {
+      await ready({ editIssues: true })
+      const response = await create()
+      expect(response.status).toBe(403)
+      expect(await json(response)).toMatchObject({ error: 'github-writes-off', message: 'The admin has not turned on creating issues on GitHub.' })
+      expect(githubRequests()).toEqual([])
+      expect((await patch()).status).toBe(200)
+      expect(sent()).toEqual(['GET', 'PATCH'])
     })
   })
 
@@ -519,7 +542,7 @@ describe('changing an issue', () => {
       const h = await createTestApp({ config: { publicUrl: PUBLIC_URL, keycloak: keycloakConfig }, fetch: wrapped })
       t = { h, kc }
       expect((await h.post('/api/auth/first-run', ADMIN)).status).toBe(201)
-      expect((await h.send('PATCH', '/api/settings', { githubWrites: true })).status).toBe(200)
+      expect((await h.send('PATCH', '/api/settings', { githubWrites: { createIssues: true, editIssues: true } })).status).toBe(200)
       await keycloakSignIn(h, kc, OCTOCAT)
       github(() => jsonResponse(issue()), () => jsonResponse(issue()))
       expect((await patch()).status).toBe(200)

@@ -204,8 +204,8 @@ describe('useUpdateIssue', () => {
     expect(githubCalls).toHaveLength(githubBefore)
   })
 
-  it('sends nothing to GitHub when the switch is off', async () => {
-    await start({ githubWrites: false })
+  it('sends nothing to GitHub when editing is off, even with creating on', async () => {
+    await start({ githubWrites: { createIssues: true, editIssues: false } })
     const { result } = render()
     await waitFor(() => expect(result.current.snapshot.data).toBeDefined())
     const before = githubCalls.length
@@ -213,13 +213,13 @@ describe('useUpdateIssue', () => {
     expect(githubCalls).toHaveLength(before)
   })
 
-  it('a server 403 github-writes-off turns the cached switch off', async () => {
+  it('a server 403 github-writes-off turns off only the cached edit switch', async () => {
     const stub = await start({ githubAccess: { mode: 'server' }, github: ({ path }) => githubAnswer('GET', `/${path}`) })
     const { result, queryClient } = render()
     await waitFor(() => expect(result.current.snapshot.data).toBeDefined())
     stub.failNext('PATCH issues', { status: 403, error: 'github-writes-off' })
     await expect(result.current.update(input())).rejects.toMatchObject({ kind: 'writes-off' })
-    expect(queryClient.getQueryData(SERVER_SETTINGS_QUERY_KEY)).toEqual({ githubWrites: false })
+    expect(queryClient.getQueryData(SERVER_SETTINGS_QUERY_KEY)).toEqual({ githubWrites: { createIssues: true, editIssues: false } })
   })
 
   it('without a pasted token nothing is sent; invalid fields are refused before any request', async () => {
