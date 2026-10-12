@@ -133,7 +133,7 @@ export function createGitHubReader(deps: GitHubReaderDeps): GitHubReader {
     const row = await getGithubToken(db, userId)
     if (!row) throw new ToolFailure('github-token-missing')
     if (row.status === 'rejected') throw new ToolFailure('github-token-rejected')
-    if (!opener || row.key_id !== opener.keyId) throw new ToolFailure('github-token-unreadable')
+    if (!opener || !opener.recognizesKeyId(row.key_id)) throw new ToolFailure('github-token-unreadable')
     const plain = opener.open(row.sealed, userId)
     if (plain === null || !checkGitHubToken(plain).ok) throw new ToolFailure('github-token-unreadable')
     return { plain, sealed: row.sealed, status: row.status }
@@ -302,7 +302,7 @@ export function createGitHubReader(deps: GitHubReaderDeps): GitHubReader {
       const row = await getGithubToken(db, userId)
       if (!row) return 'missing'
       if (row.status === 'rejected') return 'rejected'
-      if (!opener || row.key_id !== opener.keyId) return 'unreadable'
+      if (!opener || !opener.recognizesKeyId(row.key_id)) return 'unreadable'
       return 'ok'
     },
     fetchSnapshot,

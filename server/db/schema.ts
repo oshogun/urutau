@@ -84,7 +84,7 @@ export type GithubTokenRowStatus = 'unchecked' | 'ok' | 'rejected'
 
 export interface GithubTokensTable {
   user_id: string // VARCHAR(36) PK, FK users.id ON DELETE CASCADE
-  sealed: string // VARCHAR(1024): v1.<kid>.<iv>.<ct>.<tag>
+  sealed: string // VARCHAR(1024): v2.<kid>.<iv>.<ct>.<tag> (v1 rows still readable)
   key_id: string // VARCHAR(16)
   status: GithubTokenRowStatus // VARCHAR(16)
   set_by: string | null // VARCHAR(36) FK users.id ON DELETE SET NULL

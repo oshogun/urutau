@@ -126,7 +126,9 @@ hour and is required for private repositories. There are three ways to give Urut
    integration its own GitHub token on the Users page. The server encrypts it with
    `TOKEN_ENCRYPTION_KEY` before it stores it, decrypts it in memory when an agent asks for a
    board, and sends it only to `api.github.com`, in `GET` requests. It never reaches the browser,
-   a log line or a board export, and no signed-in person's request uses it. See
+   a log line or a board export, and no signed-in person's request uses it. The encryption is
+   AES-256-GCM under a key derived with HKDF from `TOKEN_ENCRYPTION_KEY`. Tokens saved by older
+   versions keep working and are re-encrypted the next time an admin sets them. See
    [AI agents (MCP)](#ai-agents-mcp).
 
 ## Deploying

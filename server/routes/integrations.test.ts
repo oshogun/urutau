@@ -1,3 +1,4 @@
+import { createCipheriv, createHmac, hkdfSync, randomBytes } from 'node:crypto'
 import { afterEach, describe, expect, test } from 'vitest'
 import type {
   CreateApiTokenResponse,
@@ -40,6 +41,18 @@ async function list(): Promise<IntegrationListResponse> {
 }
 
 const ID = '00000000-0000-0000-0000-000000000000'
+
+const v1KeyId = (rawKey: Buffer) => createHmac('sha256', rawKey).update('urutau key id').digest('hex').slice(0, 8)
+const v2KeyId = (rawKey: Buffer) => Buffer.from(hkdfSync('sha256', rawKey, 'urutau', 'urutau:key-id:v2', 4)).toString('hex')
+
+/** The v1 format as shipped: raw key, v1 AAD, HMAC key id. */
+function sealV1(rawKey: Buffer, plain: string, owner: string): string {
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', rawKey, iv, { authTagLength: 16 })
+  cipher.setAAD(Buffer.from(`urutau:github-token:v1:${owner}`, 'utf8'))
+  const ct = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()])
+  return ['v1', v1KeyId(rawKey), iv.toString('base64url'), ct.toString('base64url'), cipher.getAuthTag().toString('base64url')].join('.')
+}
 
 describe('who may use the integration routes', () => {
   test('exactly eight routes exist, each 403 forbidden for a member and each mutating one 403 csrf-rejected without the header', async () => {
@@ -250,7 +263,8 @@ describe('the stored GitHub token', () => {
     expect(text).not.toContain(FIXTURE_GITHUB_TOKEN)
     expect((JSON.parse(text) as SetGitHubTokenResponse).githubToken).toEqual({ set: true, readable: true, status: 'unchecked', updatedAt: h.clock.now.toISOString() })
     const row = await h.database.db.selectFrom('github_tokens').selectAll().executeTakeFirstOrThrow()
-    expect(row.sealed).toMatch(/^v1\./)
+    expect(row.sealed).toMatch(/^v2\./)
+    expect(row.key_id).toBe(v2KeyId(TEST_ENCRYPTION_KEY))
     expect(JSON.stringify(row)).not.toContain(FIXTURE_GITHUB_TOKEN)
     expect(JSON.stringify(row)).not.toContain('fixture_not_a_real')
 
@@ -309,6 +323,20 @@ describe('the stored GitHub token', () => {
     const agent = await setUpAgent(h)
     await h.database.db.updateTable('github_tokens').set({ key_id: 'deadbeef' }).where('user_id', '=', agent.id).execute()
     expect((await list()).integrations[0].githubToken).toMatchObject({ set: true, readable: false })
+  })
+
+  test('a token stored in the v1 format is readable, and the next set stores it as v2', async () => {
+    await setUp()
+    const agent = await setUpAgent(h)
+    const sealed = sealV1(TEST_ENCRYPTION_KEY, FIXTURE_GITHUB_TOKEN, agent.id)
+    await h.database.db.updateTable('github_tokens').set({ sealed, key_id: v1KeyId(TEST_ENCRYPTION_KEY) }).where('user_id', '=', agent.id).execute()
+    expect((await list()).integrations[0].githubToken).toMatchObject({ set: true, readable: true })
+
+    expect((await h.put(`/api/integrations/${agent.id}/github-token`, { token: FIXTURE_GITHUB_TOKEN })).status).toBe(200)
+    const row = await h.database.db.selectFrom('github_tokens').selectAll().where('user_id', '=', agent.id).executeTakeFirstOrThrow()
+    expect(row.sealed).toMatch(/^v2\./)
+    expect(row.key_id).toBe(v2KeyId(TEST_ENCRYPTION_KEY))
+    expect((await list()).integrations[0].githubToken).toMatchObject({ set: true, readable: true })
   })
 
   test('clearing deletes the row, also when none was set', async () => {

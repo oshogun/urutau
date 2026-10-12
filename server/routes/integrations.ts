@@ -38,7 +38,7 @@ function tokenSummary(row: ApiTokenRow): ApiTokenSummary {
 
 function githubTokenStatus(info: GithubTokenInfo | undefined, sealer: SecretSealer | null): GitHubTokenStatus {
   if (!info) return { set: false, readable: false, status: null, updatedAt: null }
-  return { set: true, readable: sealer !== null && info.key_id === sealer.keyId, status: info.status, updatedAt: info.updated_at }
+  return { set: true, readable: sealer !== null && sealer.recognizesKeyId(info.key_id), status: info.status, updatedAt: info.updated_at }
 }
 
 export function integrationsRoutes(ctx: AppContext) {

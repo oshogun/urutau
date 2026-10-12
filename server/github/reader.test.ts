@@ -1,3 +1,4 @@
+import { createCipheriv, createHmac, randomBytes } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSecretBox } from '../auth/secretBox.ts'
 import { getGithubToken, putGithubToken } from '../db/githubTokens.ts'
@@ -38,6 +39,17 @@ afterEach(async () => {
   vi.useRealTimers()
   await database.close()
 })
+
+const v1KeyId = (rawKey: Buffer) => createHmac('sha256', rawKey).update('urutau key id').digest('hex').slice(0, 8)
+
+/** The v1 format as shipped: raw key, v1 AAD, HMAC key id. */
+function sealV1(rawKey: Buffer, plain: string, owner: string): string {
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', rawKey, iv, { authTagLength: 16 })
+  cipher.setAAD(Buffer.from(`urutau:github-token:v1:${owner}`, 'utf8'))
+  const ct = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()])
+  return ['v1', v1KeyId(rawKey), iv.toString('base64url'), ct.toString('base64url'), cipher.getAuthTag().toString('base64url')].join('.')
+}
 
 async function storeToken(plain: string): Promise<void> {
   await putGithubToken(database.db, { userId, sealed: box.sealer.seal(plain, userId), keyId: box.sealer.keyId, setBy: userId, now: now() })
@@ -297,6 +309,17 @@ describe('the stored token', () => {
     const error = await snapshotOf(reader).catch((e: unknown) => e)
     expect(error).toMatchObject({ code: 'github-token-unreadable' })
     expect(String((error as Error).message) + String((error as Error).stack) + logs.join('\n')).not.toContain(plain)
+  })
+
+  it('reads a token stored in the v1 format by an older version, and does not re-seal it', async () => {
+    const sealed = sealV1(KEY, TOKEN, userId)
+    await putGithubToken(database.db, { userId, sealed, keyId: v1KeyId(KEY), setBy: userId, now: now() })
+    const stub = stubWithWidgets()
+    const reader = makeReader(stub.fetch)
+    expect(await reader.tokenState(userId)).toBe('ok')
+    await snapshotOf(reader)
+    expect(stub.calls[0].headers.get('authorization')).toBe(`Bearer ${TOKEN}`)
+    expect((await getGithubToken(database.db, userId))?.sealed).toBe(sealed)
   })
 
   it('accepts a classic token shape', async () => {
