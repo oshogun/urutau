@@ -1,14 +1,23 @@
 import { Chat, Draggable, Flag, Maximize, Milestone } from '@carbon/icons-react'
 import { Button, OperationalTag, OverflowMenu, OverflowMenuItem, Tag, Tile } from '@carbon/react'
 import type { HTMLAttributes } from 'react'
-import { claimIsLive, triageFlagText, unverifiedFlagText } from '../domain/activity'
+import { claimIsLive, runOutcomeLabel, triageDisagrees, triageTagText, unverifiedFlagText } from '../domain/activity'
 import { estimateLabel, isEstimate } from '../domain/estimates'
 import { labelFor } from '../domain/labels'
 import type { Bucket, Issue, Label } from '../domain/types'
+import { useLastRunDetail } from '../state/activityStore'
 import { useCardSignals } from './cardSignals'
 import { avatarSrc, issueStateTag } from './issueDisplay'
 import { LabelTag } from './LabelTag'
-import { CLAIM_TAG_TYPE, claimText, claimTone, estimateDescription, holderName } from './runDisplay'
+import {
+  CLAIM_TAG_TYPE,
+  claimText,
+  claimTone,
+  estimateDescription,
+  holderName,
+  triageAgentName,
+  triageTagTitle,
+} from './runDisplay'
 
 interface IssueCardProps {
   issue: Issue
@@ -46,16 +55,21 @@ export function IssueCard({
 }: IssueCardProps) {
   const closed = issue.state === 'closed'
   const tag = issueStateTag(issue.state, issue.stateReason)
-  const { estimates, activity, now, humanWaitLimit, onEditEstimate, onReleaseClaim } = useCardSignals()
+  const { estimates, activity, now, humanWaitLimit, repoKey, onEditEstimate, onReleaseClaim } = useCardSignals()
   const stored = estimates?.[issue.number]
   const estimate = isEstimate(stored) ? stored : null
   const card = activity.get(issue.number)
   const claim = card?.claim && claimIsLive(card.claim, now) ? card.claim : null
   const lastRun = card?.lastRun ?? null
-  const triage = triageFlagText(estimate, lastRun?.triageRange ?? null)
+  const range = lastRun?.triageRange ?? null
+  const disagrees = triageDisagrees(estimate, range)
+  const detail = useLastRunDetail(repoKey, issue.number, lastRun?.runId ?? null)
+  const agentName = triageAgentName(claim, detail, lastRun?.runId ?? null)
+  const uncertainty = detail?.uncertaintyKind ?? null
   const unverified = lastRun ? unverifiedFlagText(lastRun.unverifiedOpen) : null
-  const answered = lastRun?.status === 'plan_only' && claim === null
-  const hasSignals = estimate !== null || triage !== null || claim !== null || unverified !== null || answered
+  // A sized run's range tag already says what it found, so only a question-answering run gets the teal tag.
+  const answered = lastRun?.status === 'plan_only' && range === null && claim === null
+  const hasSignals = estimate !== null || range !== null || claim !== null || unverified !== null || answered
   const tone = claim ? claimTone(claim, humanWaitLimit, now) : 'running'
   const canMove = !closed && onMoveTo !== undefined && moveTargets.length > 0
   const canEstimate = onEditEstimate !== undefined
@@ -177,9 +191,12 @@ export function IssueCard({
                 {estimateLabel(estimate)}
               </Tag>
             ))}
-          {triage && (
-            <Tag size="sm" type="outline">
-              {triage}
+          {range !== null && (
+            <Tag size="sm" type={disagrees ? 'outline' : 'gray'}>
+              <span title={`${triageTagTitle(range, agentName, uncertainty)}${disagrees ? ' · outside the estimate' : ''}`}>
+                {triageTagText(range, agentName)}
+                {disagrees && <span className="cds--visually-hidden">, outside the estimate</span>}
+              </span>
             </Tag>
           )}
           {claim && (
@@ -210,7 +227,7 @@ export function IssueCard({
           )}
           {answered && (
             <Tag size="sm" type="teal">
-              Question answered
+              {runOutcomeLabel(lastRun)}
             </Tag>
           )}
         </div>

@@ -1,7 +1,7 @@
 import { ApiError } from '../api/client'
-import type { ActorView, ClaimView } from '../domain/api'
-import { ageText, isOverWaitLimit, isWaitingClaim, statusLabel } from '../domain/activity'
-import type { Estimate, EstimateSize } from '../domain/types'
+import type { ActorView, ClaimView, RunDetailView } from '../domain/api'
+import { ageText, isOverWaitLimit, isWaitingClaim, statusLabel, triageRangeText } from '../domain/activity'
+import type { Estimate, EstimateSize, TriageRange, UncertaintyKind } from '../domain/types'
 
 const SIZE_WORDS: Record<EstimateSize, string> = {
   S: 'small',
@@ -17,6 +17,30 @@ export function estimateDescription(estimate: Estimate): string {
 
 export function holderName(holder: ActorView | null): string {
   return holder ? holder.username : 'a removed integration'
+}
+
+/**
+ * The integration behind the last run, from what the client already holds: the run's cached detail,
+ * else a live claim for that same run. null when unknown or removed, so the tag falls back to 'triage:'.
+ */
+export function triageAgentName(
+  claim: ClaimView | null,
+  detail: RunDetailView | null,
+  lastRunId: string | null,
+): string | null {
+  if (detail?.agent) return detail.agent.username
+  if (claim?.holder && lastRunId !== null && claim.runId === lastRunId) return claim.holder.username
+  return null
+}
+
+/** 'Triage range S–M from carcara · uncertainty: external'; parts that are unknown are left out. */
+export function triageTagTitle(range: TriageRange, agentName: string | null, uncertainty: UncertaintyKind | null): string {
+  return [
+    `Triage range ${triageRangeText(range)}${agentName ? ` from ${agentName}` : ''}`,
+    uncertainty ? `uncertainty: ${uncertainty}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 /** 'Running · 12 min'; the age counts from the moment the run entered its status. */

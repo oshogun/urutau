@@ -9,6 +9,8 @@ export interface CardSignals {
   /** Epoch milliseconds, refreshed by the board page; ages and the wait limit are computed from it. */
   now: number
   humanWaitLimit: number | null
+  /** The board's repo key, for reading cached issue activity; absent outside a board. */
+  repoKey?: string
   /** Absent while nobody can change estimates here. */
   onEditEstimate?: (issue: number, launcher: HTMLElement | null) => void
   /** Absent for anyone who cannot release a claim. */

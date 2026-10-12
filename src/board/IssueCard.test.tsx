@@ -1,8 +1,9 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
-import type { CardActivity } from '../domain/api'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { CardActivity, RunSummaryView } from '../domain/api'
 import type { Estimate } from '../domain/types'
-import { makeClaim, makeIssue } from '../test/fixtures'
+import { issueActivityKey, useActivity } from '../state/activityStore'
+import { makeClaim, makeIssue, makeRunDetail } from '../test/fixtures'
 import { CardSignalsContext, type CardSignals } from './cardSignals'
 import { IssueCard } from './IssueCard'
 
@@ -70,7 +71,10 @@ describe('IssueCard signals', () => {
     renderCard({ estimates: { 7: estimate('S', 'unsure') }, activity })
     expect(screen.getByText('Running · 12 min')).toBeInTheDocument()
     expect(screen.getByText('2 unverified (external)')).toBeInTheDocument()
-    expect(screen.getByText('triage: M–L')).toBeInTheDocument()
+    // The live claim is for the last run, so its holder names the range.
+    const range = screen.getByText(/^carcara: M–L/)
+    expect(range).toHaveTextContent('outside the estimate')
+    expect(range.closest('.cds--tag')).toHaveClass('cds--tag--outline')
     expect(screen.getByText('S?')).toBeInTheDocument()
   })
 
@@ -103,5 +107,77 @@ describe('IssueCard signals', () => {
     ])
     const { container } = renderCard({ activity: claimed })
     expect(container.querySelector('[aria-label="Actions for issue #7"]')).toBeNull()
+  })
+})
+
+describe('IssueCard triage range', () => {
+  afterEach(() => useActivity.setState({ boards: {}, issues: {} }))
+
+  const lastRun = (overrides: Partial<RunSummaryView> = {}): RunSummaryView => ({
+    runId: 'r-1',
+    status: 'plan_only',
+    statusAt: '2026-10-08T14:48:00.000Z',
+    startedAt: '2026-10-08T14:40:00.000Z',
+    endedAt: '2026-10-08T14:48:00.000Z',
+    triageRange: 'S-M',
+    unverifiedOpen: { external: 0, normative: 0, untested: 0 },
+    ...overrides,
+  })
+  const activityOf = (run: RunSummaryView) =>
+    new Map<number, CardActivity>([[7, { issue: 7, claim: null, lastRun: run }]])
+  const tagOf = (text: string | RegExp) => screen.getByText(text).closest('.cds--tag')
+
+  it('shows the range without an estimate, in gray and named neutrally', () => {
+    const { container } = renderCard({ activity: activityOf(lastRun()) })
+    expect(container.querySelector('.issue-card__signals')).not.toBeNull()
+    expect(tagOf('triage: S–M')).toHaveClass('cds--tag--gray')
+    expect(tagOf('triage: S–M')).not.toHaveClass('cds--tag--outline')
+    expect(screen.getByTitle('Triage range S–M')).toHaveTextContent('triage: S–M')
+  })
+
+  it('stays gray when the estimate is inside the range', () => {
+    renderCard({ estimates: { 7: estimate('M', 'sure') }, activity: activityOf(lastRun()) })
+    expect(tagOf('triage: S–M')).toHaveClass('cds--tag--gray')
+  })
+
+  it('names the agent and the uncertainty from cached detail of the same run', () => {
+    useActivity.setState({
+      issues: {
+        [issueActivityKey('acme/widgets', 7)]: {
+          repoKey: 'acme/widgets',
+          issue: 7,
+          claim: null,
+          runs: [makeRunDetail('r-1', { status: 'plan_only', triageRange: 'S-M', uncertaintyKind: 'external' })],
+          moreRuns: false,
+        },
+      },
+    })
+    renderCard({ repoKey: 'acme/widgets', activity: activityOf(lastRun()) })
+    expect(screen.getByTitle('Triage range S–M from carcara · uncertainty: external')).toHaveTextContent('carcara: S–M')
+  })
+
+  it('ignores cached detail of another run', () => {
+    useActivity.setState({
+      issues: {
+        [issueActivityKey('acme/widgets', 7)]: {
+          repoKey: 'acme/widgets',
+          issue: 7,
+          claim: null,
+          runs: [makeRunDetail('r-0', { uncertaintyKind: 'external' })],
+          moreRuns: false,
+        },
+      },
+    })
+    renderCard({ repoKey: 'acme/widgets', activity: activityOf(lastRun()) })
+    expect(screen.getByText('triage: S–M')).toBeInTheDocument()
+  })
+
+  it('shows Question answered only for a plan_only run without a range', () => {
+    const { unmount } = renderCard({ activity: activityOf(lastRun()) })
+    expect(screen.queryByText('Question answered')).toBeNull()
+    expect(screen.queryByText('Sized')).toBeNull()
+    unmount()
+    renderCard({ activity: activityOf(lastRun({ triageRange: null })) })
+    expect(screen.getByText('Question answered')).toBeInTheDocument()
   })
 })

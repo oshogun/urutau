@@ -7,8 +7,12 @@ import {
   isTerminalStatus,
   isWaitingClaim,
   isWaitingStatus,
+  runOutcomeLabel,
   statusLabel,
+  triageDisagrees,
   triageFlagText,
+  triageRangeText,
+  triageTagText,
   unverifiedFlagText,
 } from './activity.ts'
 import type { Estimate, RunStatus } from './types.ts'
@@ -50,6 +54,35 @@ describe('triageFlagText', () => {
     expect(triageFlagText(estimate('S', 'unsure'), 'M-L')).toBe('triage: M–L')
     expect(triageFlagText(estimate('L'), 'S')).toBe('triage: S')
     expect(triageFlagText(estimate('L'), 'S-M')).toBe('triage: S–M')
+  })
+})
+
+describe('triage range helpers', () => {
+  it('writes every range, with an en dash between bounds', () => {
+    expect(triageRangeText('S')).toBe('S')
+    expect(triageRangeText('M')).toBe('M')
+    expect(triageRangeText('L')).toBe('L')
+    expect(triageRangeText('S-M')).toBe('S–M')
+    expect(triageRangeText('M-L')).toBe('M–L')
+    expect(triageRangeText('S-L')).toBe('S–L')
+  })
+  it('disagrees only when an estimate with a size is outside the range', () => {
+    expect(triageDisagrees(null, 'M')).toBe(false)
+    expect(triageDisagrees(estimate(null, 'no-idea'), 'M')).toBe(false)
+    expect(triageDisagrees(estimate('S'), null)).toBe(false)
+    expect(triageDisagrees(estimate('M'), 'S-M')).toBe(false)
+    expect(triageDisagrees(estimate('S', 'unsure'), 'M-L')).toBe(true)
+    expect(triageDisagrees(estimate('L'), 'S')).toBe(true)
+  })
+  it('names the tag after the agent, or triage when it is unknown', () => {
+    expect(triageTagText('S-M', 'carcara')).toBe('carcara: S–M')
+    expect(triageTagText('S-M', null)).toBe('triage: S–M')
+  })
+  it('labels a plan_only run with a range Sized', () => {
+    expect(runOutcomeLabel({ status: 'plan_only', triageRange: 'S-M' })).toBe('Sized')
+    expect(runOutcomeLabel({ status: 'plan_only', triageRange: null })).toBe('Question answered')
+    expect(runOutcomeLabel({ status: 'done', triageRange: 'M' })).toBe('Done')
+    expect(statusLabel('plan_only')).toBe('Question answered')
   })
 })
 

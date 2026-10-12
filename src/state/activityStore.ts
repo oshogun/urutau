@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { acceptItem, getBoardActivity, getIssueActivity, releaseClaim } from '../api/activity'
 import { ApiError } from '../api/client'
-import type { CardActivity, IssueActivityResponse, RunSummaryView } from '../domain/api'
+import type { CardActivity, IssueActivityResponse, RunDetailView, RunSummaryView } from '../domain/api'
 import { onSessionChange } from './session'
 
 export interface BoardActivityEntry {
@@ -147,6 +147,15 @@ export const useActivity = create<ActivityState>()((set, get) => {
     },
   }
 })
+
+/** The cached detail of an issue's latest run, only when it is the run `runId`; never fetches. */
+export function useLastRunDetail(repoKey: string | undefined, issue: number, runId: string | null): RunDetailView | null {
+  return useActivity((state) => {
+    if (repoKey === undefined || runId === null) return null
+    const run = state.issues[issueActivityKey(repoKey, issue)]?.runs[0]
+    return run?.runId === runId ? run : null
+  })
+}
 
 onSessionChange(() => {
   epoch += 1

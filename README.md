@@ -465,7 +465,7 @@ a terminal status.
 | --- | --- | --- |
 | `repo`, `issue`, `runId` | yes | `owner/name` on the integration's repository list, the issue number, and a run id (`A-Z a-z 0-9 . _ -`, up to 64 characters, unique across repositories) |
 | `status` | yes | `running`, `awaiting_approval`, `needs_human`, `budget_exceeded`, `done`, `failed`, `rejected` or `plan_only` |
-| `triageRange` | no | `S`, `M`, `L`, `S-M`, `M-L` or `S-L`, the agent's size guess; the card shows a `triage: M–L` flag when a person's estimate is outside it |
+| `triageRange` | no | `S`, `M`, `L`, `S-M`, `M-L` or `S-L`, the agent's size guess. The card always shows it as a tag, with or without a person's estimate: `carcara: M–L` when the browser knows the agent (a live claim for that run, or the issue's activity once opened), else `triage: M–L`. The tag turns outline when a person's estimate is outside the range. Estimates stay people-only. A `plan_only` run with a range reads `Sized` instead of `Question answered` |
 | `unverified` | no | up to 20 items `{ id, kind, text }`, `kind` being `external`, `normative` or `untested` |
 | `probes` | no | items of this run the agent checked and found to hold; closes `external` and `untested` items only |
 | `withdrawn` | no | this run's `external` or `untested` items that no longer apply |

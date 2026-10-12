@@ -37,15 +37,31 @@ const RANGE_BOUNDS: Record<TriageRange, [EstimateSize, EstimateSize]> = {
   'S-L': ['S', 'L'],
 }
 
-/** null unless the estimate's size is outside the run's triage range; else e.g. 'triage: M–L' (en dash). */
-export function triageFlagText(estimate: Estimate | null, range: TriageRange | null): string | null {
-  if (!estimate || estimate.size === null || range === null) return null
+/** 'M' for a one-size range, else e.g. 'S–M' (en dash). */
+export function triageRangeText(range: TriageRange): string {
+  const [low, high] = RANGE_BOUNDS[range]
+  return low === high ? low : `${low}–${high}`
+}
+
+/** True when a person's estimate has a size and it is outside the run's triage range. */
+export function triageDisagrees(estimate: Estimate | null, range: TriageRange | null): boolean {
+  if (!estimate || estimate.size === null || range === null) return false
   const bounds = RANGE_BOUNDS[range]
-  if (!bounds) return null
+  if (!bounds) return false
   const [low, high] = bounds
   const at = SIZE_ORDER.indexOf(estimate.size)
-  if (at >= SIZE_ORDER.indexOf(low) && at <= SIZE_ORDER.indexOf(high)) return null
-  return low === high ? `triage: ${low}` : `triage: ${low}–${high}`
+  return at < SIZE_ORDER.indexOf(low) || at > SIZE_ORDER.indexOf(high)
+}
+
+/** 'carcara: S–M' named after the agent, or 'triage: S–M' when the agent is unknown. */
+export function triageTagText(range: TriageRange, agentName: string | null): string {
+  return `${agentName ?? 'triage'}: ${triageRangeText(range)}`
+}
+
+/** null unless the estimate's size is outside the run's triage range; else e.g. 'triage: M–L' (en dash). */
+export function triageFlagText(estimate: Estimate | null, range: TriageRange | null): string | null {
+  if (range === null || !triageDisagrees(estimate, range)) return null
+  return triageTagText(range, null)
 }
 
 const STATUS_LABELS: Record<RunStatus, string> = {
@@ -61,6 +77,11 @@ const STATUS_LABELS: Record<RunStatus, string> = {
 
 export function statusLabel(status: RunStatus): string {
   return STATUS_LABELS[status]
+}
+
+/** A plan_only run that sent a triage range sized the issue: 'Sized'; otherwise the status label. */
+export function runOutcomeLabel(run: { status: RunStatus; triageRange: TriageRange | null }): string {
+  return run.status === 'plan_only' && run.triageRange !== null ? 'Sized' : statusLabel(run.status)
 }
 
 /** A claim with no lease (waiting on a human) never expires; otherwise it is live until its lease passes. */

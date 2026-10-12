@@ -1,7 +1,7 @@
 import { Accordion, AccordionItem, Button, InlineNotification, Link, Tag } from '@carbon/react'
 import { useState } from 'react'
 import { ApiError } from '../api/client'
-import { statusLabel } from '../domain/activity'
+import { runOutcomeLabel, triageRangeText } from '../domain/activity'
 import type { RunDetailView, UnverifiedItemView } from '../domain/api'
 import { holderName, httpsLink } from './runDisplay'
 
@@ -96,13 +96,20 @@ function RunBlock({ run, busyItem, onAccept }: RunBlockProps) {
   return (
     <div className="run-block">
       <p className="run-block__line">
-        {statusLabel(run.status)} · run {run.runId} · {holderName(run.agent)} · started{' '}
+        {runOutcomeLabel(run)} · run {run.runId} · {holderName(run.agent)} · started{' '}
         <RunDate iso={run.startedAt} />
       </p>
       {run.observedBy && <p className="run-block__note">Observed by {run.observedBy}</p>}
+      {run.triageRange !== null && (
+        <p className="run-block__note">
+          Triage range {triageRangeText(run.triageRange)}
+          {run.uncertaintyKind ? ` · uncertainty: ${run.uncertaintyKind}` : ''}
+        </p>
+      )}
       {run.status === 'plan_only' && (
         <p className="run-block__note">
-          Question answered{run.findings ? ': ' : ''}
+          {runOutcomeLabel(run)}
+          {run.findings ? ': ' : ''}
           {run.findings && <Findings value={run.findings} />}
         </p>
       )}

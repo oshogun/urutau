@@ -791,6 +791,23 @@ describe('IssueDetailModal agent runs', () => {
     }
   })
 
+  it('labels a plan_only run with a triage range Sized and shows the range', async () => {
+    stub.setActivity('acme/widgets', 12, {
+      runs: [
+        makeRunDetail('r-1', {
+          status: 'plan_only',
+          triageRange: 'S-M',
+          uncertaintyKind: 'external',
+          endedAt: '2026-10-08T12:10:00.000Z',
+        }),
+      ],
+    })
+    renderModal(makeIssue(12, { body: '' }))
+    expect(await screen.findByText(/^Sized · run r-1/)).toBeInTheDocument()
+    expect(screen.getByText('Triage range S–M · uncertainty: external')).toBeInTheDocument()
+    expect(screen.queryByText(/Question answered/)).toBeNull()
+  })
+
   it('shows Accept and Release only to a signed-in person', async () => {
     stub.setActivity('acme/widgets', 12, {
       claim: makeClaim('r-1', { leaseUntil: null }),

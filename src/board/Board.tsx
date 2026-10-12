@@ -148,6 +148,7 @@ export function Board({
       activity: activity.cards,
       now,
       humanWaitLimit,
+      repoKey: repoKeyOf(repo),
       onEditEstimate: (issue, launcher) => {
         estimateLauncher.current = launcher
         setDialog({ kind: 'estimate', issue })
@@ -159,7 +160,7 @@ export function Board({
           }
         : undefined,
     }),
-    [config.estimates, activity.cards, now, humanWaitLimit, signedIn],
+    [config.estimates, activity.cards, now, humanWaitLimit, repo, signedIn],
   )
 
   const contents = useMemo(() => resolveBuckets(issues, config), [issues, config])
