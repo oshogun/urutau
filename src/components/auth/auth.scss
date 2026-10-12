@@ -150,13 +150,31 @@
   }
 }
 
+// Both fields carry helper texts of different heights, so the row lines up at the top and the
+// button drops by the height of a field label. On a narrow screen the row wraps.
 .integrations__create {
+  flex-wrap: wrap;
+  align-items: flex-start;
   margin-bottom: $spacing-05;
+
+  > .cds--form-item {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
 
   .cds--text-input__field-wrapper,
   .cds--text-input-wrapper {
     width: 24rem;
     max-width: 100%;
+  }
+
+  .cds--select {
+    width: 24rem;
+    max-width: 100%;
+  }
+
+  > .cds--btn {
+    margin-top: $spacing-06;
   }
 }
 

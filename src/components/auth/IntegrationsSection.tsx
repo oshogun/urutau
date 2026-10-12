@@ -1008,7 +1008,7 @@ export function IntegrationsSection() {
             <SelectItem key={choice} value={choice} text={PERMISSION_TEXT[choice].label} />
           ))}
         </Select>
-        <Button type="submit" renderIcon={Add} disabled={create.isPending || name.trim() === ''}>
+        <Button type="submit" size="md" renderIcon={Add} disabled={create.isPending || name.trim() === ''}>
           Create integration
         </Button>
       </form>
