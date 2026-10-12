@@ -1,12 +1,15 @@
-# Runs the Urutau image with a SQLite database in a named volume.
-#   docker compose up -d --build
-# Open http://localhost:8787. A DNS name needs PUBLIC_URL (see README.md).
+# Runs the released Urutau image with a SQLite database in a named volume.
+#   docker compose pull && docker compose up -d
+# Set URUTAU_VERSION=X.Y.Z to pin a release; the default is latest.
+# Open http://localhost:8787 (URUTAU_HOST_PORT changes the host port). A DNS name needs
+# PUBLIC_URL (see README.md).
 # Only the variables listed under environment: reach the container; the shell or a .env file
 # fills in their values.
+# To build the checkout instead:
+#   docker compose -f compose.yaml -f compose.build.yaml up -d --build
 services:
   urutau:
-    build: .
-    image: urutau
+    image: ghcr.io/oshogun/urutau:${URUTAU_VERSION:-latest}
     ports:
       - '127.0.0.1:${URUTAU_HOST_PORT:-8787}:8080'
     volumes:

@@ -95,6 +95,20 @@ Mount the volume the instance already uses: a `docker compose` install keeps
 its data in `<project>_urutau-data` (`urutau_urutau-data` by default), so find
 the name with `docker volume ls` and use it in place of `urutau-data`.
 
+**Docker Compose.** From the directory with `compose.yaml`, pull the new image
+and recreate the container:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+The data stays in `<project>_urutau-data`. Without `URUTAU_VERSION`, compose
+pulls `latest`, which can cross a `BREAKING:` release. Set
+`URUTAU_VERSION=X.Y.Z` in the shell or in a `.env` file next to `compose.yaml`
+to choose when to upgrade. An install that builds from source with
+`compose.build.yaml` upgrades with `git pull`, then
+`docker compose -f compose.yaml -f compose.build.yaml up -d --build`.
+
 **Source checkout:**
 
 ```bash

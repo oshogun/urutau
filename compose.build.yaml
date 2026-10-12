@@ -1,0 +1,9 @@
+# Builds the Urutau image from this checkout instead of pulling the released one.
+#   docker compose -f compose.yaml -f compose.build.yaml up -d --build
+#   docker compose -f compose.yaml -f compose.build.yaml down
+# The local tag `urutau` keeps a source build apart from ghcr.io/oshogun/urutau.
+services:
+  urutau:
+    build: .
+    image: urutau
+    pull_policy: build

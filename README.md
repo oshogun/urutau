@@ -162,9 +162,17 @@ npm start      # http://127.0.0.1:8787
 `node_modules/` and `package.json`. (The MCP GitHub reader imports the two `src/github` files; the
 rest of `src/github` is browser code.)
 
-Or with Docker: `docker compose up -d --build` builds the image and runs it with a SQLite database
-in a named volume (`<project>_urutau-data`, `urutau_urutau-data` by default), published on
-`127.0.0.1:8787` (`URUTAU_HOST_PORT` changes the host port). The image listens on `0.0.0.0:8080`
+Or with Docker:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+This runs the released image from `ghcr.io/oshogun/urutau` with a SQLite database in a named
+volume (`<project>_urutau-data`, `urutau_urutau-data` by default), published on `127.0.0.1:8787`
+(`URUTAU_HOST_PORT` changes the host port). It pulls `latest`; set `URUTAU_VERSION=X.Y.Z` to pin
+a release. To build the checkout instead, run
+`docker compose -f compose.yaml -f compose.build.yaml up -d --build`. The image listens on `0.0.0.0:8080`
 inside the container and runs as the `node` user. `TOKEN_ENCRYPTION_KEY` and `DATABASE_URL` are passed
 through to the container if they are set in the shell or in a `.env` file; without `DATABASE_URL`
 the container uses SQLite in the `/data` volume.
@@ -737,7 +745,7 @@ server/
 ├── mcp/           The /mcp endpoint, its five tools, board JSON, snapshot cache, move and reorder, locks and call limits
 └── http/          Host allow-list, errors, request helpers
 scripts/           dev.mjs
-compose*.yaml      The app (compose.yaml) and the opt-in test containers
+compose*.yaml      The app (compose.yaml, compose.build.yaml to build from source) and the opt-in test containers
 ```
 
 The GitHub layer maps API payloads into the types in [src/domain/types.ts](src/domain/types.ts), and
