@@ -1634,6 +1634,76 @@ describe('App', () => {
       expect(screen.queryByRole('dialog', { name: /^acme\/widgets · / })).not.toBeInTheDocument()
     })
 
+    it('says the current filters hide a new issue that does not match them', async () => {
+      const user = userEvent.setup()
+      stubGitHubPost(() => created(11, 'Fix the build'))
+      open()
+      await screen.findByText('Dark mode')
+      await user.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'Dark')
+      await waitFor(() => expect(screen.queryByText('Crash on save')).not.toBeInTheDocument())
+
+      await openDialog(user)
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('Fix the build')
+      await user.click(screen.getByRole('button', { name: 'Create issue' }))
+
+      expect(await screen.findByText('Created issue #11')).toBeInTheDocument()
+      expect(screen.getByText('Added to In progress. The current filters hide it.')).toBeInTheDocument()
+      expect(within(bucket('In progress')).queryByText('Fix the build')).not.toBeInTheDocument()
+    })
+
+    it('leaves the filters out of the notice when the new issue matches them', async () => {
+      const user = userEvent.setup()
+      stubGitHubPost(() => created(11, 'Fix the build'))
+      open()
+      await screen.findByText('Dark mode')
+      await user.type(screen.getByRole('searchbox', { name: 'Search issues' }), 'Fix')
+      await waitFor(() => expect(screen.queryByText('Dark mode')).not.toBeInTheDocument())
+
+      await user.click(screen.getByRole('button', { name: 'Create issue in In progress' }))
+      await screen.findByRole('dialog', { name: /^acme\/widgets · / })
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('Fix the build')
+      await user.click(screen.getByRole('button', { name: 'Create issue' }))
+
+      expect(await screen.findByText('Created issue #11')).toBeInTheDocument()
+      expect(screen.getByText('Added to In progress.')).toBeInTheDocument()
+      expect(within(bucket('In progress')).getByText('Fix the build')).toBeInTheDocument()
+    })
+
+    it('offers Keycloak sign-in again when the server can no longer get the GitHub token', async () => {
+      const user = userEvent.setup()
+      open({
+        githubAccess: { mode: 'server' },
+        github: ({ path, query }) => {
+          const state = new URLSearchParams(query).get('state')
+          const body = ROUTES[state ? `${state}:/${path}` : `/${path}`]
+          return body === undefined
+            ? new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 })
+            : new Response(JSON.stringify(body), { status: 200 })
+        },
+        createIssue: () =>
+          new Response(JSON.stringify({ error: 'github-access', message: 'x', problem: 'signin-expired' }), {
+            status: 424,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      })
+      const dialog = await openDialog(user)
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('Fix the build')
+      await user.click(screen.getByRole('button', { name: 'Create issue' }))
+
+      expect(await within(dialog).findByText(/Sign in with Keycloak again to create issues/)).toBeInTheDocument()
+      expect(within(dialog).getByRole('link', { name: 'Sign in with Keycloak again' })).toHaveAttribute(
+        'href',
+        'api/auth/keycloak/start',
+      )
+      expect(within(dialog).queryByRole('button', { name: 'Open settings' })).not.toBeInTheDocument()
+      expect(screen.getByLabelText('Title')).toHaveValue('Fix the build')
+      expect(stub.requests('POST issues/acme/widgets')).toHaveLength(1)
+      expect(posts).toHaveLength(0)
+    })
+
     it('keeps the typed text and shows the mapped message when GitHub refuses', async () => {
       const user = userEvent.setup()
       stubGitHubPost(
