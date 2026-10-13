@@ -162,7 +162,7 @@ describe('App', () => {
   // This is the first test to open a card menu, so Carbon's menu and floating-position code is
   // loaded and compiled here: about 1 s alone, 1.8 s with three test runs in parallel and over 5 s
   // with a dozen. The default 5 s limit then fails a test that has nothing wrong with it.
-  it('moves an issue with the card menu and saves it with the stored version', { timeout: 15_000 }, async () => {
+  it('moves an issue with the card menu and saves it with the stored version', async () => {
     const user = userEvent.setup()
     renderApp('?repo=acme/widgets', { boards: [stubBoard('acme/widgets', 3)] })
     await screen.findByText('Crash on save')
@@ -1024,7 +1024,7 @@ describe('App', () => {
       expect(screen.getAllByText(/It is shown only now/)).toHaveLength(1)
     })
 
-    it('does not bring the shown token back after a new integration opens its own row', { timeout: 15_000 }, async () => {
+    it('does not bring the shown token back after a new integration opens its own row', async () => {
       const user = userEvent.setup()
       renderApp('?view=users', { integrations: [planner] })
       const secret = (await issueToken(user)).textContent ?? ''

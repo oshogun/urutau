@@ -56,6 +56,8 @@ export default defineConfig({
           environment: 'jsdom',
           include: ['src/**/*.test.{ts,tsx}'],
           setupFiles: ['./src/test/setup.ts'],
+          // Tests that render the whole app take 4 to 10 s when the machine is busy; the 5 s default fails them at random.
+          testTimeout: 30_000,
         },
       },
       {

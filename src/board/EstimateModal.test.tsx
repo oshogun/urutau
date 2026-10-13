@@ -17,7 +17,7 @@ function save() {
   return screen.getByRole('button', { name: 'Save' })
 }
 
-describe('EstimateModal', { timeout: 15_000 }, () => {
+describe('EstimateModal', () => {
   it('offers every size, No idea and Remove without a range', () => {
     renderModal({ estimate: stored })
     for (const name of ['S · Small', 'M · Medium', 'L · Large', 'Sure', 'Unsure', 'No idea']) {
