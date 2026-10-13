@@ -717,6 +717,16 @@ describe('IssueCard details button', () => {
     expect(onOpenDetails).toHaveBeenCalledWith(button)
   })
 
+  it('is a plain button with a hover title and no Carbon tooltip', () => {
+    const { container } = card(makeIssue(7), { onOpenDetails: vi.fn() })
+    const button = screen.getByRole('button', { name: 'Show details of issue #7' })
+    expect(button).toHaveAttribute('type', 'button')
+    expect(button).toHaveAttribute('title', 'Show details of issue #7')
+    expect(button.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    expect(button.closest('.cds--popover-container')).toBeNull()
+    expect(container.querySelector('.cds--popover')).toBeNull()
+  })
+
   it('is absent without a handler and on the drag overlay', () => {
     card(makeIssue(7))
     expect(screen.queryByRole('button', { name: /Show details/ })).not.toBeInTheDocument()

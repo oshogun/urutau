@@ -1,5 +1,5 @@
 import { Chat, Draggable, Flag, Maximize, Milestone } from '@carbon/icons-react'
-import { Button, OperationalTag, OverflowMenu, OverflowMenuItem, Tag, Tile } from '@carbon/react'
+import { OperationalTag, OverflowMenu, OverflowMenuItem, Tag, Tile } from '@carbon/react'
 import type { HTMLAttributes } from 'react'
 import { claimIsLive, runOutcomeLabel, triageDisagrees, triageTagText, unverifiedFlagText } from '../domain/activity'
 import { estimateLabel, isEstimate } from '../domain/estimates'
@@ -160,17 +160,17 @@ export function IssueCard({
           {issue.title}
         </a>
         {onOpenDetails && !isOverlay && (
-          <Button
+          // A plain button, not Carbon's icon-only Button: that mounts a tooltip with window listeners on every card.
+          <button
+            type="button"
             className="issue-card__details"
             data-issue-details={issue.number}
-            kind="ghost"
-            size="sm"
-            hasIconOnly
-            renderIcon={Maximize}
-            iconDescription={`Show details of issue #${issue.number}`}
-            tooltipPosition="bottom"
+            aria-label={`Show details of issue #${issue.number}`}
+            title={`Show details of issue #${issue.number}`}
             onClick={(event) => onOpenDetails(event.currentTarget)}
-          />
+          >
+            <Maximize size={16} aria-hidden="true" />
+          </button>
         )}
       </div>
 
