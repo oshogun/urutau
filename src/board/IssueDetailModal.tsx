@@ -804,7 +804,8 @@ export function IssueDetailModal({
         </div>
       )}
 
-      <p className="issue-detail__synced">Loaded with the board at {loadedAt}.</p>
+      {/* The time belongs to the board's copy; once a newer version is on screen it would be older than it. */}
+      {issue === boardIssue && <p className="issue-detail__synced">Loaded with the board at {loadedAt}.</p>}
     </Modal>
   )
 }

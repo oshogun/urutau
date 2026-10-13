@@ -529,6 +529,21 @@ describe('IssueDetailModal changes', () => {
       expect(update.mock.calls[1]![0].expectedUpdatedAt).toBe('2026-02-01T00:00:00Z')
       expect(screen.getByText('Closed as completed', { selector: '.cds--tag *' })).toBeInTheDocument()
     })
+
+    it('hides the board load time once a newer version than the board copy is shown', async () => {
+      const closed = makeIssue(1, {
+        state: 'closed',
+        stateReason: 'completed',
+        closedAt: '2026-02-01T00:00:00Z',
+        updatedAt: '2026-02-01T00:00:00Z',
+      })
+      const update = vi.fn<IssueUpdater>().mockResolvedValueOnce(closed)
+      render(modalWith(base, update))
+      expect(screen.getByText(/^Loaded with the board at /)).toBeInTheDocument()
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Close as completed' }))
+      await screen.findByText('Closed as completed.')
+      expect(screen.queryByText(/^Loaded with the board at /)).not.toBeInTheDocument()
+    })
   })
 
   it('offers Apply again for a refused state change that still applies', async () => {
