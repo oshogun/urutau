@@ -1874,6 +1874,38 @@ describe('App', () => {
       await user.type(screen.getByLabelText('Title'), 'Fix the build')
       expect(screen.getByRole('button', { name: 'Create issue' })).toBeDisabled()
     })
+
+    it('leaves focus on the title, not the notice action, when the token notice shows', async () => {
+      const user = userEvent.setup()
+      useSettings.setState({ token: '' })
+      open()
+      const dialog = await openDialog(user)
+
+      expect(within(dialog).getByRole('button', { name: 'Open settings' })).toBeInTheDocument()
+      await waitFor(() => expect(screen.getByLabelText('Title')).toHaveFocus())
+      await user.keyboard('Fix the build')
+      expect(screen.getByLabelText('Title')).toHaveValue('Fix the build')
+      expect(screen.getByRole('dialog', { name: /^acme\/widgets · / })).toBeInTheDocument()
+    })
+
+    it('keeps typing in the title after a failure that offers Open settings', async () => {
+      const user = userEvent.setup()
+      stubGitHubPost(
+        () => new Response(JSON.stringify({ message: 'Resource not accessible by personal access token' }), { status: 403 }),
+      )
+      open()
+      const dialog = await openDialog(user)
+      await user.click(screen.getByLabelText('Title'))
+      await user.paste('Fix the build')
+      await user.click(screen.getByRole('button', { name: 'Create issue' }))
+
+      expect(await within(dialog).findByText("Couldn't create the issue.")).toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: 'Open settings' })).toBeInTheDocument()
+      await waitFor(() => expect(screen.getByLabelText('Title')).toHaveFocus())
+      await user.keyboard(' now')
+      expect(screen.getByLabelText('Title')).toHaveValue('Fix the build now')
+      expect(screen.getByRole('dialog', { name: /^acme\/widgets · / })).toBeInTheDocument()
+    })
   })
 
   describe('editing issues', () => {

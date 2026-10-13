@@ -1,5 +1,5 @@
-import { ActionableNotification, Modal, Stack, TextArea, TextInput } from '@carbon/react'
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { Callout, Modal, Stack, TextArea, TextInput } from '@carbon/react'
+import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { KeycloakButton } from '../components/auth/KeycloakButton'
 import { NEW_ISSUE_BODY_MAX, NEW_ISSUE_TITLE_MAX } from '../domain/api'
 import type { Bucket, Issue } from '../domain/types'
@@ -33,8 +33,9 @@ const length = (text: string) => [...text].length
 const NO_TOKEN_TEXT =
   'Creating issues needs a GitHub personal access token with Issues read and write permission. Add one in Settings.'
 
+// Callout takes only info and warning; it moves no focus, so the title field keeps it.
 const NOTIFICATION_BY_OUTCOME = {
-  'not-created': { kind: 'error', title: "Couldn't create the issue." },
+  'not-created': { kind: 'warning', title: "Couldn't create the issue." },
   unknown: { kind: 'warning', title: 'The issue may have been created.' },
   created: { kind: 'info', title: 'The issue was created.' },
 } as const
@@ -58,6 +59,7 @@ export function CreateIssueModal({
   const controller = useRef<AbortController | null>(null)
   const titleRef = useRef<HTMLInputElement>(null)
   const refocusTitle = useRef(false)
+  const noticeTitleId = useId()
   const serverPath = useSession((state) => state.session?.githubAccess.mode === 'server')
   const token = useSettings((state) => state.token)
   const noToken = !serverPath && token.trim() === ''
@@ -142,12 +144,8 @@ export function CreateIssueModal({
           labels are added.
         </p>
         {noToken && (
-          <ActionableNotification
-            inline
+          <Callout
             lowContrast
-            hideCloseButton
-            hasFocus={false}
-            closeOnEscape={false}
             kind="info"
             role="status"
             title="A token with write access is needed."
@@ -157,15 +155,12 @@ export function CreateIssueModal({
           />
         )}
         {failure && notice && (
-          <ActionableNotification
-            inline
+          <Callout
             lowContrast
-            hideCloseButton
-            hasFocus={false}
-            closeOnEscape={false}
             role="alert"
             kind={notice.kind}
             title={notice.title}
+            titleId={noticeTitleId}
             subtitle={failure.message}
             actionButtonLabel={
               failure.action === 'open-settings'
@@ -177,11 +172,11 @@ export function CreateIssueModal({
             onActionButtonClick={failure.action === 'open-settings' ? onOpenSettings : onRefresh}
           >
             {failure.action === 'sign-in-keycloak' && (
-              <KeycloakButton kind="secondary" size="sm">
+              <KeycloakButton kind="secondary" size="sm" aria-describedby={noticeTitleId}>
                 Sign in with Keycloak again
               </KeycloakButton>
             )}
-          </ActionableNotification>
+          </Callout>
         )}
         <TextInput
           id="create-issue-title"
