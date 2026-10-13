@@ -562,6 +562,16 @@ or in `.mcp.json`:
 }
 ```
 
+Sessions that do not inherit your shell's environment, such as those started from VS Code, never
+see `URUTAU_MCP_TOKEN`. For those, use `headersHelper`: a command that prints
+`{"Authorization":"Bearer …"}` as JSON, built from a file readable only by you (the same kind of
+credential file as in the mcp-remote section below). Claude Code runs it each time it connects,
+so it needs no environment variable. The helper must be the full path to an executable script:
+
+```bash
+claude mcp add-json --scope user urutau '{"type":"http","url":"<url>","headersHelper":"/home/you/.config/urutau/mcp-headers.sh"}'
+```
+
 **Cursor** (`.cursor/mcp.json`):
 
 ```json
@@ -591,6 +601,11 @@ or in `.mcp.json`:
   }
 }
 ```
+
+This works in VS Code chat, but not in Agent Host sessions. VS Code forwards the servers in
+`.vscode/mcp.json` to the Agent Host except those that need interactive input such as
+`${input:…}`, so Urutau is missing there. To use Urutau from an Agent Host session, connect the
+agent itself, for example Claude Code with `headersHelper` above.
 
 **Clients that only start local programs** can use
 [mcp-remote](https://www.npmjs.com/package/mcp-remote) 0.12.0 or later,
